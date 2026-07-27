@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>라이브 펄스</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="../../assets/pulse.svg" width="38" height="38" alt="">
+        <div>
+          <strong>라이브 펄스</strong>
+          <span>YOUTUBE WATCHER</span>
+        </div>
+      </div>
+
+      <nav class="side-nav" aria-label="화면 이동">
+        <button class="nav-item active" data-scroll-target="dashboard">
+          <span class="nav-icon">◉</span>
+          대시보드
+        </button>
+        <button class="nav-item" data-scroll-target="activity">
+          <span class="nav-icon">↗</span>
+          최근 알림
+        </button>
+      </nav>
+
+      <div class="sidebar-status">
+        <div class="eyebrow">MONITOR STATUS</div>
+        <div class="status-line">
+          <span id="sidebar-dot" class="status-dot pulse"></span>
+          <strong id="sidebar-status-text">시작하는 중</strong>
+        </div>
+        <div id="sidebar-next-check" class="muted">첫 확인 대기 중</div>
+      </div>
+
+      <div class="sidebar-actions">
+        <button id="settings-button" class="ghost-button full">설정</button>
+        <button id="hide-button" class="text-button full">트레이로 숨기기</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">BACKGROUND CHANNEL MONITOR</div>
+          <h1>채널 현황</h1>
+        </div>
+        <div class="topbar-actions">
+          <div id="global-live-pill" class="global-pill">
+            <span class="status-dot"></span>
+            <span>라이브 없음</span>
+          </div>
+          <button id="refresh-button" class="icon-button" title="지금 새로고침" aria-label="지금 새로고침">↻</button>
+        </div>
+      </header>
+
+      <div id="error-banner" class="error-banner hidden" role="alert"></div>
+
+      <section id="dashboard" class="add-channel-panel">
+        <div>
+          <div class="eyebrow">ADD CHANNEL</div>
+          <h2>감시할 채널 추가</h2>
+          <p>채널 URL, <code>@핸들</code>, 또는 UC로 시작하는 채널 ID를 붙여넣으세요.</p>
+        </div>
+        <form id="add-channel-form" class="add-form">
+          <input id="channel-input" type="text" autocomplete="off" spellcheck="false"
+            placeholder="https://www.youtube.com/@channel" aria-label="YouTube 채널 주소">
+          <button id="add-channel-button" class="primary-button" type="submit">채널 추가</button>
+        </form>
+      </section>
+
+      <section class="section-block">
+        <div class="section-heading">
+          <div>
+            <div class="eyebrow">WATCHING NOW</div>
+            <h2>등록 채널</h2>
+          </div>
+          <span id="channel-count" class="count-chip">0 CHANNELS</span>
+        </div>
+        <div id="channel-list" class="channel-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="activity" class="section-block activity-section">
+        <div class="section-heading">
+          <div>
+            <div class="eyebrow">ACTIVITY</div>
+            <h2>최근 알림</h2>
+          </div>
+          <span class="muted">최대 100개 로컬 보관</span>
+        </div>
+        <div id="event-list" class="event-list"></div>
+      </section>
+
+      <footer>
+        <span>라이브 펄스 <span id="app-version"></span></span>
+        <span>창을 닫아도 트레이에서 계속 확인합니다.</span>
+      </footer>
+    </main>
+  </div>
+
+  <dialog id="settings-dialog">
+    <form id="settings-form" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <div class="eyebrow">PREFERENCES</div>
+          <h2>모니터 설정</h2>
+        </div>
+        <button id="settings-close" class="icon-button" type="button" aria-label="설정 닫기">×</button>
+      </div>
+
+      <div class="setting-group">
+        <label class="setting-row">
+          <span>
+            <strong>Windows 로그인 때 자동 실행</strong>
+            <small id="startup-help">설치된 앱에서 적용됩니다.</small>
+          </span>
+          <input id="setting-startup" type="checkbox" class="switch">
+        </label>
+        <label class="setting-row">
+          <span>
+            <strong>라이브 시작 시 Chrome 자동 열기</strong>
+            <small>같은 방송은 한 번만 자동으로 엽니다.</small>
+          </span>
+          <input id="setting-live" type="checkbox" class="switch">
+        </label>
+        <label class="setting-row">
+          <span>
+            <strong>예약 방송 발견 시 Chrome 자동 열기</strong>
+            <small>예약과 실제 라이브 시작은 각각 한 번 열립니다.</small>
+          </span>
+          <input id="setting-upcoming" type="checkbox" class="switch">
+        </label>
+        <label class="setting-row">
+          <span>
+            <strong>새 동영상 알림</strong>
+            <small>첫 확인은 기준점만 저장하고 알리지 않습니다.</small>
+          </span>
+          <input id="setting-videos" type="checkbox" class="switch">
+        </label>
+        <label class="setting-row">
+          <span>
+            <strong>새 게시물 알림</strong>
+            <small>YouTube 공개 페이지 기반의 실험적 감지입니다.</small>
+          </span>
+          <input id="setting-posts" type="checkbox" class="switch">
+        </label>
+      </div>
+
+      <div class="field-group">
+        <label for="setting-interval">확인 주기</label>
+        <div class="inline-field">
+          <input id="setting-interval" type="number" min="15" max="300" step="5">
+          <span>초</span>
+        </div>
+        <small>15~300초. 기본값은 30초입니다.</small>
+      </div>
+
+      <div class="field-group api-field">
+        <label for="setting-api-key">YouTube Data API 키 <span>선택</span></label>
+        <input id="setting-api-key" type="password" autocomplete="off" placeholder="입력하지 않아도 작동합니다">
+        <div class="api-actions">
+          <small id="api-key-status">API 키 없음 · 공개 페이지에서 통계를 읽습니다.</small>
+          <button id="clear-api-key" type="button" class="text-button">저장된 키 삭제</button>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button id="quit-button" type="button" class="danger-text-button">앱 완전히 종료</button>
+        <div>
+          <button id="settings-cancel" type="button" class="ghost-button">취소</button>
+          <button type="submit" class="primary-button">설정 저장</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./renderer.js"></script>
+</body>
+</html>
