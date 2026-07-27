@@ -1,6 +1,6 @@
 {
   "name": "youtube-live-pulse",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "지정한 YouTube 채널의 라이브, 예약 방송, 새 영상과 게시물을 알려주는 Windows 트레이 앱",
   "main": "src/main.js",
   "author": "Local user",
@@ -10,7 +10,11 @@
     "test": "node --test",
     "icon": "electron scripts/generate-icon.js",
     "pack": "electron-builder --dir --win --publish never",
-    "build": "electron-builder --win nsis --publish never"
+    "build": "electron-builder --win nsis --publish never",
+    "release": "electron-builder --win nsis --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^40.0.0",
@@ -27,6 +31,14 @@
       "src/**/*",
       "assets/**/*",
       "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "nonohako",
+        "repo": "youtube-live-pulse",
+        "releaseType": "release"
+      }
     ],
     "win": {
       "icon": "assets/pulse.png",

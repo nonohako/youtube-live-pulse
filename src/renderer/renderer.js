@@ -36,7 +36,7 @@ function cacheElements() {
     'settings-cancel', 'hide-button', 'quit-button', 'clear-api-key',
     'setting-startup', 'setting-live', 'setting-upcoming', 'setting-videos',
     'setting-posts', 'setting-interval', 'setting-api-key', 'api-key-status',
-    'startup-help', 'app-version'
+    'startup-help', 'app-version', 'update-button', 'update-status'
   ];
   for (const id of ids) elements[toCamel(id)] = document.getElementById(id);
 }
@@ -44,6 +44,7 @@ function cacheElements() {
 function bindEvents() {
   elements.addChannelForm.addEventListener('submit', handleAddChannel);
   elements.refreshButton.addEventListener('click', handleRefresh);
+  elements.updateButton.addEventListener('click', handleUpdateCheck);
   elements.settingsButton.addEventListener('click', openSettings);
   elements.settingsClose.addEventListener('click', () => elements.settingsDialog.close());
   elements.settingsCancel.addEventListener('click', () => elements.settingsDialog.close());
@@ -84,6 +85,12 @@ function bindEvents() {
 function render() {
   if (!appState) return;
   elements.appVersion.textContent = appState.app?.version ? `v${appState.app.version}` : '';
+  const update = appState.app?.update;
+  elements.updateStatus.textContent = update?.message || '업데이트 확인 대기 중';
+  elements.updateButton.textContent = update?.status === 'downloading'
+    ? `업데이트 ${update.percent || 0}%`
+    : '업데이트 확인';
+  elements.updateButton.disabled = ['checking', 'downloading'].includes(update?.status);
   renderMonitorStatus();
   renderChannels();
   renderEvents();
@@ -389,6 +396,14 @@ async function handleRefresh() {
   } catch (error) {
     showError(cleanError(error));
   }
+}
+
+async function handleUpdateCheck() {
+  elements.updateButton.disabled = true;
+  await safely(async () => {
+    appState = await window.livePulse.checkForUpdates();
+    render();
+  });
 }
 
 function openSettings() {

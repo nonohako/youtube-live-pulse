@@ -15,6 +15,7 @@ const {
 } = require('electron');
 const { JsonStore, clampInterval } = require('./lib/store');
 const { ChannelMonitor } = require('./lib/monitor');
+const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
 
 const isSmokeTest = process.argv.includes('--smoke-test');
@@ -32,6 +33,7 @@ let mainWindow = null;
 let tray = null;
 let store = null;
 let monitor = null;
+let updater = null;
 let isQuitting = false;
 
 app.on('second-instance', () => showWindow());
@@ -58,6 +60,16 @@ app.whenReady().then(() => {
   });
   monitor.start();
 
+  updater = new AppUpdater({
+    getParentWindow: () => mainWindow,
+    onState: () => broadcastState(monitor.publicState()),
+    onBeforeInstall: () => {
+      isQuitting = true;
+      monitor?.stop();
+    }
+  });
+  updater.start();
+
   if (process.argv.includes('--hidden')) {
     mainWindow.hide();
   } else {
@@ -70,6 +82,7 @@ app.on('activate', () => showWindow());
 app.on('before-quit', () => {
   isQuitting = true;
   monitor?.stop();
+  updater?.stop();
 });
 
 app.on('window-all-closed', () => {
@@ -212,6 +225,11 @@ function registerIpc() {
     return withAppInfo(monitor.publicState());
   });
 
+  ipcMain.handle('update:check', async () => {
+    await updater?.check();
+    return withAppInfo(monitor?.publicState() || initialPublicState());
+  });
+
   ipcMain.handle('settings:update', (_event, partial) => updateSettings(partial));
 
   ipcMain.handle('url:open', async (_event, url) => {
@@ -295,7 +313,14 @@ function withAppInfo(state) {
       loginSettingApplied: app.isPackaged
         ? app.getLoginItemSettings().openAtLogin
         : false,
-      version: app.getVersion()
+      version: app.getVersion(),
+      update: updater?.getState() || {
+        status: app.isPackaged ? 'idle' : 'development',
+        currentVersion: app.getVersion(),
+        message: app.isPackaged
+          ? '업데이트 확인 대기 중'
+          : '개발 실행에서는 업데이트를 확인하지 않습니다.'
+      }
     }
   };
 }
