@@ -145,6 +145,7 @@ For documentation-only changes, commit and push them but do not bump the applica
 - Never commit API keys, GitHub tokens, cookies, local user data or subscriber-history files.
 - Never commit `node_modules/`, `dist/`, `artifacts/` or `.smoke-user-data/`.
 - Keep release publishing explicit through version tags; ordinary `main` pushes must not publish installers.
+- The release workflow builds with `npm run build`, creates or reuses the tagged Release, then uploads the installer, block map and `latest.yml` with `gh` so a partial asset upload fails the job.
 - The Windows installer is currently unsigned. Do not claim it is code-signed.
 - Avoid destructive Git commands and preserve existing user changes.
 - Update `handoff.md` whenever architecture, release behavior, known limitations or the next milestone changes materially.
