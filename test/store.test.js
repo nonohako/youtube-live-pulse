@@ -27,3 +27,24 @@ test('확인 주기를 15~300초 범위로 제한한다', () => {
   assert.equal(clampInterval(999), 300);
   assert.equal(clampInterval('invalid'), 30);
 });
+
+test('기존 저장 파일을 열 때 중복 알림을 최신 한 건으로 정리한다', (context) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'live-pulse-store-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'settings.json');
+  const duplicateUrl = 'https://www.youtube.com/watch?v=abcdefghijk';
+  fs.writeFileSync(filePath, JSON.stringify({
+    version: 1,
+    settings: {},
+    channels: [{ id: TARGET_CHANNEL_ID }],
+    events: [
+      { id: 'newer', channelId: TARGET_CHANNEL_ID, type: 'video', url: duplicateUrl },
+      { id: 'older', channelId: TARGET_CHANNEL_ID, type: 'video', url: duplicateUrl }
+    ]
+  }), 'utf8');
+
+  const data = new JsonStore(filePath).load();
+
+  assert.equal(data.version, 2);
+  assert.deepEqual(data.events.map((event) => event.id), ['newer']);
+});

@@ -28,7 +28,7 @@ function createDefaultChannel() {
 
 function createDefaultData() {
   return {
-    version: 1,
+    version: 2,
     settings: { ...DEFAULT_SETTINGS },
     channels: [createDefaultChannel()],
     events: []

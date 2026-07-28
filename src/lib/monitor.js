@@ -1,6 +1,7 @@
 'use strict';
 
 const { fetchChannelSnapshot } = require('./youtube');
+const { eventDedupKey } = require('./events');
 
 const OFFICIAL_STATS_INTERVAL_MS = 10 * 60 * 1000;
 const HISTORY_HEARTBEAT_MS = 6 * 60 * 60 * 1000;
@@ -143,42 +144,53 @@ class ChannelMonitor {
     const settings = this.store.data.settings;
     const latestVideo = snapshot.latestVideo;
     const latestPost = snapshot.latestPost;
-    const isFirstVideoCheck = !channel.lastVideoId;
-    const isFirstPostCheck = !channel.lastPostId;
+    const recentVideos = uniqueContentItems(snapshot.recentVideos || [latestVideo]);
+    const recentPosts = uniqueContentItems(snapshot.recentPosts || [latestPost]);
+    const videoTrackingInitialized = Array.isArray(channel.seenVideoIds);
+    const postTrackingInitialized = Array.isArray(channel.seenPostIds);
+    const seenVideoIds = new Set(videoTrackingInitialized ? channel.seenVideoIds : []);
+    const seenPostIds = new Set(postTrackingInitialized ? channel.seenPostIds : []);
+    const newVideos = findUnseenItems(recentVideos, seenVideoIds, videoTrackingInitialized);
+    const newPosts = findUnseenItems(recentPosts, seenPostIds, postTrackingInitialized);
 
-    if (latestVideo?.id && !isFirstVideoCheck && latestVideo.id !== channel.lastVideoId) {
+    for (const video of [...newVideos].reverse()) {
       this.#addEvent({
         channelId: channel.id,
         type: 'video',
+        sourceId: video.id,
         title: '새 동영상',
-        detail: latestVideo.title,
-        url: latestVideo.url
+        detail: video.title,
+        url: video.url
       });
       if (settings.notifyNewVideos) {
         this.onNotify({
           title: `${snapshot.metadata.title} · 새 동영상`,
-          body: latestVideo.title,
-          url: latestVideo.url
+          body: video.title,
+          url: video.url
         });
       }
     }
 
-    if (latestPost?.id && !isFirstPostCheck && latestPost.id !== channel.lastPostId) {
+    for (const post of [...newPosts].reverse()) {
       this.#addEvent({
         channelId: channel.id,
         type: 'post',
+        sourceId: post.id,
         title: '새 게시물',
-        detail: latestPost.text,
-        url: latestPost.url
+        detail: post.text,
+        url: post.url
       });
       if (settings.notifyNewPosts) {
         this.onNotify({
           title: `${snapshot.metadata.title} · 새 게시물`,
-          body: latestPost.text.slice(0, 160),
-          url: latestPost.url
+          body: post.text.slice(0, 160),
+          url: post.url
         });
       }
     }
+
+    for (const video of recentVideos) seenVideoIds.add(video.id);
+    for (const post of recentPosts) seenPostIds.add(post.id);
 
     const opened = new Set(channel.openedBroadcastIds || []);
     if (snapshot.live?.id) {
@@ -187,6 +199,7 @@ class ChannelMonitor {
         this.#addEvent({
           channelId: channel.id,
           type: 'live',
+          sourceId: snapshot.live.id,
           title: '라이브 시작',
           detail: snapshot.live.title,
           url: snapshot.live.url
@@ -207,6 +220,7 @@ class ChannelMonitor {
         this.#addEvent({
           channelId: channel.id,
           type: 'upcoming',
+          sourceId: upcoming.id,
           title: '예약 방송 발견',
           detail: upcoming.title,
           url: upcoming.url
@@ -229,6 +243,8 @@ class ChannelMonitor {
       stored.lastCheckedAt = snapshot.checkedAt;
       if (latestVideo?.id) stored.lastVideoId = latestVideo.id;
       if (latestPost?.id) stored.lastPostId = latestPost.id;
+      stored.seenVideoIds = [...seenVideoIds].slice(-100);
+      stored.seenPostIds = [...seenPostIds].slice(-100);
       stored.openedBroadcastIds = [...opened].slice(-100);
       this.#recordSubscriberSample(stored, snapshot.metadata.subscriberCount, snapshot.checkedAt);
     });
@@ -251,6 +267,10 @@ class ChannelMonitor {
 
   #addEvent(event) {
     this.store.update((data) => {
+      const key = eventDedupKey(event);
+      if (key && (data.events || []).some((existing) => eventDedupKey(existing) === key)) {
+        return;
+      }
       const entry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         at: new Date().toISOString(),
@@ -269,6 +289,21 @@ class ChannelMonitor {
   }
 }
 
+function uniqueContentItems(items) {
+  const seen = new Set();
+  return (items || []).filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function findUnseenItems(items, seenIds, initialized = true) {
+  if (!initialized) return [];
+  const seen = seenIds instanceof Set ? seenIds : new Set(seenIds || []);
+  return uniqueContentItems(items).filter((item) => !seen.has(item.id));
+}
+
 function friendlyError(error) {
   if (error?.name === 'TimeoutError') return '응답 시간이 초과되었습니다.';
   if (error?.status === 429) return 'YouTube 요청 한도에 도달했습니다. 잠시 후 다시 시도합니다.';
@@ -276,4 +311,9 @@ function friendlyError(error) {
   return error?.message || '알 수 없는 오류';
 }
 
-module.exports = { ChannelMonitor, friendlyError };
+module.exports = {
+  ChannelMonitor,
+  findUnseenItems,
+  friendlyError,
+  uniqueContentItems
+};
