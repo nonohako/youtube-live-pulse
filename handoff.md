@@ -4,15 +4,15 @@ Last updated: 2026-07-28
 
 ## Current production state
 
-- Application version: `1.1.0`
+- Application version: `1.2.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.1.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.2.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.1.0 GitHub Actions build, tests and Release publication completed successfully. The public installer and `latest.yml` were downloaded again after publication, and the installer's SHA-512 matched the update metadata.
+The v1.2.0 release includes semantic recent-event deduplication, persisted recent content IDs and the interactive subscriber detail chart. Fill in the final GitHub Actions and published-asset verification result after the tag workflow completes.
 
 Existing v1.0.x installations do not contain the updater and require one manual v1.1.0 installation. Starting with v1.1.0, the app checks public GitHub Releases after startup and every four hours, downloads a newer release in the background, then offers restart installation.
 
@@ -25,7 +25,10 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Supports YouTube channel URLs, handles and channel IDs.
 - Displays recent videos and experimental community posts.
 - Shows live/offline/checking indicators.
-- Records local subscriber-count history and renders a trend chart.
+- Records local subscriber-count history and renders a clickable detail chart with 7-day, 30-day, 90-day, 1-year and all-history ranges.
+- Shows actual subscriber values, a linear trendline, range change, high, low, daily trend and point tooltips.
+- Tracks recently seen video and post IDs so feed reordering cannot create repeated notifications.
+- Removes already-stored duplicate recent notifications during the v2 store migration.
 - Uses an optional YouTube Data API key to improve official channel statistics.
 - Stores configuration, deduplication state, events and history in local Electron user data.
 - Checks and installs updates from public GitHub Releases.
@@ -51,6 +54,19 @@ Current invariant:
 - Only an explicit future timestamp, or an explicit upcoming badge when no timestamp exists in a stream-list renderer, can be upcoming.
 
 Regression coverage is in `test/youtube.test.js`.
+
+## Recent-notification deduplication
+
+Older versions stored only the single latest video/post ID. When YouTube returned recent feed entries in a different order, an already-seen item could alternate back into the first position and be recorded again.
+
+Version 1.2.0 now:
+
+- Persists up to 100 recently seen video IDs and post IDs per channel.
+- Baselines existing channels on migration without emitting historical alerts.
+- Adds a semantic event key based on channel, event type and content identity.
+- Deduplicates existing locally stored events on startup while keeping the newest row.
+
+Regression coverage is in `test/events.test.js` and `test/store.test.js`.
 
 ## Current data sources and limitations
 
@@ -113,11 +129,11 @@ node scripts/check-channel.js
 .\dist\win-unpacked\라이브 펄스.exe --smoke-test
 ```
 
-On this workstation, use the full npm CLI path documented in `Agent.md` if the npm shim fails.
+On this workstation, use the full npm CLI path documented in `AGENTS.md` if the npm shim fails.
 
 ## Files to read first
 
-1. `Agent.md`
+1. `AGENTS.md`
 2. `README.md`
 3. `src/lib/monitor.js`
 4. `src/lib/youtube.js`

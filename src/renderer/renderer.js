@@ -2,6 +2,9 @@
 
 let appState = null;
 let countdownTimer = null;
+let subscriberChartChannelId = null;
+let subscriberChartRange = '30d';
+let detailChartModel = null;
 
 const elements = {};
 
@@ -16,6 +19,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     appState = await window.livePulse.getState();
     render();
+    if (new URLSearchParams(window.location.search).has('smokeChart') && appState.channels[0]) {
+      openSubscriberChart(appState.channels[0].id);
+    }
   } catch (error) {
     showError(cleanError(error));
   }
@@ -36,7 +42,9 @@ function cacheElements() {
     'settings-cancel', 'hide-button', 'quit-button', 'clear-api-key',
     'setting-startup', 'setting-live', 'setting-upcoming', 'setting-videos',
     'setting-posts', 'setting-interval', 'setting-api-key', 'api-key-status',
-    'startup-help', 'app-version', 'update-button', 'update-status'
+    'startup-help', 'app-version', 'update-button', 'update-status',
+    'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
+    'subscriber-detail-content'
   ];
   for (const id of ids) elements[toCamel(id)] = document.getElementById(id);
 }
@@ -48,6 +56,13 @@ function bindEvents() {
   elements.settingsButton.addEventListener('click', openSettings);
   elements.settingsClose.addEventListener('click', () => elements.settingsDialog.close());
   elements.settingsCancel.addEventListener('click', () => elements.settingsDialog.close());
+  elements.subscriberClose.addEventListener('click', () => elements.subscriberDialog.close());
+  elements.subscriberDialog.addEventListener('close', () => {
+    subscriberChartChannelId = null;
+    detailChartModel = null;
+  });
+  elements.subscriberDialog.addEventListener('pointermove', handleDetailChartPointerMove);
+  elements.subscriberDialog.addEventListener('pointerleave', hideDetailChartTooltip);
   elements.settingsForm.addEventListener('submit', handleSaveSettings);
   elements.clearApiKey.addEventListener('click', handleClearApiKey);
   elements.hideButton.addEventListener('click', () => window.livePulse.hideWindow());
@@ -73,6 +88,19 @@ function bindEvents() {
       return;
     }
 
+    const subscriberButton = event.target.closest('[data-subscriber-chart]');
+    if (subscriberButton) {
+      openSubscriberChart(subscriberButton.dataset.subscriberChart);
+      return;
+    }
+
+    const rangeButton = event.target.closest('[data-chart-range]');
+    if (rangeButton) {
+      subscriberChartRange = rangeButton.dataset.chartRange;
+      renderSubscriberDetail();
+      return;
+    }
+
     const navButton = event.target.closest('[data-scroll-target]');
     if (navButton) {
       document.getElementById(navButton.dataset.scrollTarget)?.scrollIntoView({ behavior: 'smooth' });
@@ -89,11 +117,12 @@ function render() {
   elements.updateStatus.textContent = update?.message || '업데이트 확인 대기 중';
   elements.updateButton.textContent = update?.status === 'downloading'
     ? `업데이트 ${update.percent || 0}%`
-    : '업데이트 확인';
+    : '앱 업데이트 확인';
   elements.updateButton.disabled = ['checking', 'downloading'].includes(update?.status);
   renderMonitorStatus();
   renderChannels();
   renderEvents();
+  if (elements.subscriberDialog.open) renderSubscriberDetail();
 }
 
 function renderMonitorStatus() {
@@ -184,14 +213,16 @@ function renderChannelCard(channel) {
 
         ${live ? renderBroadcast(live) : ''}
 
-        <div class="subscriber-panel">
+        <button type="button" class="subscriber-panel" data-subscriber-chart="${escapeAttribute(channel.id)}"
+          aria-label="${escapeAttribute(title)} 구독자 상세 차트 열기">
           <div>
             <span class="metric-label">구독자</span>
             <strong class="metric-value">${escapeHtml(subscriberValue)}</strong>
             <span class="metric-delta ${chart.delta > 0 ? 'up' : ''}">${escapeHtml(chart.deltaText)}</span>
+            <span class="metric-chart-hint">상세 차트 보기 ↗</span>
           </div>
           ${chart.svg}
-        </div>
+        </button>
 
         <div class="content-list">
           ${(snapshot?.upcoming || []).slice(0, 2).map(renderUpcomingRow).join('')}
@@ -334,6 +365,201 @@ function emptyChart() {
       <line class="chart-grid" x1="0" y1="57" x2="300" y2="57"/>
       <path class="chart-line" d="M4 48 L296 48" opacity="0.2"/>
     </svg>`;
+}
+
+function openSubscriberChart(channelId) {
+  const channel = appState?.channels.find((item) => item.id === channelId);
+  if (!channel) return;
+  subscriberChartChannelId = channelId;
+  subscriberChartRange = '30d';
+  renderSubscriberDetail();
+  if (!elements.subscriberDialog.open) elements.subscriberDialog.showModal();
+}
+
+function renderSubscriberDetail() {
+  const channel = appState?.channels.find((item) => item.id === subscriberChartChannelId);
+  if (!channel) {
+    elements.subscriberDialog.close();
+    return;
+  }
+
+  const title = channel.snapshot?.metadata?.title || channel.title || 'YouTube 채널';
+  elements.subscriberDialogTitle.textContent = `${title} · 구독자 상세 추이`;
+  elements.subscriberDialog.querySelectorAll('[data-chart-range]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.chartRange === subscriberChartRange);
+  });
+
+  const math = window.LivePulseChartMath;
+  const samples = math.filterSamples(channel.subscriberHistory || [], subscriberChartRange);
+  const summary = math.summarizeSamples(samples);
+  if (!samples.length) {
+    detailChartModel = null;
+    elements.subscriberDetailContent.innerHTML = `
+      <div class="detail-chart-empty">
+        <strong>아직 이 기간의 구독자 기록이 없습니다.</strong>
+        <span>앱이 채널을 확인하면서 기록을 모으면 여기에 상세 차트가 표시됩니다.</span>
+      </div>`;
+    return;
+  }
+
+  const changeClass = summary.change > 0 ? 'up' : summary.change < 0 ? 'down' : '';
+  const changeText = `${summary.change >= 0 ? '+' : ''}${formatNumber(summary.change)}`;
+  const slopeText = `${summary.slopePerDay >= 0 ? '+' : ''}${formatTrend(summary.slopePerDay)}/일`;
+  const rangeLabel = {
+    '7d': '7일',
+    '30d': '30일',
+    '90d': '90일',
+    '1y': '1년',
+    all: '전체'
+  }[subscriberChartRange] || '선택 기간';
+
+  const chart = buildDetailChart(samples, math.linearRegression(samples));
+  detailChartModel = chart.model;
+  elements.subscriberDetailContent.innerHTML = `
+    <div class="detail-metrics">
+      ${renderDetailMetric('현재', formatNumber(summary.current))}
+      ${renderDetailMetric(`${rangeLabel} 증감`, changeText, changeClass)}
+      ${renderDetailMetric('기간 고점', formatNumber(summary.high))}
+      ${renderDetailMetric('기간 저점', formatNumber(summary.low))}
+      ${renderDetailMetric('추세', slopeText, summary.slopePerDay > 0 ? 'up' : summary.slopePerDay < 0 ? 'down' : '')}
+    </div>
+    <div class="detail-chart-legend">
+      <span><i class="legend-actual"></i>실제 구독자 수</span>
+      <span><i class="legend-trend"></i>선형 추세선</span>
+      <span>${samples.length}개 기록</span>
+    </div>
+    ${chart.svg}`;
+}
+
+function renderDetailMetric(label, value, className = '') {
+  return `
+    <div class="detail-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+    </div>`;
+}
+
+function buildDetailChart(samples, trend) {
+  const width = 840;
+  const height = 320;
+  const plot = { left: 68, right: 18, top: 18, bottom: 44 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = height - plot.top - plot.bottom;
+  const timestamps = samples.map((sample) => sample.timestamp);
+  const values = samples.map((sample) => sample.count);
+  const trendValues = trend.values || [];
+  const combined = [...values, ...trendValues];
+  const rawMin = Math.min(...combined);
+  const rawMax = Math.max(...combined);
+  const rawRange = rawMax - rawMin;
+  const padding = Math.max(1, rawRange * 0.12, rawMax * 0.002);
+  const minValue = Math.max(0, rawMin - padding);
+  const maxValue = rawMax + padding;
+  const valueRange = Math.max(1, maxValue - minValue);
+  const startTime = timestamps[0];
+  const endTime = timestamps.at(-1);
+  const timeRange = Math.max(1, endTime - startTime);
+  const toX = (timestamp) => samples.length === 1
+    ? plot.left + plotWidth / 2
+    : plot.left + ((timestamp - startTime) / timeRange) * plotWidth;
+  const toY = (value) => plot.top + ((maxValue - value) / valueRange) * plotHeight;
+  const points = samples.map((sample) => ({
+    x: toX(sample.timestamp),
+    y: toY(sample.count),
+    sample
+  }));
+  const linePoints = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+  const areaPoints = `${plot.left},${plot.top + plotHeight} ${linePoints} ${plot.left + plotWidth},${plot.top + plotHeight}`;
+  const trendPoints = samples.map((sample, index) => (
+    `${toX(sample.timestamp).toFixed(2)},${toY(trendValues[index] ?? sample.count).toFixed(2)}`
+  )).join(' ');
+  const yTicks = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+    const y = plot.top + ratio * plotHeight;
+    const value = maxValue - ratio * valueRange;
+    return `
+      <line class="detail-grid" x1="${plot.left}" y1="${y}" x2="${plot.left + plotWidth}" y2="${y}"/>
+      <text class="detail-axis-label y" x="${plot.left - 10}" y="${y + 3}">${escapeHtml(formatCompact(value))}</text>`;
+  }).join('');
+  const tickCount = Math.min(5, samples.length);
+  const tickIndexes = uniqueNumbers(Array.from({ length: tickCount }, (_, index) => (
+    Math.round(index * (samples.length - 1) / Math.max(1, tickCount - 1))
+  )));
+  const xTicks = tickIndexes.map((sampleIndex) => {
+    const point = points[sampleIndex];
+    return `
+      <line class="detail-tick" x1="${point.x}" y1="${plot.top + plotHeight}" x2="${point.x}" y2="${plot.top + plotHeight + 5}"/>
+      <text class="detail-axis-label x" x="${point.x}" y="${height - 15}">${escapeHtml(formatChartDate(point.sample.timestamp))}</text>`;
+  }).join('');
+  const pointDots = points.length <= 40
+    ? points.map((point) => `<circle class="detail-point" cx="${point.x}" cy="${point.y}" r="2.5"/>`).join('')
+    : '';
+
+  return {
+    model: { width, height, points },
+    svg: `
+      <div class="detail-chart-wrap">
+        <svg id="subscriber-detail-svg" class="detail-chart" viewBox="0 0 ${width} ${height}"
+          preserveAspectRatio="none" role="img" aria-labelledby="detail-chart-title detail-chart-desc">
+          <title id="detail-chart-title">구독자 수 상세 추이</title>
+          <desc id="detail-chart-desc">선택한 기간의 실제 구독자 수와 선형 추세선을 나타낸 차트입니다.</desc>
+          <defs>
+            <linearGradient id="detail-chart-gradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#38d995" stop-opacity="0.23"/>
+              <stop offset="100%" stop-color="#38d995" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          ${yTicks}
+          ${xTicks}
+          <polygon class="detail-chart-area" points="${areaPoints}"/>
+          <polyline class="detail-trend-line" points="${trendPoints}"/>
+          <polyline class="detail-actual-line" points="${linePoints}"/>
+          ${pointDots}
+          <line id="detail-crosshair" class="detail-crosshair hidden" y1="${plot.top}" y2="${plot.top + plotHeight}"/>
+          <circle id="detail-hover-dot" class="detail-hover-dot hidden" r="5"/>
+        </svg>
+        <div id="detail-chart-tooltip" class="detail-chart-tooltip hidden"></div>
+      </div>`
+  };
+}
+
+function handleDetailChartPointerMove(event) {
+  const svg = event.target.closest?.('#subscriber-detail-svg');
+  if (!svg || !detailChartModel?.points?.length) return;
+  const bounds = svg.getBoundingClientRect();
+  const viewX = ((event.clientX - bounds.left) / bounds.width) * detailChartModel.width;
+  const point = detailChartModel.points.reduce((nearest, candidate) => (
+    Math.abs(candidate.x - viewX) < Math.abs(nearest.x - viewX) ? candidate : nearest
+  ));
+  const crosshair = elements.subscriberDialog.querySelector('#detail-crosshair');
+  const dot = elements.subscriberDialog.querySelector('#detail-hover-dot');
+  const tooltip = elements.subscriberDialog.querySelector('#detail-chart-tooltip');
+  if (!crosshair || !dot || !tooltip) return;
+
+  crosshair.setAttribute('x1', point.x);
+  crosshair.setAttribute('x2', point.x);
+  dot.setAttribute('cx', point.x);
+  dot.setAttribute('cy', point.y);
+  crosshair.classList.remove('hidden');
+  dot.classList.remove('hidden');
+  tooltip.classList.remove('hidden');
+  tooltip.innerHTML = `
+    <strong>${escapeHtml(formatNumber(point.sample.count))}명</strong>
+    <span>${escapeHtml(formatChartDateTime(point.sample.timestamp))}</span>`;
+  const pixelX = (point.x / detailChartModel.width) * bounds.width;
+  const pixelY = (point.y / detailChartModel.height) * bounds.height;
+  tooltip.style.left = `${Math.min(bounds.width - 84, Math.max(84, pixelX))}px`;
+  tooltip.style.top = `${Math.max(8, pixelY - 62)}px`;
+}
+
+function hideDetailChartTooltip() {
+  elements.subscriberDialog.querySelector('#detail-crosshair')?.classList.add('hidden');
+  elements.subscriberDialog.querySelector('#detail-hover-dot')?.classList.add('hidden');
+  elements.subscriberDialog.querySelector('#detail-chart-tooltip')?.classList.add('hidden');
+}
+
+function uniqueNumbers(values) {
+  return [...new Set(values)];
 }
 
 function renderEvents() {
@@ -492,6 +718,37 @@ function formatCompact(value) {
     notation: 'compact',
     maximumFractionDigits: 2
   }).format(numeric);
+}
+
+function formatNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '—';
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(Math.round(numeric));
+}
+
+function formatTrend(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0';
+  const absolute = Math.abs(numeric);
+  const maximumFractionDigits = absolute < 1 ? 2 : absolute < 10 ? 1 : 0;
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits }).format(numeric);
+}
+
+function formatChartDate(value) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'short',
+    day: 'numeric'
+  }).format(value);
+}
+
+function formatChartDateTime(value) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(value);
 }
 
 function formatRelativeTime(value) {

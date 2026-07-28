@@ -152,6 +152,7 @@ async function fetchChannelSnapshot(channel, options = {}) {
     latestVideo: feed[0] || videos.find((video) => !video.isLive && !video.isUpcoming) || null,
     latestPost: posts[0] || null,
     recentVideos: uniqueById([...feed, ...videos]).slice(0, 8),
+    recentPosts: posts.slice(0, 8),
     warnings: warnings.filter(Boolean)
   };
 }

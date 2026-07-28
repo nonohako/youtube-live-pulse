@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { DEFAULT_SETTINGS, createDefaultData } = require('./defaults');
+const { dedupeEvents } = require('./events');
 
 class JsonStore {
   constructor(filePath) {
@@ -54,14 +55,14 @@ class JsonStore {
       : fallback.channels;
 
     return {
-      version: 1,
+      version: 2,
       settings: {
         ...DEFAULT_SETTINGS,
         ...(parsed?.settings || {}),
         pollIntervalSeconds: clampInterval(parsed?.settings?.pollIntervalSeconds)
       },
       channels,
-      events: Array.isArray(parsed?.events) ? parsed.events.slice(0, 100) : []
+      events: dedupeEvents(parsed?.events, 100)
     };
   }
 }

@@ -18,7 +18,8 @@ const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
 
-const isSmokeTest = process.argv.includes('--smoke-test');
+const isSmokeChart = process.argv.includes('--smoke-chart');
+const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart;
 if (isSmokeTest) {
   app.setPath('userData', path.join(process.cwd(), '.smoke-user-data'));
 }
@@ -41,6 +42,7 @@ app.on('second-instance', () => showWindow());
 app.whenReady().then(() => {
   store = new JsonStore(path.join(app.getPath('userData'), 'live-pulse.json'));
   store.load();
+  if (isSmokeChart) seedSmokeChartData();
 
   createWindow();
   registerIpc();
@@ -107,7 +109,10 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.loadFile(
+    path.join(__dirname, 'renderer', 'index.html'),
+    isSmokeChart ? { query: { smokeChart: '1' } } : undefined
+  );
   mainWindow.removeMenu();
 
   mainWindow.on('close', (event) => {
@@ -130,7 +135,10 @@ function scheduleSmokeCapture() {
         const outputDirectory = path.join(process.cwd(), 'artifacts');
         fs.mkdirSync(outputDirectory, { recursive: true });
         const image = await mainWindow.webContents.capturePage();
-        const outputPath = path.join(outputDirectory, 'dashboard-smoke.png');
+        const outputPath = path.join(
+          outputDirectory,
+          isSmokeChart ? 'subscriber-chart-smoke.png' : 'dashboard-smoke.png'
+        );
         fs.writeFileSync(outputPath, image.toPNG());
         process.stdout.write(`SMOKE_SCREENSHOT=${outputPath}\n`);
       } catch (error) {
@@ -141,6 +149,20 @@ function scheduleSmokeCapture() {
         app.quit();
       }
     }, 700);
+  });
+}
+
+function seedSmokeChartData() {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  store.update((data) => {
+    const channel = data.channels[0];
+    if (!channel) return;
+    channel.title = 'RESCENE';
+    channel.subscriberHistory = Array.from({ length: 121 }, (_, index) => ({
+      at: new Date(now - (120 - index) * dayMs).toISOString(),
+      count: Math.round(245000 + index * 73 + Math.sin(index / 4) * 310 + (index > 65 ? 1200 : 0))
+    }));
   });
 }
 
