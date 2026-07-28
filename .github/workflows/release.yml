@@ -29,7 +29,37 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Build and publish GitHub Release
-        run: npm run release
+      - name: Build Windows installer
+        run: npm run build
+
+      - name: Publish GitHub Release assets
+        shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $installer = Get-ChildItem -Path dist -Filter "LivePulse-Setup-*.exe" |
+            Where-Object { $_.Name -notlike "*.__uninstaller.exe" } |
+            Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows installer was not created."
+          }
+
+          $blockMap = "$($installer.FullName).blockmap"
+          $latestYml = (Resolve-Path "dist/latest.yml").Path
+          if (-not (Test-Path -LiteralPath $blockMap)) {
+            throw "Installer block map was not created."
+          }
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --title $tag --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              throw "GitHub Release creation failed."
+            }
+          }
+
+          gh release upload $tag $installer.FullName $blockMap $latestYml --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub Release asset upload failed."
+          }

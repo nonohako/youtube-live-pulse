@@ -12,7 +12,9 @@ Last updated: 2026-07-28
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.2.0 release includes semantic recent-event deduplication, persisted recent content IDs and the interactive subscriber detail chart. Fill in the final GitHub Actions and published-asset verification result after the tag workflow completes.
+The v1.2.0 GitHub Actions build, tests and Release publication completed successfully. The published Release is non-draft and contains the installer, block map and `latest.yml`. The public installer was downloaded again after publication, and its SHA-512 matched the published update metadata.
+
+The first v1.2.0 workflow attempt exposed an Electron Builder publication race: it reported success after only the block map became visible. Rerunning with the Release already created uploaded all assets. The workflow was then hardened to build with `npm run build` and publish the three assets explicitly with `gh release upload`; a partial upload now fails the job.
 
 Existing v1.0.x installations do not contain the updater and require one manual v1.1.0 installation. Starting with v1.1.0, the app checks public GitHub Releases after startup and every four hours, downloads a newer release in the background, then offers restart installation.
 
@@ -96,8 +98,8 @@ Expected process:
 2. Update `package.json` and `package-lock.json` to the same semantic version.
 3. Commit and push `main`.
 4. Push a matching version tag.
-5. GitHub Actions runs `npm ci`, `npm test` and `npm run release`.
-6. Electron Builder publishes the NSIS installer and `latest.yml`.
+5. GitHub Actions runs `npm ci`, `npm test` and `npm run build`.
+6. The workflow creates or reuses the tagged Release, then explicitly uploads the NSIS installer, block map and `latest.yml`.
 7. Verify the workflow, Release visibility and asset hashes before handoff.
 
 Ordinary documentation-only pushes to `main` do not produce a Release.
