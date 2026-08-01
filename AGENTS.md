@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 for the v1.6.2 Windows taskbar pin identity and stale-shortcut repair.
+Last maintained: 2026-08-01 after the verified v1.6.2 Windows taskbar pin identity and stale-shortcut repair release.
 
 ## Project mission
 
