@@ -39,7 +39,7 @@ node --test
 node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build
 ```
 
-완성된 설치 파일은 `dist/LivePulse-Setup-1.6.0.exe`에 생성됩니다. 설치 후 앱 설정에서 “Windows 로그인 때 자동 실행”이 켜져 있으면 다음 로그인부터 숨김 상태로 트레이에서 시작합니다.
+완성된 설치 파일은 `dist/LivePulse-Setup-1.6.1.exe`에 생성됩니다. 설치 후 앱 설정에서 “Windows 로그인 때 자동 실행”이 켜져 있으면 다음 로그인부터 숨김 상태로 트레이에서 시작합니다.
 
 ## 자동 업데이트
 
@@ -48,8 +48,8 @@ node "C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js" run build
 새 버전을 배포하려면 `package.json` 버전을 올려 커밋한 뒤 같은 버전의 태그를 푸시합니다.
 
 ```powershell
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.6.1
+git push origin v1.6.1
 ```
 
 GitHub Actions가 테스트, Windows 설치 파일 빌드, Release 및 업데이트 메타데이터 게시를 자동으로 처리합니다.

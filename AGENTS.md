@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 after the verified v1.6.0 calendar-range analytics and subscriber-chart display-mode release.
+Last maintained: 2026-08-01 for the v1.6.1 Windows notification-activation repair release candidate.
 
 ## Project mission
 
@@ -65,6 +65,7 @@ Useful packaged-app smoke test:
 - `src/lib/youtube.js`: YouTube input resolution, fetching, parsing and normalization
 - `src/lib/updater.js`: GitHub Release update checks, download state and installation
 - `src/lib/store.js`: atomic local JSON persistence and settings normalization
+- `src/lib/windows-notifications.js`: installed-shortcut validation, production/development AppUserModelID isolation and stable toast activation
 - `src/lib/subscriber-import.js`: `.xlsx` parsing, local-date normalization and non-destructive subscriber-history merging
 - `src/renderer/`: Korean dashboard and settings UI
 - `src/renderer/chart-math.js`: local-date axes, completed-day growth analytics and selected-range summaries
@@ -98,6 +99,13 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Import `.xlsx` rows only from sheets containing `날짜` and `전체 구독자` headers. Ignore `합계` and `평균`; `신규 구독자` is not a source of truth.
 - Store imported dates at local 00:00. If any sample already exists on that local date, keep the existing data and skip the imported row.
 - Parse workbooks in the main process and expose only the narrow import action through preload; never give the renderer filesystem or Node.js access.
+
+## Windows notification invariants
+
+- Only an installed executable whose path matches the current user’s Start Menu shortcut may use the production AppUserModelID `kr.local.youtubelivepulse`.
+- Development runs, unpacked builds and smoke tests must use `process.execPath` as their AppUserModelID so they cannot overwrite production toast activation with `node_modules\\electron\\dist\\electron.exe`.
+- Production uses the stable ToastActivatorCLSID `{EAFF6767-89DB-4AC0-98A0-9F4FBE3AC3D7}` and repairs both notification properties on the existing Start Menu shortcut before creating notifications.
+- A missing or unreadable Start Menu shortcut must fall back to the isolated development identity instead of claiming the production notification identity.
 
 ## Planned CHZZK provider
 

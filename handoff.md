@@ -4,15 +4,19 @@ Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version: `1.6.0`
+- Application version in source: `1.6.1` release candidate
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.0`
+- Current verified production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The verified v1.6.0 release fixes preset ranges to use inclusive local-calendar dates and carries one hidden prior close into analytics so the first displayed day has a valid change baseline. The growth chart now ends at the latest completed day instead of reserving a blank current-day slot. Channel cards calculate total subscriber change from the complete stored history even though their sparkline remains bounded. Settings now offer `수집 시각 기준` and `날짜 기준`; the latter plots only each date’s last value without modifying stored raw history. Growth wording explains momentum as the recent three completed intervals’ average versus the preceding three, and presents acceleration as a difference between daily rates instead of the opaque `명/일²` label.
+The v1.6.1 source candidate fixes Windows native-notification activation opening Electron’s default-app screen instead of the YouTube video. Development and unpacked runs previously reused the production AppUserModelID, allowing Windows toast activation to point at the project’s `node_modules\\electron\\dist\\electron.exe` without the app path. The new startup logic grants the production identity only when the running executable matches the installed Start Menu shortcut, uses `process.execPath` for development and smoke isolation, sets a stable ToastActivatorCLSID, and repairs both notification properties on the installed shortcut. The repair applies automatically on the first v1.6.1 launch; old notifications already stored in Windows may still reference the previous activation registration and should be dismissed.
+
+Current local verification covers all 44 tests, syntax checks, a warning-free live RESCENE diagnostic, a successful development smoke launch with the isolated identity, and a real copy of the installed Start Menu shortcut updated and re-read with both Windows notification properties before app readiness. The x64 NSIS build and packaged smoke passed; packaged version `1.6.1`, inclusion of the repair module, `latest.yml`, `resources/app-update.yml` and the local installer SHA-512 were verified. Public Release verification remains.
+
+The verified v1.6.0 release fixes preset ranges to use inclusive local-calendar dates and carries one hidden prior close into analytics so the first displayed day has a valid change baseline. The growth chart ends at the latest completed day instead of reserving a blank current-day slot. Channel cards calculate total subscriber change from the complete stored history even though their sparkline remains bounded. Settings offer `수집 시각 기준` and `날짜 기준`; the latter plots only each date’s last value without modifying stored raw history. Growth wording explains momentum as the recent three completed intervals’ average versus the preceding three, and presents acceleration as a difference between daily rates instead of the opaque `명/일²` label.
 
 Local verification covers all 38 tests, syntax checks, a warning-free live RESCENE public-channel diagnostic, the x64 NSIS build, and packaged dashboard, growth-chart, date-mode and settings-dialog smoke captures. `dist/latest.yml`, packaged `resources/app-update.yml`, packaged version `1.6.0` and the local installer SHA-512 were verified. GitHub Actions run `30696633468` completed successfully; the public non-draft Release contains the installer, block map and `latest.yml`, and the downloaded public installer SHA-512 matches its published update metadata.
 
@@ -48,6 +52,7 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Uses an optional YouTube Data API key to improve official channel statistics.
 - Stores configuration, deduplication state, events and history in local Electron user data.
 - Checks and installs updates from public GitHub Releases.
+- Keeps development and unpacked Electron runs isolated from the installed app’s Windows notification activation identity.
 
 The default monitored channel is:
 

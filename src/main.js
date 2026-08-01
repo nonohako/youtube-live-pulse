@@ -19,6 +19,7 @@ const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
 const { loadSubscriberRecords, mergeSubscriberHistory } = require('./lib/subscriber-import');
+const { configureWindowsNotificationIdentity } = require('./lib/windows-notifications');
 
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
 const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
@@ -33,7 +34,13 @@ const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) app.quit();
 
 app.setName('라이브 펄스');
-app.setAppUserModelId('kr.local.youtubelivepulse');
+const notificationIdentity = configureWindowsNotificationIdentity({
+  app,
+  shell,
+  isSmokeTest,
+  appDataPath: app.getPath('appData')
+});
+if (notificationIdentity.warning) console.warn(notificationIdentity.warning);
 
 let mainWindow = null;
 let tray = null;
