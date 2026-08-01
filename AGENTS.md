@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 for the v1.6.1 Windows notification-activation repair release candidate.
+Last maintained: 2026-08-01 after the verified v1.6.1 Windows notification-activation repair release.
 
 ## Project mission
 
