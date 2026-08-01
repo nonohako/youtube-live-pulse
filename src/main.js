@@ -116,7 +116,8 @@ function createWindow() {
     isSmokeChart ? {
       query: {
         smokeChart: '1',
-        chartRange: isSmokeSparseChart ? '1y' : '30d'
+        chartRange: isSmokeSparseChart ? '1y' : '30d',
+        chartSelection: isSmokeGrowthChart ? '1' : '0'
       }
     } : undefined
   );

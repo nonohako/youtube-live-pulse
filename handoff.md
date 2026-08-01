@@ -4,15 +4,15 @@ Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version: `1.3.0`
+- Application version: `1.4.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.3.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.4.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.3.0 GitHub Actions build, all 26 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. This release adds daily subscriber growth, growth-rate trend, day-over-day acceleration/deceleration, a recent-three-versus-previous-three momentum comparison, selected-period first-half-versus-second-half slope change, and a secondary daily-change bar chart with a growth-rate line. Daily closes use the last measurement on each local date, and gaps are normalized by elapsed calendar days.
+The v1.4.0 source excludes the incomplete current local day from every growth and selected-range calculation while keeping current samples visible on the raw chart. Clicking a completed date selects that day; dragging in either direction selects an inclusive completed-day range and shows cumulative change, average daily change, average daily growth, total range growth and trend slope. Missing dates are not interpolated and remain normalized by elapsed local calendar days. The matching tagged Release is pending publication and verification.
 
 The first v1.2.0 workflow attempt exposed an Electron Builder publication race: it reported success after only the block map became visible. Rerunning with the Release already created uploaded all assets. The workflow was then hardened to build with `npm run build` and publish the three assets explicitly with `gh release upload`; a partial upload now fails the job.
 
@@ -30,6 +30,7 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Records local subscriber-count history and renders a clickable detail chart with 7-day, 30-day, 90-day, 1-year and all-history ranges.
 - Shows actual subscriber values, a linear trendline, range change, high, low, daily trend and point tooltips.
 - Calculates daily change and growth rate, day-over-day acceleration/deceleration, three-period momentum change and first-half-versus-second-half slope change, with a secondary bar-and-line chart.
+- Excludes the incomplete current local day from analytics and supports click/drag completed-date selection with cumulative, average and slope summaries.
 - Tracks recently seen video and post IDs so feed reordering cannot create repeated notifications.
 - Removes already-stored duplicate recent notifications during the v2 store migration.
 - Uses an optional YouTube Data API key to improve official channel statistics.
@@ -87,7 +88,7 @@ Known limitations:
 - Community-post detection is experimental.
 - Public subscriber numbers are rounded and may differ briefly between YouTube endpoints.
 - Subscriber history starts when the app first runs; historical YouTube data is not backfilled.
-- Growth analytics use local-date closing samples, normalize missing-day gaps by elapsed calendar days and treat the current day as partial.
+- Growth analytics use completed local-date closing samples, normalize missing-day gaps by elapsed calendar days and exclude the current partial day from calculations while leaving it visible on the raw chart.
 - The Windows installer is not code-signed and can trigger SmartScreen on first installation.
 
 ## Automatic release pipeline

@@ -1194,6 +1194,133 @@ dialog::backdrop {
   color: var(--text);
 }
 
+.detail-selection-hint {
+  color: var(--blue);
+}
+
+.detail-chart {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.detail-selection {
+  fill: rgba(111, 168, 255, 0.12);
+  stroke: var(--blue);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.selection-analysis {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(111, 168, 255, 0.28);
+  border-radius: 12px;
+  background: rgba(111, 168, 255, 0.045);
+}
+
+.selection-analysis.empty {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  padding: 12px 15px;
+  border-style: dashed;
+}
+
+.selection-analysis.empty strong,
+.selection-analysis.empty span {
+  display: block;
+}
+
+.selection-analysis.empty strong {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.selection-analysis.empty span {
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 9px;
+}
+
+.selection-analysis-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(111, 168, 255, 0.16);
+}
+
+.selection-analysis-header h3 {
+  display: inline;
+  margin: 3px 7px 0 0;
+  font-size: 14px;
+}
+
+.selection-analysis-header > div > span {
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.selection-analysis-header button {
+  height: 27px;
+  padding: 0 10px;
+  border: 1px solid rgba(111, 168, 255, 0.3);
+  border-radius: 7px;
+  color: var(--blue);
+  background: rgba(111, 168, 255, 0.07);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.selection-analysis-header button:hover {
+  background: rgba(111, 168, 255, 0.14);
+}
+
+.selection-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.selection-metric {
+  min-width: 0;
+  padding: 11px 13px;
+  border-right: 1px solid rgba(111, 168, 255, 0.12);
+}
+
+.selection-metric:last-child {
+  border-right: 0;
+}
+
+.selection-metric span,
+.selection-metric strong {
+  display: block;
+}
+
+.selection-metric span {
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.selection-metric strong {
+  overflow: hidden;
+  margin-top: 4px;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selection-metric strong.up {
+  color: var(--green);
+}
+
+.selection-metric strong.down {
+  color: var(--accent);
+}
+
 .growth-analysis {
   margin-top: 22px;
   padding-top: 20px;
@@ -1530,6 +1657,10 @@ dialog::backdrop {
     grid-template-columns: repeat(3, 1fr);
   }
 
+  .selection-metrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
   .detail-metric:nth-child(3) {
     border-right: 0;
   }
@@ -1544,5 +1675,13 @@ dialog::backdrop {
 
   .growth-metric:nth-child(n + 4) {
     border-top: 1px solid var(--line-soft);
+  }
+
+  .selection-metric:nth-child(3) {
+    border-right: 0;
+  }
+
+  .selection-metric:nth-child(n + 4) {
+    border-top: 1px solid rgba(111, 168, 255, 0.12);
   }
 }

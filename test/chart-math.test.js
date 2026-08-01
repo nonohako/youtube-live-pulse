@@ -9,6 +9,7 @@ const {
   filterSamples,
   linearRegression,
   normalizeSamples,
+  summarizeDailyRange,
   summarizeSamples
 } = require('../src/renderer/chart-math');
 
@@ -154,4 +155,40 @@ test('둔화, 3일 모멘텀과 기간 전후반 기울기 변화를 계산한�
   assert.ok(Number.isFinite(analysis.earlierSlope));
   assert.ok(Number.isFinite(analysis.laterSlope));
   assert.ok(analysis.slopeChange < 0);
+});
+
+test('완료되지 않은 오늘 기록은 성장 분석에서 제외한다', () => {
+  const now = new Date(2026, 7, 1, 15, 0).getTime();
+  const samples = [
+    { at: new Date(2026, 6, 29, 20, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 6, 30, 20, 0).toISOString(), count: 110 },
+    { at: new Date(2026, 6, 31, 20, 0).toISOString(), count: 125 },
+    { at: new Date(2026, 7, 1, 14, 0).toISOString(), count: 999 }
+  ];
+  const analysis = analyzeGrowth(samples, now);
+
+  assert.deepEqual(analysis.daily.map((sample) => sample.count), [100, 110, 125]);
+  assert.equal(analysis.latestDailyChange, 15);
+  assert.equal(analysis.excludedCurrentDay, true);
+  assert.equal(analysis.latestCompletedAt, new Date(2026, 6, 31, 0, 0).getTime());
+});
+
+test('클릭하거나 드래그한 완료일 구간의 평균과 성장률을 요약한다', () => {
+  const counts = [100, 110, 130, 145, 165];
+  const daily = buildDailySeries(counts.map((count, index) => ({
+    at: new Date(2026, 6, 27 + index, 20, 0).toISOString(),
+    count
+  })));
+  const summary = summarizeDailyRange(
+    daily,
+    new Date(2026, 6, 29, 0, 0).getTime(),
+    new Date(2026, 6, 31, 0, 0).getTime()
+  );
+
+  assert.equal(summary.dayCount, 3);
+  assert.equal(summary.totalChange, 55);
+  assert.ok(Math.abs(summary.averageDailyChange - (20 + 15 + 20) / 3) < 1e-10);
+  assert.ok(Math.abs(summary.averageGrowthRate - ((20 / 110) + (15 / 130) + (20 / 145)) / 3 * 100) < 1e-10);
+  assert.equal(summary.periodGrowthRate, 50);
+  assert.ok(Math.abs(summary.slopePerDay - 17.5) < 1e-10);
 });
