@@ -12,7 +12,7 @@ Last updated: 2026-08-01
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.3.0 source adds daily subscriber growth, growth-rate trend, day-over-day acceleration/deceleration, a recent-three-versus-previous-three momentum comparison, and selected-period first-half-versus-second-half slope change. It also renders a secondary daily-change bar chart with a growth-rate line. Daily closes use the last measurement on each local date, and gaps are normalized by elapsed calendar days. The matching tagged Release is pending publication and verification.
+The v1.3.0 GitHub Actions build, all 26 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. This release adds daily subscriber growth, growth-rate trend, day-over-day acceleration/deceleration, a recent-three-versus-previous-three momentum comparison, selected-period first-half-versus-second-half slope change, and a secondary daily-change bar chart with a growth-rate line. Daily closes use the last measurement on each local date, and gaps are normalized by elapsed calendar days.
 
 The first v1.2.0 workflow attempt exposed an Electron Builder publication race: it reported success after only the block map became visible. Rerunning with the Release already created uploaded all assets. The workflow was then hardened to build with `npm run build` and publish the three assets explicitly with `gh release upload`; a partial upload now fails the job.
 
