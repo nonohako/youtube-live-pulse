@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 for the locally verified v1.5.0 channel-scoped subscriber-history Excel import release candidate.
+Last maintained: 2026-08-01 after the verified v1.5.0 channel-scoped subscriber-history Excel import release.
 
 ## Project mission
 
