@@ -19,7 +19,10 @@ const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
 const { loadSubscriberRecords, mergeSubscriberHistory } = require('./lib/subscriber-import');
-const { configureWindowsNotificationIdentity } = require('./lib/windows-notifications');
+const {
+  buildWindowsTaskbarDetails,
+  configureWindowsNotificationIdentity
+} = require('./lib/windows-notifications');
 
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
 const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
@@ -38,7 +41,8 @@ const notificationIdentity = configureWindowsNotificationIdentity({
   app,
   shell,
   isSmokeTest,
-  appDataPath: app.getPath('appData')
+  appDataPath: app.getPath('appData'),
+  localAppDataPath: process.env.LOCALAPPDATA
 });
 if (notificationIdentity.warning) console.warn(notificationIdentity.warning);
 
@@ -120,6 +124,15 @@ function createWindow() {
       sandbox: true
     }
   });
+
+  const taskbarDetails = buildWindowsTaskbarDetails({
+    appUserModelId: notificationIdentity.appUserModelId,
+    execPath: process.execPath,
+    appPath: app.getAppPath(),
+    isPackaged: app.isPackaged,
+    iconPath: path.join(__dirname, '..', 'assets', 'pulse.ico')
+  });
+  if (taskbarDetails) mainWindow.setAppDetails(taskbarDetails);
 
   mainWindow.loadFile(
     path.join(__dirname, 'renderer', 'index.html'),

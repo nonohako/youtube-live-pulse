@@ -4,13 +4,17 @@ Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version: `1.6.1`
+- Application version: `1.6.2`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.1`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.1` (v1.6.2 verification and publication pending)
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
+
+The v1.6.2 source fixes a pinned taskbar item falling back to Electron’s default icon after the Live Pulse window is hidden. Each window now publishes explicit Windows taskbar relaunch details: AppUserModelID, executable-plus-app command, product name and product icon. A default-location installed copy also repairs an existing `라이브 펄스.lnk` Start Menu shortcut whose target still has the product executable name but points at a stale user path; unrelated shortcuts remain untouched. Windows does not permit the app to safely replace an already pinned Electron item, so that one stale pin must be unpinned and Live Pulse pinned again after the fixed version is installed.
+
+Local v1.6.2 verification covers all 50 tests, syntax checks, a warning-free live RESCENE diagnostic, a valid nine-size `pulse.ico`, the x64 NSIS build and packaged smoke test. The packaged executable reports version `1.6.2`, contains the new taskbar/shortcut module and ICO, and exposes the expected Live Pulse waveform icon. `dist/latest.yml`, packaged `resources/app-update.yml` and the local installer SHA-512 were verified; GitHub publication and public-installer hash verification remain pending.
 
 The verified v1.6.1 release fixes Windows native-notification activation opening Electron’s default-app screen instead of the YouTube video. Development and unpacked runs previously reused the production AppUserModelID, allowing Windows toast activation to point at the project’s `node_modules\\electron\\dist\\electron.exe` without the app path. The new startup logic grants the production identity only when the running executable matches the installed Start Menu shortcut, uses `process.execPath` for development and smoke isolation, sets a stable ToastActivatorCLSID, and repairs both notification properties on the installed shortcut. The repair applies automatically on the first v1.6.1 launch; old notifications already stored in Windows may still reference the previous activation registration and should be dismissed.
 
@@ -53,6 +57,7 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Stores configuration, deduplication state, events and history in local Electron user data.
 - Checks and installs updates from public GitHub Releases.
 - Keeps development and unpacked Electron runs isolated from the installed app’s Windows notification activation identity.
+- Publishes explicit Windows taskbar relaunch identity and repairs a stale default-install Start Menu shortcut without touching unrelated shortcuts.
 
 The default monitored channel is:
 

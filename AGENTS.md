@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 after the verified v1.6.1 Windows notification-activation repair release.
+Last maintained: 2026-08-01 for the v1.6.2 Windows taskbar pin identity and stale-shortcut repair.
 
 ## Project mission
 
@@ -100,9 +100,16 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Store imported dates at local 00:00. If any sample already exists on that local date, keep the existing data and skip the imported row.
 - Parse workbooks in the main process and expose only the narrow import action through preload; never give the renderer filesystem or Node.js access.
 
+## Windows shell identity invariants
+
+- Give each window explicit taskbar relaunch details: the current AppUserModelID, executable-plus-app relaunch command, product display name and product icon.
+- Packaged installs use the product executable as the relaunch command and icon; development runs include the application path and packaged `assets/pulse.ico` so a newly pinned item does not relaunch Electron without Live Pulse or fall back to Electron's icon.
+- At startup, an installed copy may repair the exact `라이브 펄스.lnk` Start Menu shortcut to its current executable only when the shortcut already targets the product executable name and the running executable is in the default NSIS install location. Never rewrite an unrelated shortcut.
+- Do not delete or rewrite an existing user-pinned taskbar item automatically. A stale Electron pin must be unpinned and pinned again once after installing the fixed version.
+
 ## Windows notification invariants
 
-- Only an installed executable whose path matches the current user’s Start Menu shortcut may use the production AppUserModelID `kr.local.youtubelivepulse`.
+- Only an installed executable whose path matches the current user’s Start Menu shortcut, or the default NSIS install executable repairing a stale same-product shortcut, may use the production AppUserModelID `kr.local.youtubelivepulse`.
 - Development runs, unpacked builds and smoke tests must use `process.execPath` as their AppUserModelID so they cannot overwrite production toast activation with `node_modules\\electron\\dist\\electron.exe`.
 - Production uses the stable ToastActivatorCLSID `{EAFF6767-89DB-4AC0-98A0-9F4FBE3AC3D7}` and repairs both notification properties on the existing Start Menu shortcut before creating notifications.
 - A missing or unreadable Start Menu shortcut must fall back to the isolated development identity instead of claiming the production notification identity.

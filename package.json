@@ -1,6 +1,6 @@
 {
   "name": "youtube-live-pulse",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "지정한 YouTube 채널의 라이브, 예약 방송, 새 영상과 게시물을 알려주는 Windows 트레이 앱",
   "main": "src/main.js",
   "author": "Local user",
@@ -42,7 +42,7 @@
       }
     ],
     "win": {
-      "icon": "assets/pulse.png",
+      "icon": "assets/pulse.ico",
       "target": [
         {
           "target": "nsis",

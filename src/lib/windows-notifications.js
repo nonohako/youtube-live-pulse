@@ -5,6 +5,8 @@ const path = require('node:path');
 const APP_USER_MODEL_ID = 'kr.local.youtubelivepulse';
 const TOAST_ACTIVATOR_CLSID = '{EAFF6767-89DB-4AC0-98A0-9F4FBE3AC3D7}';
 const START_MENU_SHORTCUT_NAME = '라이브 펄스.lnk';
+const PRODUCT_EXECUTABLE_NAME = '라이브 펄스.exe';
+const PRODUCT_NAME = '라이브 펄스';
 
 function configureWindowsNotificationIdentity({
   app,
@@ -12,19 +14,24 @@ function configureWindowsNotificationIdentity({
   isSmokeTest = false,
   platform = process.platform,
   execPath = process.execPath,
-  appDataPath
+  appDataPath,
+  localAppDataPath
 }) {
   if (platform !== 'win32') return { mode: 'unsupported' };
 
   const shortcutPath = buildStartMenuShortcutPath(appDataPath);
-  const shortcut = readMatchingShortcut({
+  const shortcut = readShortcut({
     shell,
     shortcutPath,
-    execPath,
     enabled: Boolean(app?.isPackaged) && !isSmokeTest
   });
+  const isInstalledShortcut = isTrustedInstalledShortcut({
+    shortcut,
+    execPath,
+    localAppDataPath
+  });
 
-  if (!shortcut) {
+  if (!isInstalledShortcut) {
     app.setAppUserModelId(execPath);
     return {
       mode: 'development',
@@ -37,10 +44,13 @@ function configureWindowsNotificationIdentity({
   app.setToastActivatorCLSID(TOAST_ACTIVATOR_CLSID);
 
   let shortcutUpdated = false;
+  const shortcutTargetRepaired = !sameWindowsPath(shortcut.target, execPath);
   let warning = '';
   try {
     shortcutUpdated = shell.writeShortcutLink(shortcutPath, 'update', {
-      target: shortcut.target,
+      target: execPath,
+      icon: execPath,
+      iconIndex: 0,
       appUserModelId: APP_USER_MODEL_ID,
       toastActivatorClsid: TOAST_ACTIVATOR_CLSID
     });
@@ -55,8 +65,43 @@ function configureWindowsNotificationIdentity({
     toastActivatorClsid: TOAST_ACTIVATOR_CLSID,
     shortcutPath,
     shortcutUpdated,
+    shortcutTargetRepaired,
     warning
   };
+}
+
+function buildWindowsTaskbarDetails({
+  platform = process.platform,
+  appUserModelId,
+  execPath = process.execPath,
+  appPath,
+  isPackaged = false,
+  iconPath
+}) {
+  if (
+    platform !== 'win32'
+    || typeof appUserModelId !== 'string'
+    || !appUserModelId.trim()
+    || typeof execPath !== 'string'
+    || !execPath.trim()
+  ) {
+    return null;
+  }
+
+  const commandParts = [execPath];
+  if (!isPackaged && typeof appPath === 'string' && appPath.trim()) commandParts.push(appPath);
+
+  const details = {
+    appId: appUserModelId,
+    relaunchCommand: commandParts.map(quoteWindowsCommandArgument).join(' '),
+    relaunchDisplayName: PRODUCT_NAME
+  };
+  const resolvedIconPath = isPackaged ? execPath : iconPath;
+  if (typeof resolvedIconPath === 'string' && resolvedIconPath.trim()) {
+    details.appIconPath = resolvedIconPath;
+    details.appIconIndex = 0;
+  }
+  return details;
 }
 
 function buildStartMenuShortcutPath(appDataPath) {
@@ -71,14 +116,38 @@ function buildStartMenuShortcutPath(appDataPath) {
   );
 }
 
-function readMatchingShortcut({ shell, shortcutPath, execPath, enabled }) {
-  if (!enabled || !shortcutPath || typeof execPath !== 'string') return null;
+function buildDefaultInstallExecutablePath(localAppDataPath) {
+  if (typeof localAppDataPath !== 'string' || !localAppDataPath.trim()) return null;
+  return path.join(localAppDataPath, 'Programs', 'youtube-live-pulse', PRODUCT_EXECUTABLE_NAME);
+}
+
+function readShortcut({ shell, shortcutPath, enabled }) {
+  if (!enabled || !shortcutPath) return null;
   try {
-    const shortcut = shell.readShortcutLink(shortcutPath);
-    return sameWindowsPath(shortcut?.target, execPath) ? shortcut : null;
+    return shell.readShortcutLink(shortcutPath);
   } catch {
     return null;
   }
+}
+
+function isTrustedInstalledShortcut({ shortcut, execPath, localAppDataPath }) {
+  if (!shortcut || typeof execPath !== 'string') return false;
+  if (sameWindowsPath(shortcut.target, execPath)) return true;
+
+  const defaultInstallPath = buildDefaultInstallExecutablePath(localAppDataPath);
+  return Boolean(
+    defaultInstallPath
+    && sameWindowsPath(execPath, defaultInstallPath)
+    && sameWindowsPath(path.win32.basename(shortcut.target || ''), PRODUCT_EXECUTABLE_NAME)
+  );
+}
+
+function quoteWindowsCommandArgument(value) {
+  const text = String(value);
+  if (text && !/[\s"]/u.test(text)) return text;
+  return `"${text
+    .replace(/(\\*)"/gu, '$1$1\\"')
+    .replace(/(\\+)$/u, '$1$1')}"`;
 }
 
 function sameWindowsPath(left, right) {
@@ -88,9 +157,13 @@ function sameWindowsPath(left, right) {
 
 module.exports = {
   APP_USER_MODEL_ID,
+  PRODUCT_EXECUTABLE_NAME,
   START_MENU_SHORTCUT_NAME,
   TOAST_ACTIVATOR_CLSID,
+  buildDefaultInstallExecutablePath,
   buildStartMenuShortcutPath,
+  buildWindowsTaskbarDetails,
   configureWindowsNotificationIdentity,
+  quoteWindowsCommandArgument,
   sameWindowsPath
 };
