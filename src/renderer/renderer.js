@@ -51,7 +51,7 @@ function cacheElements() {
     'setting-posts', 'setting-interval', 'setting-api-key', 'api-key-status',
     'startup-help', 'app-version', 'update-button', 'update-status',
     'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
-    'subscriber-detail-content'
+    'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content'
   ];
   for (const id of ids) elements[toCamel(id)] = document.getElementById(id);
 }
@@ -64,11 +64,13 @@ function bindEvents() {
   elements.settingsClose.addEventListener('click', () => elements.settingsDialog.close());
   elements.settingsCancel.addEventListener('click', () => elements.settingsDialog.close());
   elements.subscriberClose.addEventListener('click', () => elements.subscriberDialog.close());
+  elements.subscriberImportButton.addEventListener('click', handleSubscriberImport);
   elements.subscriberDialog.addEventListener('close', () => {
     subscriberChartChannelId = null;
     subscriberChartSelection = null;
     detailChartModel = null;
     detailChartDrag = null;
+    elements.subscriberImportStatus.textContent = '';
   });
   elements.subscriberDialog.addEventListener('pointerdown', handleDetailChartPointerDown);
   elements.subscriberDialog.addEventListener('pointermove', handleDetailChartPointerMove);
@@ -398,6 +400,7 @@ function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange =
     : '30d';
   subscriberChartSelection = null;
   detailChartDrag = null;
+  elements.subscriberImportStatus.textContent = '';
   if (selectSmokeRange) {
     const math = window.LivePulseChartMath;
     const samples = math.filterSamples(channel.subscriberHistory || [], subscriberChartRange);
@@ -411,6 +414,36 @@ function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange =
   }
   renderSubscriberDetail();
   if (!elements.subscriberDialog.open) elements.subscriberDialog.showModal();
+}
+
+async function handleSubscriberImport() {
+  if (!subscriberChartChannelId) return;
+  const originalText = elements.subscriberImportButton.textContent;
+  elements.subscriberImportButton.disabled = true;
+  elements.subscriberImportButton.textContent = '가져오는 중…';
+  elements.subscriberImportStatus.textContent = '';
+  hideError();
+
+  try {
+    const result = await window.livePulse.importSubscriberHistory(subscriberChartChannelId);
+    if (!result || result.canceled) return;
+    appState = await window.livePulse.getState();
+    render();
+
+    const details = [
+      `${result.fileName}에서 ${formatNumber(result.added)}일 추가`,
+      `기존 ${formatNumber(result.skippedExisting)}일 유지`
+    ];
+    if (result.skippedInvalid) details.push(`읽지 못한 행 ${formatNumber(result.skippedInvalid)}개 제외`);
+    if (result.skippedDuplicate) details.push(`파일 안 중복 날짜 ${formatNumber(result.skippedDuplicate)}개 정리`);
+    elements.subscriberImportStatus.textContent = details.join(' · ');
+  } catch (error) {
+    showError(cleanError(error));
+    elements.subscriberImportStatus.textContent = '가져오지 못했습니다. 위 오류 내용을 확인해 주세요.';
+  } finally {
+    elements.subscriberImportButton.disabled = false;
+    elements.subscriberImportButton.textContent = originalText;
+  }
 }
 
 function renderSubscriberDetail() {

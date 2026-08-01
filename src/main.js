@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   Menu,
   nativeImage,
@@ -17,6 +18,7 @@ const { JsonStore, clampInterval } = require('./lib/store');
 const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
+const { loadSubscriberRecords, mergeSubscriberHistory } = require('./lib/subscriber-import');
 
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
 const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
@@ -270,6 +272,43 @@ function registerIpc() {
   });
 
   ipcMain.handle('settings:update', (_event, partial) => updateSettings(partial));
+
+  ipcMain.handle('subscriber-history:import', async (_event, channelId) => {
+    if (typeof channelId !== 'string') throw new Error('올바르지 않은 채널 ID입니다.');
+    const channel = store.data.channels.find((item) => item.id === channelId);
+    if (!channel) throw new Error('구독자 기록을 가져올 채널을 찾지 못했습니다.');
+
+    const selection = await dialog.showOpenDialog(mainWindow, {
+      title: `${channel.title || '채널'} 구독자 기록 가져오기`,
+      buttonLabel: '기록 가져오기',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel 통합 문서', extensions: ['xlsx'] }]
+    });
+    if (selection.canceled || !selection.filePaths[0]) return { ok: true, canceled: true };
+
+    const filePath = selection.filePaths[0];
+    const imported = await loadSubscriberRecords(filePath);
+    let merged = null;
+    store.update((data) => {
+      const stored = data.channels.find((item) => item.id === channelId);
+      if (!stored) throw new Error('구독자 기록을 가져올 채널을 찾지 못했습니다.');
+      merged = mergeSubscriberHistory(stored.subscriberHistory, imported.records);
+      stored.subscriberHistory = merged.history;
+    });
+    broadcastState(monitor?.publicState() || initialPublicState());
+
+    return {
+      ok: true,
+      canceled: false,
+      fileName: path.basename(filePath),
+      added: merged.added,
+      skippedExisting: merged.skippedExisting,
+      skippedInvalid: imported.invalidRows,
+      skippedDuplicate: imported.duplicateRows,
+      firstAddedDate: merged.firstAddedDate,
+      lastAddedDate: merged.lastAddedDate
+    };
+  });
 
   ipcMain.handle('url:open', async (_event, url) => {
     if (!isAllowedExternalUrl(url)) throw new Error('허용되지 않은 주소입니다.');

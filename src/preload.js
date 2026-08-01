@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('livePulse', {
   removeChannel: (channelId) => ipcRenderer.invoke('channel:remove', channelId),
   refresh: () => ipcRenderer.invoke('monitor:refresh'),
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
+  importSubscriberHistory: (channelId) => ipcRenderer.invoke('subscriber-history:import', channelId),
   updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
   openUrl: (url) => ipcRenderer.invoke('url:open', url),
   hideWindow: () => ipcRenderer.invoke('window:hide'),

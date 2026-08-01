@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 after the verified v1.4.0 completed-day analytics and interactive date-range selection release.
+Last maintained: 2026-08-01 for the locally verified v1.5.0 channel-scoped subscriber-history Excel import release candidate.
 
 ## Project mission
 
@@ -63,6 +63,7 @@ Useful packaged-app smoke test:
 - `src/lib/youtube.js`: YouTube input resolution, fetching, parsing and normalization
 - `src/lib/updater.js`: GitHub Release update checks, download state and installation
 - `src/lib/store.js`: atomic local JSON persistence and settings normalization
+- `src/lib/subscriber-import.js`: `.xlsx` parsing, local-date normalization and non-destructive subscriber-history merging
 - `src/renderer/`: Korean dashboard and settings UI
 - `src/renderer/chart-math.js`: local-date axes, completed-day growth analytics and selected-range summaries
 - `test/`: parser and persistence regression tests
@@ -87,6 +88,10 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - When recorded dates have gaps, divide change and growth by elapsed local calendar days; never invent or interpolate missing daily closes.
 - Date clicks select one completed day. Pointer drags select the inclusive span of actual completed-day records and must work in either direction.
 - A selected-day change includes that day’s change from the prior recorded close. If no prior close exists, show insufficient data instead of fabricating a baseline.
+- Subscriber-history imports are explicitly scoped to the channel whose detail dialog opened the file picker; never infer the target channel from a file name.
+- Import `.xlsx` rows only from sheets containing `날짜` and `전체 구독자` headers. Ignore `합계` and `평균`; `신규 구독자` is not a source of truth.
+- Store imported dates at local 00:00. If any sample already exists on that local date, keep the existing data and skip the imported row.
+- Parse workbooks in the main process and expose only the narrow import action through preload; never give the renderer filesystem or Node.js access.
 
 ## Planned CHZZK provider
 

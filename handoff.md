@@ -2,6 +2,14 @@
 
 Last updated: 2026-08-01
 
+## v1.5.0 release candidate
+
+The source and local Windows artifacts are prepared at `1.5.0`; production remains v1.4.0 until the matching tag workflow and public assets are verified.
+
+This release adds channel-scoped `.xlsx` subscriber-history import from the subscriber detail dialog. It reads sheets containing `날짜` and `전체 구독자`, ignores the summary rows and the derived `신규 구독자` column, stores new dates at local 00:00, and never overwrites a local date that already has an app sample. Duplicate dates inside one workbook resolve to the last valid row, and the result reports added, preserved, invalid and duplicate counts. Workbook parsing stays in the main process behind a narrow preload IPC method.
+
+Local verification completed with all 33 tests, syntax checks, both provided workbooks (365 valid RESCENE dates and 176 valid 안원잘부 dates), a live RESCENE public-channel diagnostic without warnings, `npm audit` with zero vulnerabilities, the x64 NSIS build, packaged dashboard smoke test and a packaged-ASAR import of the 365-row workbook. `dist/latest.yml`, packaged `resources/app-update.yml` and the local installer SHA-512 were also verified.
+
 ## Current production state
 
 - Application version: `1.4.0`
@@ -87,7 +95,7 @@ Known limitations:
 - Public YouTube page structures can change.
 - Community-post detection is experimental.
 - Public subscriber numbers are rounded and may differ briefly between YouTube endpoints.
-- Subscriber history starts when the app first runs; historical YouTube data is not backfilled.
+- Subscriber history starts when the app first runs unless the user imports a matching channel history `.xlsx`; YouTube itself is not used to backfill historical data.
 - Growth analytics use completed local-date closing samples, normalize missing-day gaps by elapsed calendar days and exclude the current partial day from calculations while leaving it visible on the raw chart.
 - The Windows installer is not code-signed and can trigger SmartScreen on first installation.
 

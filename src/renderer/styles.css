@@ -374,6 +374,7 @@ input::placeholder {
 }
 
 .primary-button:disabled,
+.ghost-button:disabled,
 .icon-button:disabled {
   cursor: wait;
   opacity: 0.6;
@@ -944,6 +945,24 @@ dialog::backdrop {
 
 .subscriber-detail {
   padding: 24px;
+}
+
+.subscriber-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.subscriber-dialog-actions .ghost-button {
+  height: 38px;
+}
+
+.subscriber-import-status {
+  min-height: 16px;
+  margin: 8px 0 0;
+  color: var(--green);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .chart-toolbar {
