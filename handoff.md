@@ -12,7 +12,7 @@ Last updated: 2026-08-01
 - Packaging: Electron + NSIS
 - License: MIT
 
-Version 1.2.1 changes the subscriber detail chart's horizontal axis from sample-index labels to fixed time intervals: daily for 7 days, every 5 days for 30 days, every 15 days for 90 days, quarterly for 1 year and evenly spaced time divisions for all history. Fill in the final GitHub Actions and published-asset verification result after the tag workflow completes.
+The v1.2.1 GitHub Actions build, all 24 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. This release changes the subscriber detail chart's horizontal axis from sample-index labels to fixed time intervals: daily for 7 days, every 5 days for 30 days, every 15 days for 90 days, quarterly for 1 year and evenly spaced time divisions for all history.
 
 The first v1.2.0 workflow attempt exposed an Electron Builder publication race: it reported success after only the block map became visible. Rerunning with the Release already created uploaded all assets. The workflow was then hardened to build with `npm run build` and publish the three assets explicitly with `gh release upload`; a partial upload now fails the job.
 
