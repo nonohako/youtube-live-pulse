@@ -12,7 +12,7 @@ Last updated: 2026-08-01
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.4.0 source excludes the incomplete current local day from every growth and selected-range calculation while keeping current samples visible on the raw chart. Clicking a completed date selects that day; dragging in either direction selects an inclusive completed-day range and shows cumulative change, average daily change, average daily growth, total range growth and trend slope. Missing dates are not interpolated and remain normalized by elapsed local calendar days. The matching tagged Release is pending publication and verification.
+The v1.4.0 GitHub Actions build, all 28 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. This release excludes the incomplete current local day from every growth and selected-range calculation while keeping current samples visible on the raw chart. Clicking a completed date selects that day; dragging in either direction selects an inclusive completed-day range and shows cumulative change, average daily change, average daily growth, total range growth and trend slope. Missing dates are not interpolated and remain normalized by elapsed local calendar days.
 
 The first v1.2.0 workflow attempt exposed an Electron Builder publication race: it reported success after only the block map became visible. Rerunning with the Release already created uploaded all assets. The workflow was then hardened to build with `npm run build` and publish the three assets explicitly with `gh release upload`; a partial upload now fails the job.
 
