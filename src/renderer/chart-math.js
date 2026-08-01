@@ -140,6 +140,7 @@
       if (!previous) {
         return {
           ...close,
+          previousCount: null,
           elapsedDays: null,
           rawChange: null,
           dailyChange: null,
@@ -157,6 +158,7 @@
         : null;
       return {
         ...close,
+        previousCount: previous.count,
         elapsedDays,
         rawChange,
         dailyChange,
@@ -165,8 +167,10 @@
     });
   }
 
-  function analyzeGrowth(samples) {
-    const daily = buildDailySeries(samples);
+  function analyzeGrowth(samples, now = Date.now()) {
+    const currentDayStart = startOfLocalDay(now);
+    const allDaily = buildDailySeries(samples);
+    const daily = allDaily.filter((sample) => sample.dayTimestamp < currentDayStart);
     const changes = daily.filter((sample) => Number.isFinite(sample.dailyChange));
     const latest = changes.at(-1);
     const previous = changes.at(-2);
@@ -202,6 +206,8 @@
 
     return {
       daily,
+      excludedCurrentDay: allDaily.some((sample) => sample.dayTimestamp >= currentDayStart),
+      latestCompletedAt: daily.at(-1)?.dayTimestamp ?? null,
       latestDailyChange: latest?.dailyChange ?? null,
       latestGrowthRate: latest?.growthRate ?? null,
       accelerationChange,
@@ -212,6 +218,43 @@
       earlierSlope,
       laterSlope,
       slopeChange
+    };
+  }
+
+  function summarizeDailyRange(dailySamples, startTime, endTime) {
+    const lower = Math.min(Number(startTime), Number(endTime));
+    const upper = Math.max(Number(startTime), Number(endTime));
+    const selected = (Array.isArray(dailySamples) ? dailySamples : [])
+      .filter((sample) => Number.isFinite(sample?.dayTimestamp)
+        && sample.dayTimestamp >= lower
+        && sample.dayTimestamp <= upper)
+      .sort((left, right) => left.dayTimestamp - right.dayTimestamp);
+    const changes = selected.filter((sample) => Number.isFinite(sample.dailyChange));
+    const rates = selected.filter((sample) => Number.isFinite(sample.growthRate));
+    const firstChange = changes[0];
+    const last = selected.at(-1);
+    const baseline = firstChange?.previousCount;
+
+    return {
+      selected,
+      startTime: selected[0]?.dayTimestamp ?? null,
+      endTime: last?.dayTimestamp ?? null,
+      dayCount: selected.length,
+      totalChange: changes.length
+        ? changes.reduce((sum, sample) => sum + sample.rawChange, 0)
+        : null,
+      averageDailyChange: changes.length
+        ? average(changes.map((sample) => sample.dailyChange))
+        : null,
+      averageGrowthRate: rates.length
+        ? average(rates.map((sample) => sample.growthRate))
+        : null,
+      periodGrowthRate: Number.isFinite(baseline) && baseline > 0 && last
+        ? ((last.count - baseline) / baseline) * 100
+        : null,
+      slopePerDay: selected.length >= 2
+        ? linearRegression(selected).slopePerDay
+        : null
     };
   }
 
@@ -258,6 +301,7 @@
     filterSamples,
     linearRegression,
     normalizeSamples,
+    summarizeDailyRange,
     summarizeSamples
   };
 }));

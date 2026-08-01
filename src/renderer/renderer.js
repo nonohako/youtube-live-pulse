@@ -4,7 +4,9 @@ let appState = null;
 let countdownTimer = null;
 let subscriberChartChannelId = null;
 let subscriberChartRange = '30d';
+let subscriberChartSelection = null;
 let detailChartModel = null;
+let detailChartDrag = null;
 
 const elements = {};
 
@@ -21,7 +23,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     render();
     const smokeParams = new URLSearchParams(window.location.search);
     if (smokeParams.has('smokeChart') && appState.channels[0]) {
-      openSubscriberChart(appState.channels[0].id, smokeParams.get('chartRange') || '30d');
+      openSubscriberChart(
+        appState.channels[0].id,
+        smokeParams.get('chartRange') || '30d',
+        smokeParams.get('chartSelection') === '1'
+      );
     }
   } catch (error) {
     showError(cleanError(error));
@@ -60,9 +66,14 @@ function bindEvents() {
   elements.subscriberClose.addEventListener('click', () => elements.subscriberDialog.close());
   elements.subscriberDialog.addEventListener('close', () => {
     subscriberChartChannelId = null;
+    subscriberChartSelection = null;
     detailChartModel = null;
+    detailChartDrag = null;
   });
+  elements.subscriberDialog.addEventListener('pointerdown', handleDetailChartPointerDown);
   elements.subscriberDialog.addEventListener('pointermove', handleDetailChartPointerMove);
+  elements.subscriberDialog.addEventListener('pointerup', handleDetailChartPointerUp);
+  elements.subscriberDialog.addEventListener('pointercancel', handleDetailChartPointerCancel);
   elements.subscriberDialog.addEventListener('pointerleave', hideDetailChartTooltip);
   elements.settingsForm.addEventListener('submit', handleSaveSettings);
   elements.clearApiKey.addEventListener('click', handleClearApiKey);
@@ -98,6 +109,16 @@ function bindEvents() {
     const rangeButton = event.target.closest('[data-chart-range]');
     if (rangeButton) {
       subscriberChartRange = rangeButton.dataset.chartRange;
+      subscriberChartSelection = null;
+      detailChartDrag = null;
+      renderSubscriberDetail();
+      return;
+    }
+
+    const clearChartSelection = event.target.closest('[data-clear-chart-selection]');
+    if (clearChartSelection) {
+      subscriberChartSelection = null;
+      detailChartDrag = null;
       renderSubscriberDetail();
       return;
     }
@@ -368,13 +389,26 @@ function emptyChart() {
     </svg>`;
 }
 
-function openSubscriberChart(channelId, initialRange = '30d') {
+function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange = false) {
   const channel = appState?.channels.find((item) => item.id === channelId);
   if (!channel) return;
   subscriberChartChannelId = channelId;
   subscriberChartRange = ['7d', '30d', '90d', '1y', 'all'].includes(initialRange)
     ? initialRange
     : '30d';
+  subscriberChartSelection = null;
+  detailChartDrag = null;
+  if (selectSmokeRange) {
+    const math = window.LivePulseChartMath;
+    const samples = math.filterSamples(channel.subscriberHistory || [], subscriberChartRange);
+    const completed = math.analyzeGrowth(samples).daily;
+    if (completed.length) {
+      subscriberChartSelection = {
+        startTime: completed[Math.max(0, completed.length - 7)].dayTimestamp,
+        endTime: completed.at(-1).dayTimestamp
+      };
+    }
+  }
   renderSubscriberDetail();
   if (!elements.subscriberDialog.open) elements.subscriberDialog.showModal();
 }
@@ -416,13 +450,27 @@ function renderSubscriberDetail() {
     all: '전체'
   }[subscriberChartRange] || '선택 기간';
 
+  const growth = math.analyzeGrowth(samples);
+  const timeAxis = math.buildTimeAxis(samples, subscriberChartRange);
+  let selectionSummary = subscriberChartSelection
+    ? math.summarizeDailyRange(
+      growth.daily,
+      subscriberChartSelection.startTime,
+      subscriberChartSelection.endTime
+    )
+    : null;
+  if (selectionSummary && !selectionSummary.dayCount) {
+    subscriberChartSelection = null;
+    selectionSummary = null;
+  }
   const chart = buildDetailChart(
     samples,
     math.linearRegression(samples),
-    math.buildTimeAxis(samples, subscriberChartRange)
+    timeAxis,
+    growth.daily,
+    subscriberChartSelection
   );
-  const growth = math.analyzeGrowth(samples);
-  const growthChart = buildGrowthChart(growth.daily, math.buildTimeAxis(samples, subscriberChartRange));
+  const growthChart = buildGrowthChart(growth.daily, timeAxis);
   detailChartModel = chart.model;
   elements.subscriberDetailContent.innerHTML = `
     <div class="detail-metrics">
@@ -435,9 +483,11 @@ function renderSubscriberDetail() {
     <div class="detail-chart-legend">
       <span><i class="legend-actual"></i>실제 구독자 수</span>
       <span><i class="legend-trend"></i>선형 추세선</span>
+      <span class="detail-selection-hint">날짜 클릭 · 구간 드래그</span>
       <span>${samples.length}개 기록</span>
     </div>
     ${chart.svg}
+    ${renderSelectionSummary(selectionSummary)}
     ${renderGrowthAnalysis(growth, growthChart)}`;
 }
 
@@ -446,6 +496,54 @@ function renderDetailMetric(label, value, className = '') {
     <div class="detail-metric">
       <span>${escapeHtml(label)}</span>
       <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+    </div>`;
+}
+
+function renderSelectionSummary(summary) {
+  if (!summary) {
+    return `
+      <section class="selection-analysis empty" aria-label="선택 구간 분석 안내">
+        <div>
+          <strong>날짜 또는 구간 분석</strong>
+          <span>위 차트에서 완료된 날짜를 클릭하거나 좌우로 드래그해 보세요.</span>
+        </div>
+      </section>`;
+  }
+
+  const rangeLabel = summary.startTime === summary.endTime
+    ? formatSelectionDate(summary.startTime)
+    : `${formatSelectionDate(summary.startTime)} – ${formatSelectionDate(summary.endTime)}`;
+  const total = formatSignedAnalysis(summary.totalChange, '명', formatNumber);
+  const averageChange = formatSignedAnalysis(summary.averageDailyChange, '명/일');
+  const averageRate = formatSignedAnalysis(summary.averageGrowthRate, '%/일', formatPercent);
+  const periodRate = formatSignedAnalysis(summary.periodGrowthRate, '%', formatPercent);
+  const slope = formatSignedAnalysis(summary.slopePerDay, '명/일');
+
+  return `
+    <section class="selection-analysis" aria-labelledby="selection-analysis-title">
+      <div class="selection-analysis-header">
+        <div>
+          <div class="eyebrow">SELECTED RANGE</div>
+          <h3 id="selection-analysis-title">${escapeHtml(rangeLabel)}</h3>
+          <span>완료일 ${summary.dayCount}개 기준</span>
+        </div>
+        <button type="button" data-clear-chart-selection>선택 해제</button>
+      </div>
+      <div class="selection-metrics">
+        ${renderSelectionMetric('누적 증감', total)}
+        ${renderSelectionMetric('일평균 증가량', averageChange)}
+        ${renderSelectionMetric('일평균 성장률', averageRate)}
+        ${renderSelectionMetric('구간 성장률', periodRate)}
+        ${renderSelectionMetric('추세 기울기', slope)}
+      </div>
+    </section>`;
+}
+
+function renderSelectionMetric(label, metric) {
+  return `
+    <div class="selection-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${escapeAttribute(metric.className)}">${escapeHtml(metric.value)}</strong>
     </div>`;
 }
 
@@ -477,6 +575,10 @@ function renderGrowthAnalysis(growth, chart) {
     ? '일별 마감 기록 4개 필요'
     : `전반 ${formatSignedAnalysis(growth.earlierSlope, '명/일').value} → 후반 ${formatSignedAnalysis(growth.laterSlope, '명/일').value}`;
 
+  const completedLabel = Number.isFinite(growth.latestCompletedAt)
+    ? `${formatChartDate(growth.latestCompletedAt)} 마감 기준 · ${growth.daily.length}개 완료일`
+    : '완료된 날짜 기록 없음';
+
   return `
     <section class="growth-analysis" aria-labelledby="growth-analysis-title">
       <div class="growth-analysis-header">
@@ -484,11 +586,11 @@ function renderGrowthAnalysis(growth, chart) {
           <div class="eyebrow">GROWTH SIGNALS</div>
           <h3 id="growth-analysis-title">성장 분석</h3>
         </div>
-        <span>${growth.daily.length}개 일별 마감 기록</span>
+        <span>${escapeHtml(completedLabel)}</span>
       </div>
       <div class="growth-metrics">
-        ${renderGrowthMetric('일일 증가량', dailyChange.value, dailyChange.className, '직전 기록일 이후 하루 평균')}
-        ${renderGrowthMetric('성장률 추이', growthRate.value, growthRate.className, '최근 일일 증가율')}
+        ${renderGrowthMetric('일일 증가량', dailyChange.value, dailyChange.className, '마지막 완료일의 하루 평균')}
+        ${renderGrowthMetric('성장률 추이', growthRate.value, growthRate.className, '마지막 완료일의 일일 증가율')}
         ${renderGrowthMetric('증가세 둔화', acceleration.value, acceleration.className, '최근 증가량 − 직전 증가량')}
         ${renderGrowthMetric('모멘텀 변화', momentum.value, momentum.className, momentumDetail)}
         ${renderGrowthMetric('기울기 변화', slope.value, slope.className, slopeDetail)}
@@ -499,7 +601,7 @@ function renderGrowthAnalysis(growth, chart) {
         <span><i class="legend-growth-rate"></i>성장률</span>
       </div>
       ${chart}
-      <p class="growth-method">날짜별 마지막 측정값을 일별 마감값으로 사용합니다. 측정일 사이가 비면 증가분을 경과 일수로 나눕니다. 둔화는 최근 두 일간 증가량, 모멘텀은 최근 3개와 직전 3개 평균, 기울기는 선택 기간 전반부와 후반부 추세를 비교합니다.</p>
+      <p class="growth-method">오늘은 집계가 끝나지 않았으므로 모든 성장 분석에서 제외합니다. 완료된 날짜별 마지막 측정값을 마감값으로 사용하고, 측정일 사이가 비면 증가분을 경과 일수로 나눕니다. 둔화는 최근 두 일간 증가량, 모멘텀은 최근 3개와 직전 3개 평균, 기울기는 선택 기간 전반부와 후반부 추세를 비교합니다.</p>
     </section>`;
 }
 
@@ -612,7 +714,7 @@ function buildGrowthChart(dailySamples, timeAxis) {
     </div>`;
 }
 
-function buildDetailChart(samples, trend, timeAxis) {
+function buildDetailChart(samples, trend, timeAxis, dailySamples = [], selection = null) {
   const width = 840;
   const height = 320;
   const plot = { left: 68, right: 18, top: 18, bottom: 44 };
@@ -638,6 +740,10 @@ function buildDetailChart(samples, trend, timeAxis) {
     y: toY(sample.count),
     sample
   }));
+  const dayPoints = dailySamples.map((sample) => ({
+    x: toX(sample.dayTimestamp),
+    sample
+  }));
   const linePoints = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
   const areaPoints = `${plot.left},${plot.top + plotHeight} ${linePoints} ${plot.left + plotWidth},${plot.top + plotHeight}`;
   const trendPoints = samples.map((sample, index) => (
@@ -660,9 +766,12 @@ function buildDetailChart(samples, trend, timeAxis) {
   const pointDots = points.length <= 40
     ? points.map((point) => `<circle class="detail-point" cx="${point.x}" cy="${point.y}" r="2.5"/>`).join('')
     : '';
+  const selectionMarkup = selection
+    ? buildSelectionMarkup(selection, toX, endTime, plot, plotHeight)
+    : '<rect id="detail-selection" class="detail-selection hidden"/>';
 
   return {
-    model: { width, height, points },
+    model: { width, height, points, dayPoints, plot, timeAxis },
     svg: `
       <div class="detail-chart-wrap">
         <svg id="subscriber-detail-svg" class="detail-chart" viewBox="0 0 ${width} ${height}"
@@ -681,6 +790,7 @@ function buildDetailChart(samples, trend, timeAxis) {
           <polyline class="detail-trend-line" points="${trendPoints}"/>
           <polyline class="detail-actual-line" points="${linePoints}"/>
           ${pointDots}
+          ${selectionMarkup}
           <line id="detail-crosshair" class="detail-crosshair hidden" y1="${plot.top}" y2="${plot.top + plotHeight}"/>
           <circle id="detail-hover-dot" class="detail-hover-dot hidden" r="5"/>
         </svg>
@@ -689,9 +799,45 @@ function buildDetailChart(samples, trend, timeAxis) {
   };
 }
 
+function buildSelectionMarkup(selection, toX, endTime, plot, plotHeight) {
+  const startTime = Math.min(selection.startTime, selection.endTime);
+  const selectedEnd = Math.max(selection.startTime, selection.endTime);
+  const nextDay = new Date(selectedEnd);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const x = toX(startTime);
+  const endX = toX(Math.min(endTime, nextDay.getTime()));
+  return `<rect id="detail-selection" class="detail-selection" x="${x.toFixed(2)}" y="${plot.top}" width="${Math.max(2, endX - x).toFixed(2)}" height="${plotHeight}" rx="4"/>`;
+}
+
+function handleDetailChartPointerDown(event) {
+  const svg = event.target.closest?.('#subscriber-detail-svg');
+  if (!svg || event.button !== 0 || !detailChartModel?.dayPoints?.length) return;
+  const day = nearestSelectableDay(event, svg);
+  if (!day) return;
+  event.preventDefault();
+  svg.setPointerCapture?.(event.pointerId);
+  detailChartDrag = {
+    pointerId: event.pointerId,
+    anchorTime: day.sample.dayTimestamp,
+    currentTime: day.sample.dayTimestamp
+  };
+  updateSelectionOverlay(detailChartDrag.anchorTime, detailChartDrag.currentTime);
+  hideDetailChartTooltip();
+}
+
 function handleDetailChartPointerMove(event) {
   const svg = event.target.closest?.('#subscriber-detail-svg');
   if (!svg || !detailChartModel?.points?.length) return;
+  if (detailChartDrag?.pointerId === event.pointerId) {
+    const day = nearestSelectableDay(event, svg);
+    if (day) {
+      detailChartDrag.currentTime = day.sample.dayTimestamp;
+      updateSelectionOverlay(detailChartDrag.anchorTime, detailChartDrag.currentTime);
+    }
+    event.preventDefault();
+    return;
+  }
+
   const bounds = svg.getBoundingClientRect();
   const viewX = ((event.clientX - bounds.left) / bounds.width) * detailChartModel.width;
   const point = detailChartModel.points.reduce((nearest, candidate) => (
@@ -716,6 +862,66 @@ function handleDetailChartPointerMove(event) {
   const pixelY = (point.y / detailChartModel.height) * bounds.height;
   tooltip.style.left = `${Math.min(bounds.width - 84, Math.max(84, pixelX))}px`;
   tooltip.style.top = `${Math.max(8, pixelY - 62)}px`;
+}
+
+function handleDetailChartPointerUp(event) {
+  if (!detailChartDrag || detailChartDrag.pointerId !== event.pointerId) return;
+  const svg = event.target.closest?.('#subscriber-detail-svg')
+    || elements.subscriberDialog.querySelector('#subscriber-detail-svg');
+  const day = svg ? nearestSelectableDay(event, svg) : null;
+  const endTime = day?.sample.dayTimestamp ?? detailChartDrag.currentTime;
+  subscriberChartSelection = {
+    startTime: Math.min(detailChartDrag.anchorTime, endTime),
+    endTime: Math.max(detailChartDrag.anchorTime, endTime)
+  };
+  try {
+    svg?.releasePointerCapture?.(event.pointerId);
+  } catch {
+    // Pointer capture may already have been released by the browser.
+  }
+  detailChartDrag = null;
+  renderSubscriberDetail();
+}
+
+function handleDetailChartPointerCancel(event) {
+  if (!detailChartDrag || detailChartDrag.pointerId !== event.pointerId) return;
+  detailChartDrag = null;
+  renderSubscriberDetail();
+}
+
+function nearestSelectableDay(event, svg) {
+  if (!detailChartModel?.dayPoints?.length) return null;
+  const bounds = svg.getBoundingClientRect();
+  if (!bounds.width) return null;
+  const viewX = ((event.clientX - bounds.left) / bounds.width) * detailChartModel.width;
+  return detailChartModel.dayPoints.reduce((nearest, candidate) => (
+    Math.abs(candidate.x - viewX) < Math.abs(nearest.x - viewX) ? candidate : nearest
+  ));
+}
+
+function updateSelectionOverlay(firstTime, secondTime) {
+  const selection = elements.subscriberDialog.querySelector('#detail-selection');
+  const model = detailChartModel;
+  if (!selection || !model?.plot || !model?.timeAxis) return;
+  const startTime = Math.min(firstTime, secondTime);
+  const endTime = Math.max(firstTime, secondTime);
+  const nextDay = new Date(endTime);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const plotWidth = model.width - model.plot.left - model.plot.right;
+  const timeRange = Math.max(1, model.timeAxis.endTime - model.timeAxis.startTime);
+  const toX = (timestamp) => model.plot.left
+    + ((timestamp - model.timeAxis.startTime) / timeRange) * plotWidth;
+  const x = Math.max(model.plot.left, toX(startTime));
+  const endX = Math.min(
+    model.plot.left + plotWidth,
+    toX(Math.min(model.timeAxis.endTime, nextDay.getTime()))
+  );
+  selection.setAttribute('x', x.toFixed(2));
+  selection.setAttribute('y', model.plot.top);
+  selection.setAttribute('width', Math.max(2, endX - x).toFixed(2));
+  selection.setAttribute('height', model.height - model.plot.top - model.plot.bottom);
+  selection.setAttribute('rx', '4');
+  selection.classList.remove('hidden');
 }
 
 function hideDetailChartTooltip() {
@@ -906,6 +1112,14 @@ function formatPercent(value) {
 
 function formatChartDate(value) {
   return new Intl.DateTimeFormat('ko-KR', {
+    month: 'short',
+    day: 'numeric'
+  }).format(value);
+}
+
+function formatSelectionDate(value) {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
     month: 'short',
     day: 'numeric'
   }).format(value);

@@ -1,5 +1,7 @@
 # Agent Guide
 
+Last maintained: 2026-08-01 for the v1.4.0 completed-day analytics and interactive date-range selection release.
+
 ## Project mission
 
 Build and maintain **Live Pulse (라이브 펄스)**, a Windows Electron tray application that monitors creator channels in the background and opens Chrome when a live stream or scheduled broadcast is detected.
@@ -62,6 +64,7 @@ Useful packaged-app smoke test:
 - `src/lib/updater.js`: GitHub Release update checks, download state and installation
 - `src/lib/store.js`: atomic local JSON persistence and settings normalization
 - `src/renderer/`: Korean dashboard and settings UI
+- `src/renderer/chart-math.js`: local-date axes, completed-day growth analytics and selected-range summaries
 - `test/`: parser and persistence regression tests
 
 Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `nodeIntegration: false`, URL validation, and the existing IPC boundary.
@@ -76,6 +79,14 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - A stream-list item with a timestamp is upcoming only when that timestamp is in the future.
 - Missing or past timestamps must never be treated as `Number.MAX_SAFE_INTEGER` or otherwise coerced into the future.
 - Keep a regression test for finished live video `hm6LLaIfMho`.
+
+## Subscriber analytics invariants
+
+- Keep current-day samples on the raw subscriber chart, but exclude the current local calendar day from every daily growth, momentum, slope-change and selected-range calculation because that day is incomplete.
+- Daily analytics use the last stored sample from each completed local date.
+- When recorded dates have gaps, divide change and growth by elapsed local calendar days; never invent or interpolate missing daily closes.
+- Date clicks select one completed day. Pointer drags select the inclusive span of actual completed-day records and must work in either direction.
+- A selected-day change includes that day’s change from the prior recorded close. If no prior close exists, show insufficient data instead of fabricating a baseline.
 
 ## Planned CHZZK provider
 
@@ -122,6 +133,13 @@ Before implementing CHZZK:
 Do not store NAVER login cookies or credentials. If authenticated access becomes necessary, stop and discuss the security and product tradeoffs before implementing it.
 
 ## Change and release checklist
+
+For every completed repository task, including documentation-only tasks:
+
+1. Update `AGENTS.md` in the same task. At minimum, refresh the `Last maintained` checkpoint and preserve any new invariant or workflow rule introduced by the work.
+2. Update `handoff.md` with the resulting source/release state, verification result, limitation or next step.
+
+Do not defer either file to a later task or release.
 
 For runtime changes:
 
