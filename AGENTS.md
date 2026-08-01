@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 for the v1.4.0 completed-day analytics and interactive date-range selection release.
+Last maintained: 2026-08-01 after the verified v1.4.0 completed-day analytics and interactive date-range selection release.
 
 ## Project mission
 
