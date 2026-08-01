@@ -4,17 +4,17 @@ Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version in source: `1.6.0` release candidate
+- Application version: `1.6.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Current verified production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.5.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.6.0 source candidate fixes preset ranges to use inclusive local-calendar dates and carries one hidden prior close into analytics so the first displayed day has a valid change baseline. The growth chart now ends at the latest completed day instead of reserving a blank current-day slot. Channel cards calculate total subscriber change from the complete stored history even though their sparkline remains bounded. Settings now offer `수집 시각 기준` and `날짜 기준`; the latter plots only each date’s last value without modifying stored raw history. Growth wording explains momentum as the recent three completed intervals’ average versus the preceding three, and presents acceleration as a difference between daily rates instead of the opaque `명/일²` label.
+The verified v1.6.0 release fixes preset ranges to use inclusive local-calendar dates and carries one hidden prior close into analytics so the first displayed day has a valid change baseline. The growth chart now ends at the latest completed day instead of reserving a blank current-day slot. Channel cards calculate total subscriber change from the complete stored history even though their sparkline remains bounded. Settings now offer `수집 시각 기준` and `날짜 기준`; the latter plots only each date’s last value without modifying stored raw history. Growth wording explains momentum as the recent three completed intervals’ average versus the preceding three, and presents acceleration as a difference between daily rates instead of the opaque `명/일²` label.
 
-Local verification covers all 38 tests, syntax checks, a warning-free live RESCENE public-channel diagnostic, the x64 NSIS build, and packaged dashboard, growth-chart, date-mode and settings-dialog smoke captures. `dist/latest.yml`, packaged `resources/app-update.yml`, packaged version `1.6.0` and the local installer SHA-512 were verified. GitHub publication and verification remain before this candidate replaces v1.5.0 as production.
+Local verification covers all 38 tests, syntax checks, a warning-free live RESCENE public-channel diagnostic, the x64 NSIS build, and packaged dashboard, growth-chart, date-mode and settings-dialog smoke captures. `dist/latest.yml`, packaged `resources/app-update.yml`, packaged version `1.6.0` and the local installer SHA-512 were verified. GitHub Actions run `30696633468` completed successfully; the public non-draft Release contains the installer, block map and `latest.yml`, and the downloaded public installer SHA-512 matches its published update metadata.
 
 The v1.5.0 GitHub Actions build, all 33 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. That release added channel-scoped `.xlsx` subscriber-history import from the subscriber detail dialog. It reads sheets containing `날짜` and `전체 구독자`, ignores summary rows and the derived `신규 구독자` column, stores new dates at local 00:00, and never overwrites a local date that already has an app sample. Duplicate dates inside one workbook resolve to the last valid row, and the result reports added, preserved, invalid and duplicate counts. Workbook parsing stays in the main process behind a narrow preload IPC method.
 

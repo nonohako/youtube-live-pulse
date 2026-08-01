@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 for the v1.6.0 calendar-range analytics and subscriber-chart display-mode release candidate.
+Last maintained: 2026-08-01 after the verified v1.6.0 calendar-range analytics and subscriber-chart display-mode release.
 
 ## Project mission
 
