@@ -1,18 +1,18 @@
 # Live Pulse handoff
 
-Last updated: 2026-07-28
+Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version: `1.2.0`
+- Application version: `1.2.1`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.2.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.2.1`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.2.0 GitHub Actions build, tests and Release publication completed successfully. The published Release is non-draft and contains the installer, block map and `latest.yml`. The public installer was downloaded again after publication, and its SHA-512 matched the published update metadata.
+Version 1.2.1 changes the subscriber detail chart's horizontal axis from sample-index labels to fixed time intervals: daily for 7 days, every 5 days for 30 days, every 15 days for 90 days, quarterly for 1 year and evenly spaced time divisions for all history. Fill in the final GitHub Actions and published-asset verification result after the tag workflow completes.
 
 The first v1.2.0 workflow attempt exposed an Electron Builder publication race: it reported success after only the block map became visible. Rerunning with the Release already created uploaded all assets. The workflow was then hardened to build with `npm run build` and publish the three assets explicitly with `gh release upload`; a partial upload now fails the job.
 

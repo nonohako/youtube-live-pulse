@@ -413,7 +413,11 @@ function renderSubscriberDetail() {
     all: '전체'
   }[subscriberChartRange] || '선택 기간';
 
-  const chart = buildDetailChart(samples, math.linearRegression(samples));
+  const chart = buildDetailChart(
+    samples,
+    math.linearRegression(samples),
+    math.buildTimeAxis(samples, subscriberChartRange)
+  );
   detailChartModel = chart.model;
   elements.subscriberDetailContent.innerHTML = `
     <div class="detail-metrics">
@@ -439,13 +443,12 @@ function renderDetailMetric(label, value, className = '') {
     </div>`;
 }
 
-function buildDetailChart(samples, trend) {
+function buildDetailChart(samples, trend, timeAxis) {
   const width = 840;
   const height = 320;
   const plot = { left: 68, right: 18, top: 18, bottom: 44 };
   const plotWidth = width - plot.left - plot.right;
   const plotHeight = height - plot.top - plot.bottom;
-  const timestamps = samples.map((sample) => sample.timestamp);
   const values = samples.map((sample) => sample.count);
   const trendValues = trend.values || [];
   const combined = [...values, ...trendValues];
@@ -456,12 +459,10 @@ function buildDetailChart(samples, trend) {
   const minValue = Math.max(0, rawMin - padding);
   const maxValue = rawMax + padding;
   const valueRange = Math.max(1, maxValue - minValue);
-  const startTime = timestamps[0];
-  const endTime = timestamps.at(-1);
+  const startTime = timeAxis.startTime;
+  const endTime = timeAxis.endTime;
   const timeRange = Math.max(1, endTime - startTime);
-  const toX = (timestamp) => samples.length === 1
-    ? plot.left + plotWidth / 2
-    : plot.left + ((timestamp - startTime) / timeRange) * plotWidth;
+  const toX = (timestamp) => plot.left + ((timestamp - startTime) / timeRange) * plotWidth;
   const toY = (value) => plot.top + ((maxValue - value) / valueRange) * plotHeight;
   const points = samples.map((sample) => ({
     x: toX(sample.timestamp),
@@ -481,15 +482,11 @@ function buildDetailChart(samples, trend) {
       <line class="detail-grid" x1="${plot.left}" y1="${y}" x2="${plot.left + plotWidth}" y2="${y}"/>
       <text class="detail-axis-label y" x="${plot.left - 10}" y="${y + 3}">${escapeHtml(formatCompact(value))}</text>`;
   }).join('');
-  const tickCount = Math.min(5, samples.length);
-  const tickIndexes = uniqueNumbers(Array.from({ length: tickCount }, (_, index) => (
-    Math.round(index * (samples.length - 1) / Math.max(1, tickCount - 1))
-  )));
-  const xTicks = tickIndexes.map((sampleIndex) => {
-    const point = points[sampleIndex];
+  const xTicks = timeAxis.ticks.map((timestamp) => {
+    const x = toX(timestamp);
     return `
-      <line class="detail-tick" x1="${point.x}" y1="${plot.top + plotHeight}" x2="${point.x}" y2="${plot.top + plotHeight + 5}"/>
-      <text class="detail-axis-label x" x="${point.x}" y="${height - 15}">${escapeHtml(formatChartDate(point.sample.timestamp))}</text>`;
+      <line class="detail-tick" x1="${x}" y1="${plot.top + plotHeight}" x2="${x}" y2="${plot.top + plotHeight + 5}"/>
+      <text class="detail-axis-label x" x="${x}" y="${height - 15}">${escapeHtml(formatChartDate(timestamp))}</text>`;
   }).join('');
   const pointDots = points.length <= 40
     ? points.map((point) => `<circle class="detail-point" cx="${point.x}" cy="${point.y}" r="2.5"/>`).join('')
@@ -556,10 +553,6 @@ function hideDetailChartTooltip() {
   elements.subscriberDialog.querySelector('#detail-crosshair')?.classList.add('hidden');
   elements.subscriberDialog.querySelector('#detail-hover-dot')?.classList.add('hidden');
   elements.subscriberDialog.querySelector('#detail-chart-tooltip')?.classList.add('hidden');
-}
-
-function uniqueNumbers(values) {
-  return [...new Set(values)];
 }
 
 function renderEvents() {
