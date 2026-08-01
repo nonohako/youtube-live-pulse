@@ -31,73 +31,70 @@
     const samples = normalizeSamples(history);
     const days = RANGE_DAYS[range];
     if (!days) return samples;
-    const cutoff = range === '1y' ? shiftUtcMonths(now, -12) : now - days * DAY_MS;
+    const cutoff = range === '1y' ? shiftLocalMonths(now, -12) : now - days * DAY_MS;
     return samples.filter((sample) => sample.timestamp >= cutoff);
   }
 
-  function buildTimeAxis(samples, range = '30d', now = Date.now()) {
+  function buildTimeAxis(samples, _range = '30d', now = Date.now()) {
     const normalized = normalizeSamples(samples);
     const end = Number.isFinite(Number(now)) ? Number(now) : Date.now();
-    const segments = { '7d': 7, '30d': 6, '90d': 6 }[range];
-    if (segments) {
-      const start = end - RANGE_DAYS[range] * DAY_MS;
-      return {
-        startTime: start,
-        endTime: end,
-        ticks: evenlySpacedTicks(start, end, segments)
-      };
-    }
-
-    if (range === '1y') {
-      const ticks = [12, 9, 6, 3, 0].map((monthsAgo) => shiftUtcMonths(end, -monthsAgo));
-      return { startTime: ticks[0], endTime: end, ticks };
-    }
-
-    if (!normalized.length) {
-      return {
-        startTime: end - DAY_MS,
-        endTime: end,
-        ticks: evenlySpacedTicks(end - DAY_MS, end, 1)
-      };
-    }
-
-    if (normalized.length === 1) {
-      const middle = normalized[0].timestamp;
-      return {
-        startTime: middle - DAY_MS / 2,
-        endTime: middle + DAY_MS / 2,
-        ticks: evenlySpacedTicks(middle - DAY_MS / 2, middle + DAY_MS / 2, 2)
-      };
-    }
-
-    const start = normalized[0].timestamp;
-    const finish = normalized.at(-1).timestamp;
+    const firstSampleTime = normalized[0]?.timestamp ?? end;
+    const start = startOfLocalDay(firstSampleTime);
+    const spanDays = Math.max(0, Math.ceil((end - start) / DAY_MS));
     return {
       startTime: start,
-      endTime: finish,
-      ticks: evenlySpacedTicks(start, finish, 6)
+      endTime: Math.max(end, start + 1),
+      ticks: buildCalendarTicks(start, end, spanDays)
     };
   }
 
-  function evenlySpacedTicks(startTime, endTime, segments) {
-    const safeSegments = Math.max(1, Math.round(segments));
-    return Array.from({ length: safeSegments + 1 }, (_, index) => (
-      startTime + ((endTime - startTime) * index) / safeSegments
-    ));
+  function buildCalendarTicks(startTime, endTime, spanDays) {
+    if (spanDays <= 10) return buildLocalDayTicks(startTime, endTime, 1);
+    if (spanDays <= 45) return buildLocalDayTicks(startTime, endTime, 5);
+    if (spanDays <= 120) return buildLocalDayTicks(startTime, endTime, 15);
+    return buildLocalMonthTicks(startTime, endTime, 3);
   }
 
-  function shiftUtcMonths(timestamp, monthDelta) {
-    const source = new Date(timestamp);
-    const day = source.getUTCDate();
+  function buildLocalDayTicks(startTime, endTime, stepDays) {
+    const ticks = [];
+    for (let index = 0; index < 500; index += 1) {
+      const tick = shiftLocalDays(startTime, index * stepDays);
+      if (tick > endTime) break;
+      ticks.push(tick);
+    }
+    return ticks.length ? ticks : [startTime];
+  }
+
+  function buildLocalMonthTicks(startTime, endTime, stepMonths) {
+    const ticks = [];
+    for (let index = 0; index < 100; index += 1) {
+      const tick = shiftLocalMonths(startTime, index * stepMonths);
+      if (tick > endTime) break;
+      ticks.push(tick);
+    }
+    return ticks.length ? ticks : [startTime];
+  }
+
+  function startOfLocalDay(timestamp) {
+    const date = new Date(timestamp);
+    date.setHours(0, 0, 0, 0);
+    return date.getTime();
+  }
+
+  function shiftLocalDays(timestamp, dayDelta) {
     const shifted = new Date(timestamp);
-    shifted.setUTCDate(1);
-    shifted.setUTCMonth(shifted.getUTCMonth() + monthDelta);
-    const lastDay = new Date(Date.UTC(
-      shifted.getUTCFullYear(),
-      shifted.getUTCMonth() + 1,
-      0
-    )).getUTCDate();
-    shifted.setUTCDate(Math.min(day, lastDay));
+    shifted.setDate(shifted.getDate() + dayDelta);
+    return shifted.getTime();
+  }
+
+  function shiftLocalMonths(timestamp, monthDelta) {
+    const source = new Date(timestamp);
+    const day = source.getDate();
+    const shifted = new Date(timestamp);
+    shifted.setDate(1);
+    shifted.setMonth(shifted.getMonth() + monthDelta);
+    const lastDay = new Date(shifted.getFullYear(), shifted.getMonth() + 1, 0).getDate();
+    shifted.setDate(Math.min(day, lastDay));
     return shifted.getTime();
   }
 

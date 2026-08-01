@@ -19,8 +19,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     appState = await window.livePulse.getState();
     render();
-    if (new URLSearchParams(window.location.search).has('smokeChart') && appState.channels[0]) {
-      openSubscriberChart(appState.channels[0].id);
+    const smokeParams = new URLSearchParams(window.location.search);
+    if (smokeParams.has('smokeChart') && appState.channels[0]) {
+      openSubscriberChart(appState.channels[0].id, smokeParams.get('chartRange') || '30d');
     }
   } catch (error) {
     showError(cleanError(error));
@@ -367,11 +368,13 @@ function emptyChart() {
     </svg>`;
 }
 
-function openSubscriberChart(channelId) {
+function openSubscriberChart(channelId, initialRange = '30d') {
   const channel = appState?.channels.find((item) => item.id === channelId);
   if (!channel) return;
   subscriberChartChannelId = channelId;
-  subscriberChartRange = '30d';
+  subscriberChartRange = ['7d', '30d', '90d', '1y', 'all'].includes(initialRange)
+    ? initialRange
+    : '30d';
   renderSubscriberDetail();
   if (!elements.subscriberDialog.open) elements.subscriberDialog.showModal();
 }

@@ -18,7 +18,8 @@ const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
 
-const isSmokeChart = process.argv.includes('--smoke-chart');
+const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
+const isSmokeChart = process.argv.includes('--smoke-chart') || isSmokeSparseChart;
 const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart;
 if (isSmokeTest) {
   app.setPath('userData', path.join(process.cwd(), '.smoke-user-data'));
@@ -111,7 +112,12 @@ function createWindow() {
 
   mainWindow.loadFile(
     path.join(__dirname, 'renderer', 'index.html'),
-    isSmokeChart ? { query: { smokeChart: '1' } } : undefined
+    isSmokeChart ? {
+      query: {
+        smokeChart: '1',
+        chartRange: isSmokeSparseChart ? '1y' : '30d'
+      }
+    } : undefined
   );
   mainWindow.removeMenu();
 
@@ -137,7 +143,9 @@ function scheduleSmokeCapture() {
         const image = await mainWindow.webContents.capturePage();
         const outputPath = path.join(
           outputDirectory,
-          isSmokeChart ? 'subscriber-chart-smoke.png' : 'dashboard-smoke.png'
+          isSmokeSparseChart
+            ? 'subscriber-chart-sparse-smoke.png'
+            : isSmokeChart ? 'subscriber-chart-smoke.png' : 'dashboard-smoke.png'
         );
         fs.writeFileSync(outputPath, image.toPNG());
         process.stdout.write(`SMOKE_SCREENSHOT=${outputPath}\n`);
@@ -159,10 +167,15 @@ function seedSmokeChartData() {
     const channel = data.channels[0];
     if (!channel) return;
     channel.title = 'RESCENE';
-    channel.subscriberHistory = Array.from({ length: 121 }, (_, index) => ({
-      at: new Date(now - (120 - index) * dayMs).toISOString(),
-      count: Math.round(245000 + index * 73 + Math.sin(index / 4) * 310 + (index > 65 ? 1200 : 0))
-    }));
+    const sampleCount = isSmokeSparseChart ? 5 : 121;
+    channel.subscriberHistory = Array.from({ length: sampleCount }, (_, index) => {
+      const at = new Date(now - (sampleCount - 1 - index) * dayMs);
+      if (isSmokeSparseChart) at.setHours(5, 48, 0, 0);
+      return {
+        at: at.toISOString(),
+        count: Math.round(245000 + index * 73 + Math.sin(index / 4) * 310)
+      };
+    });
   });
 }
 

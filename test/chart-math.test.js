@@ -57,42 +57,63 @@ test('구독자 선형 추세와 기간 요약을 계산한다', () => {
   });
 });
 
-test('7일·30일·90일 가로축은 일정한 날짜 간격으로 나눈다', () => {
-  const now = new Date('2026-08-01T12:00:00.000Z').getTime();
-  const expectations = [
-    ['7d', 8, 1],
-    ['30d', 7, 5],
-    ['90d', 7, 15]
+test('보유 기록이 짧으면 모든 기간의 축이 최초 수집일에서 시작한다', () => {
+  const now = new Date(2026, 7, 1, 15, 0, 0, 0).getTime();
+  const samples = [
+    { at: new Date(2026, 6, 28, 5, 48, 0, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 7, 1, 10, 30, 0, 0).toISOString(), count: 130 }
   ];
 
-  for (const [range, tickCount, intervalDays] of expectations) {
-    const axis = buildTimeAxis([], range, now);
-    assert.equal(axis.ticks.length, tickCount);
+  for (const range of ['7d', '30d', '90d', '1y', 'all']) {
+    const axis = buildTimeAxis(samples, range, now);
+    const start = new Date(axis.startTime);
     assert.deepEqual(
-      axis.ticks.slice(1).map((tick, index) => (tick - axis.ticks[index]) / DAY_MS),
-      Array(tickCount - 1).fill(intervalDays)
+      [start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes()],
+      [2026, 6, 28, 0, 0]
     );
+    assert.equal(axis.endTime, now);
   }
 });
 
-test('1년 가로축은 3개월 단위로 표시한다', () => {
-  const now = new Date('2026-08-01T12:00:00.000Z').getTime();
-  const axis = buildTimeAxis([], '1y', now);
+test('날짜 눈금선은 해당 날짜의 현지시간 00시를 정확히 가리킨다', () => {
+  const now = new Date(2026, 7, 1, 15, 0, 0, 0).getTime();
+  const samples = [
+    { at: new Date(2026, 6, 28, 5, 48, 0, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 7, 1, 10, 30, 0, 0).toISOString(), count: 130 }
+  ];
+  const axis = buildTimeAxis(samples, '1y', now);
+
   assert.deepEqual(
-    axis.ticks.map((tick) => new Date(tick).toISOString().slice(0, 10)),
-    ['2025-08-01', '2025-11-01', '2026-02-01', '2026-05-01', '2026-08-01']
+    axis.ticks.map((tick) => {
+      const date = new Date(tick);
+      return [date.getMonth() + 1, date.getDate(), date.getHours(), date.getMinutes()];
+    }),
+    [
+      [7, 28, 0, 0],
+      [7, 29, 0, 0],
+      [7, 30, 0, 0],
+      [7, 31, 0, 0],
+      [8, 1, 0, 0]
+    ]
   );
 });
 
-test('전체 가로축도 기록 개수와 무관하게 같은 화면 간격으로 나눈다', () => {
+test('보유 기간이 길어지면 현지 자정 기준의 읽기 좋은 고정 간격을 사용한다', () => {
+  const now = new Date(2026, 7, 1, 15, 0, 0, 0).getTime();
   const samples = [
-    { at: '2026-01-01T00:00:00.000Z', count: 100 },
-    { at: '2026-01-02T00:00:00.000Z', count: 110 },
-    { at: '2026-07-01T00:00:00.000Z', count: 130 }
+    { at: new Date(2026, 5, 30, 5, 48, 0, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 7, 1, 10, 30, 0, 0).toISOString(), count: 130 }
   ];
-  const axis = buildTimeAxis(samples, 'all');
-  const intervals = axis.ticks.slice(1).map((tick, index) => tick - axis.ticks[index]);
+  const axis = buildTimeAxis(samples, '90d', now);
 
-  assert.equal(axis.ticks.length, 7);
-  assert.equal(new Set(intervals).size, 1);
+  assert.ok(axis.ticks.length >= 6);
+  for (const tick of axis.ticks) {
+    const date = new Date(tick);
+    assert.equal(date.getHours(), 0);
+    assert.equal(date.getMinutes(), 0);
+  }
+  assert.deepEqual(
+    axis.ticks.slice(1).map((tick, index) => (tick - axis.ticks[index]) / DAY_MS),
+    Array(axis.ticks.length - 1).fill(5)
+  );
 });
