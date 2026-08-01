@@ -1194,6 +1194,191 @@ dialog::backdrop {
   color: var(--text);
 }
 
+.growth-analysis {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.growth-analysis-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.growth-analysis-header h3 {
+  margin: 3px 0 0;
+  font-size: 17px;
+}
+
+.growth-analysis-header > span {
+  color: var(--dim);
+  font-size: 9px;
+}
+
+.growth-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  overflow: hidden;
+  margin-bottom: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #101319;
+}
+
+.growth-metric {
+  min-width: 0;
+  padding: 12px 13px;
+  border-right: 1px solid var(--line-soft);
+}
+
+.growth-metric:last-child {
+  border-right: 0;
+}
+
+.growth-metric > span,
+.growth-metric > strong,
+.growth-metric > small {
+  display: block;
+}
+
+.growth-metric > span {
+  color: var(--dim);
+  font-size: 9px;
+}
+
+.growth-metric > strong {
+  overflow: hidden;
+  margin-top: 5px;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.growth-metric > strong.up {
+  color: var(--green);
+}
+
+.growth-metric > strong.down {
+  color: var(--accent);
+}
+
+.growth-metric > small {
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.growth-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin: 0 2px 8px;
+  color: var(--dim);
+  font-size: 9px;
+}
+
+.growth-chart-legend strong {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.growth-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.growth-chart-legend i {
+  display: inline-block;
+  width: 15px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--green);
+}
+
+.growth-chart-legend .legend-growth-rate {
+  height: 0;
+  border-top: 2px solid var(--blue);
+  border-radius: 0;
+  background: transparent;
+}
+
+.growth-chart-wrap,
+.growth-chart-empty {
+  height: 210px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #0e1117;
+}
+
+.growth-chart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.growth-chart-empty {
+  display: grid;
+  height: 130px;
+  place-items: center;
+  padding: 20px;
+  color: var(--dim);
+  font-size: 10px;
+  text-align: center;
+}
+
+.growth-zero-line {
+  stroke: #525a68;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.growth-bar {
+  fill: var(--green);
+  opacity: 0.74;
+}
+
+.growth-bar.down {
+  fill: var(--accent);
+}
+
+.growth-rate-line {
+  fill: none;
+  stroke: var(--blue);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.growth-rate-dot {
+  fill: #0e1117;
+  stroke: var(--blue);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.detail-axis-label.growth-rate-axis {
+  fill: var(--blue);
+  text-anchor: start;
+}
+
+.growth-method {
+  margin: 9px 2px 0;
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
 .chart-disclaimer {
   margin: 12px 2px 0;
   color: var(--dim);
@@ -1341,11 +1526,23 @@ dialog::backdrop {
     grid-template-columns: repeat(3, 1fr);
   }
 
+  .growth-metrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
   .detail-metric:nth-child(3) {
     border-right: 0;
   }
 
   .detail-metric:nth-child(n + 4) {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .growth-metric:nth-child(3) {
+    border-right: 0;
+  }
+
+  .growth-metric:nth-child(n + 4) {
     border-top: 1px solid var(--line-soft);
   }
 }

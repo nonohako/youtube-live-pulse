@@ -19,7 +19,8 @@ const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
 
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
-const isSmokeChart = process.argv.includes('--smoke-chart') || isSmokeSparseChart;
+const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
+const isSmokeChart = process.argv.includes('--smoke-chart') || isSmokeSparseChart || isSmokeGrowthChart;
 const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart;
 if (isSmokeTest) {
   app.setPath('userData', path.join(process.cwd(), '.smoke-user-data'));
@@ -95,7 +96,7 @@ app.on('window-all-closed', () => {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
-    height: 800,
+    height: isSmokeGrowthChart ? 1200 : 800,
     minWidth: 900,
     minHeight: 660,
     show: false,
@@ -143,7 +144,9 @@ function scheduleSmokeCapture() {
         const image = await mainWindow.webContents.capturePage();
         const outputPath = path.join(
           outputDirectory,
-          isSmokeSparseChart
+          isSmokeGrowthChart
+            ? 'subscriber-growth-smoke.png'
+            : isSmokeSparseChart
             ? 'subscriber-chart-sparse-smoke.png'
             : isSmokeChart ? 'subscriber-chart-smoke.png' : 'dashboard-smoke.png'
         );

@@ -122,6 +122,112 @@
     };
   }
 
+  function buildDailySeries(samples) {
+    const closes = [];
+    for (const sample of normalizeSamples(samples)) {
+      const dayTimestamp = startOfLocalDay(sample.timestamp);
+      const previousClose = closes.at(-1);
+      const close = { ...sample, dayTimestamp };
+      if (previousClose?.dayTimestamp === dayTimestamp) {
+        closes[closes.length - 1] = close;
+      } else {
+        closes.push(close);
+      }
+    }
+
+    return closes.map((close, index) => {
+      const previous = closes[index - 1];
+      if (!previous) {
+        return {
+          ...close,
+          elapsedDays: null,
+          rawChange: null,
+          dailyChange: null,
+          growthRate: null
+        };
+      }
+      const elapsedDays = Math.max(1, localCalendarDayDifference(
+        previous.dayTimestamp,
+        close.dayTimestamp
+      ));
+      const rawChange = close.count - previous.count;
+      const dailyChange = rawChange / elapsedDays;
+      const growthRate = previous.count > 0
+        ? (rawChange / previous.count / elapsedDays) * 100
+        : null;
+      return {
+        ...close,
+        elapsedDays,
+        rawChange,
+        dailyChange,
+        growthRate
+      };
+    });
+  }
+
+  function analyzeGrowth(samples) {
+    const daily = buildDailySeries(samples);
+    const changes = daily.filter((sample) => Number.isFinite(sample.dailyChange));
+    const latest = changes.at(-1);
+    const previous = changes.at(-2);
+    const accelerationChange = latest && previous
+      ? latest.dailyChange - previous.dailyChange
+      : null;
+
+    const momentumWindow = 3;
+    let recentMomentum = null;
+    let previousMomentum = null;
+    let momentumChange = null;
+    if (changes.length >= momentumWindow * 2) {
+      recentMomentum = average(changes.slice(-momentumWindow).map((sample) => sample.dailyChange));
+      previousMomentum = average(
+        changes.slice(-(momentumWindow * 2), -momentumWindow).map((sample) => sample.dailyChange)
+      );
+      momentumChange = recentMomentum - previousMomentum;
+    }
+
+    let earlierSlope = null;
+    let laterSlope = null;
+    let slopeChange = null;
+    if (daily.length >= 4) {
+      const midpoint = Math.floor(daily.length / 2);
+      const earlier = daily.slice(0, midpoint);
+      const later = daily.slice(midpoint);
+      if (earlier.length >= 2 && later.length >= 2) {
+        earlierSlope = linearRegression(earlier).slopePerDay;
+        laterSlope = linearRegression(later).slopePerDay;
+        slopeChange = laterSlope - earlierSlope;
+      }
+    }
+
+    return {
+      daily,
+      latestDailyChange: latest?.dailyChange ?? null,
+      latestGrowthRate: latest?.growthRate ?? null,
+      accelerationChange,
+      momentumWindow,
+      recentMomentum,
+      previousMomentum,
+      momentumChange,
+      earlierSlope,
+      laterSlope,
+      slopeChange
+    };
+  }
+
+  function localCalendarDayDifference(startTimestamp, endTimestamp) {
+    const start = new Date(startTimestamp);
+    const end = new Date(endTimestamp);
+    const startDay = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+    const endDay = Date.UTC(end.getFullYear(), end.getMonth(), end.getDate());
+    return Math.round((endDay - startDay) / DAY_MS);
+  }
+
+  function average(values) {
+    if (!values.length) return null;
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
+
   function summarizeSamples(samples) {
     const normalized = normalizeSamples(samples);
     if (!normalized.length) {
@@ -146,6 +252,8 @@
 
   return {
     RANGE_DAYS,
+    analyzeGrowth,
+    buildDailySeries,
     buildTimeAxis,
     filterSamples,
     linearRegression,
