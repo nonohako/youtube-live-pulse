@@ -22,8 +22,9 @@ const { loadSubscriberRecords, mergeSubscriberHistory } = require('./lib/subscri
 
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
 const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
+const isSmokeSettings = process.argv.includes('--smoke-settings');
 const isSmokeChart = process.argv.includes('--smoke-chart') || isSmokeSparseChart || isSmokeGrowthChart;
-const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart;
+const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart || isSmokeSettings;
 if (isSmokeTest) {
   app.setPath('userData', path.join(process.cwd(), '.smoke-user-data'));
 }
@@ -115,11 +116,14 @@ function createWindow() {
 
   mainWindow.loadFile(
     path.join(__dirname, 'renderer', 'index.html'),
-    isSmokeChart ? {
+    isSmokeChart || isSmokeSettings ? {
       query: {
-        smokeChart: '1',
-        chartRange: isSmokeSparseChart ? '1y' : '30d',
-        chartSelection: isSmokeGrowthChart ? '1' : '0'
+        ...(isSmokeChart ? {
+          smokeChart: '1',
+          chartRange: isSmokeSparseChart ? '1y' : '30d',
+          chartSelection: isSmokeGrowthChart ? '1' : '0'
+        } : {}),
+        ...(isSmokeSettings ? { smokeSettings: '1' } : {})
       }
     } : undefined
   );
@@ -147,7 +151,9 @@ function scheduleSmokeCapture() {
         const image = await mainWindow.webContents.capturePage();
         const outputPath = path.join(
           outputDirectory,
-          isSmokeGrowthChart
+          isSmokeSettings
+            ? 'settings-smoke.png'
+            : isSmokeGrowthChart
             ? 'subscriber-growth-smoke.png'
             : isSmokeSparseChart
             ? 'subscriber-chart-sparse-smoke.png'
@@ -343,6 +349,12 @@ function updateSettings(partial) {
   }
   if (Object.hasOwn(partial, 'pollIntervalSeconds')) {
     changed.pollIntervalSeconds = clampInterval(partial.pollIntervalSeconds);
+  }
+  if (Object.hasOwn(partial, 'subscriberChartMode')) {
+    if (!['samples', 'daily'].includes(partial.subscriberChartMode)) {
+      throw new Error('구독자 차트 표시 기준이 올바르지 않습니다.');
+    }
+    changed.subscriberChartMode = partial.subscriberChartMode;
   }
   if (Object.hasOwn(partial, 'apiKey')) {
     const apiKey = String(partial.apiKey || '').trim();

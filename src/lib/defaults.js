@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   autoOpenUpcoming: true,
   notifyNewVideos: true,
   notifyNewPosts: true,
+  subscriberChartMode: 'samples',
   apiKey: ''
 });
 

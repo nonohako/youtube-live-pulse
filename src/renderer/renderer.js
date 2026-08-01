@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         smokeParams.get('chartSelection') === '1'
       );
     }
+    if (smokeParams.has('smokeSettings')) openSettings();
   } catch (error) {
     showError(cleanError(error));
   }
@@ -48,7 +49,8 @@ function cacheElements() {
     'settings-button', 'settings-dialog', 'settings-form', 'settings-close',
     'settings-cancel', 'hide-button', 'quit-button', 'clear-api-key',
     'setting-startup', 'setting-live', 'setting-upcoming', 'setting-videos',
-    'setting-posts', 'setting-interval', 'setting-api-key', 'api-key-status',
+    'setting-posts', 'setting-subscriber-chart-mode', 'setting-interval',
+    'setting-api-key', 'api-key-status',
     'startup-help', 'app-version', 'update-button', 'update-status',
     'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
     'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content'
@@ -211,7 +213,10 @@ function renderChannelCard(channel) {
   const subscriberValue = Number.isFinite(metadata.subscriberCount)
     ? formatCompact(metadata.subscriberCount)
     : metadata.subscriberText || '확인 중';
-  const chart = renderSubscriberChart(channel.subscriberHistory || []);
+  const chart = renderSubscriberChart(
+    channel.subscriberHistory || [],
+    appState?.settings?.subscriberChartMode
+  );
   const warning = snapshot?.warnings?.length
     ? `<div class="warning-line">${escapeHtml(snapshot.warnings.join(' · '))} · 자동으로 재시도합니다.</div>`
     : channel.error
@@ -331,11 +336,14 @@ function renderPostRow(post) {
     </div>`;
 }
 
-function renderSubscriberChart(history) {
-  const samples = history
-    .filter((sample) => Number.isFinite(sample.count) && Number.isFinite(new Date(sample.at).getTime()))
-    .slice(-60);
-  if (!samples.length) {
+function renderSubscriberChart(history, displayMode = 'samples') {
+  const math = window.LivePulseChartMath;
+  const allSamples = math.normalizeSamples(history);
+  const visualSamples = displayMode === 'daily'
+    ? math.collapseSamplesByLocalDate(allSamples)
+    : allSamples;
+  const samples = visualSamples.slice(-60);
+  if (!allSamples.length) {
     return {
       delta: 0,
       deltaText: '추이 수집 대기 중',
@@ -359,10 +367,10 @@ function renderSubscriberChart(history) {
   });
   const finalPoint = points.at(-1).split(',');
   const areaPoints = `${padding},${height} ${points.join(' ')} ${width - padding},${height}`;
-  const delta = values.at(-1) - values[0];
-  const deltaText = samples.length === 1
+  const delta = allSamples.at(-1).count - allSamples[0].count;
+  const deltaText = allSamples.length === 1
     ? '오늘부터 추이 수집'
-    : `${delta >= 0 ? '+' : ''}${formatCompact(delta)} · 수집 기간`;
+    : `${delta >= 0 ? '+' : ''}${formatNumber(delta)} · 전체 수집 기간`;
 
   return {
     delta,
@@ -403,8 +411,10 @@ function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange =
   elements.subscriberImportStatus.textContent = '';
   if (selectSmokeRange) {
     const math = window.LivePulseChartMath;
-    const samples = math.filterSamples(channel.subscriberHistory || [], subscriberChartRange);
-    const completed = math.analyzeGrowth(samples).daily;
+    const completed = math.analyzeGrowthForRange(
+      channel.subscriberHistory || [],
+      subscriberChartRange
+    ).daily;
     if (completed.length) {
       subscriberChartSelection = {
         startTime: completed[Math.max(0, completed.length - 7)].dayTimestamp,
@@ -460,7 +470,12 @@ function renderSubscriberDetail() {
   });
 
   const math = window.LivePulseChartMath;
-  const samples = math.filterSamples(channel.subscriberHistory || [], subscriberChartRange);
+  const now = Date.now();
+  const displayMode = appState?.settings?.subscriberChartMode === 'daily' ? 'daily' : 'samples';
+  const displayHistory = displayMode === 'daily'
+    ? math.collapseSamplesByLocalDate(channel.subscriberHistory || [])
+    : channel.subscriberHistory || [];
+  const samples = math.filterSamples(displayHistory, subscriberChartRange, now);
   const summary = math.summarizeSamples(samples);
   if (!samples.length) {
     detailChartModel = null;
@@ -483,8 +498,13 @@ function renderSubscriberDetail() {
     all: '전체'
   }[subscriberChartRange] || '선택 기간';
 
-  const growth = math.analyzeGrowth(samples);
-  const timeAxis = math.buildTimeAxis(samples, subscriberChartRange);
+  const growth = math.analyzeGrowthForRange(
+    channel.subscriberHistory || [],
+    subscriberChartRange,
+    now
+  );
+  const timeAxis = math.buildTimeAxis(samples, subscriberChartRange, now);
+  const growthTimeAxis = math.buildCompletedDayAxis(growth.daily);
   let selectionSummary = subscriberChartSelection
     ? math.summarizeDailyRange(
       growth.daily,
@@ -501,9 +521,10 @@ function renderSubscriberDetail() {
     math.linearRegression(samples),
     timeAxis,
     growth.daily,
-    subscriberChartSelection
+    subscriberChartSelection,
+    displayMode
   );
-  const growthChart = buildGrowthChart(growth.daily, timeAxis);
+  const growthChart = buildGrowthChart(growth.daily, growthTimeAxis);
   detailChartModel = chart.model;
   elements.subscriberDetailContent.innerHTML = `
     <div class="detail-metrics">
@@ -517,7 +538,7 @@ function renderSubscriberDetail() {
       <span><i class="legend-actual"></i>실제 구독자 수</span>
       <span><i class="legend-trend"></i>선형 추세선</span>
       <span class="detail-selection-hint">날짜 클릭 · 구간 드래그</span>
-      <span>${samples.length}개 기록</span>
+      <span>${displayMode === 'daily' ? '날짜 기준' : '수집 시각 기준'} · ${samples.length}개 기록</span>
     </div>
     ${chart.svg}
     ${renderSelectionSummary(selectionSummary)}
@@ -587,7 +608,7 @@ function renderGrowthAnalysis(growth, chart) {
     growth.accelerationChange,
     '가속',
     '둔화',
-    '명/일²'
+    '명/일 차이'
   );
   const momentum = formatChangeState(
     growth.momentumChange,
@@ -603,7 +624,7 @@ function renderGrowthAnalysis(growth, chart) {
   );
   const momentumDetail = growth.momentumChange === null
     ? '일간 변화 6개 필요'
-    : `이전 3개 평균 ${formatSignedAnalysis(growth.previousMomentum, '명/일').value} → 최근 3개 ${formatSignedAnalysis(growth.recentMomentum, '명/일').value}`;
+    : `직전 3개 완료 구간 하루 평균 ${formatSignedAnalysis(growth.previousMomentum, '명/일').value} → 최근 3개 ${formatSignedAnalysis(growth.recentMomentum, '명/일').value}`;
   const slopeDetail = growth.slopeChange === null
     ? '일별 마감 기록 4개 필요'
     : `전반 ${formatSignedAnalysis(growth.earlierSlope, '명/일').value} → 후반 ${formatSignedAnalysis(growth.laterSlope, '명/일').value}`;
@@ -634,7 +655,7 @@ function renderGrowthAnalysis(growth, chart) {
         <span><i class="legend-growth-rate"></i>성장률</span>
       </div>
       ${chart}
-      <p class="growth-method">오늘은 집계가 끝나지 않았으므로 모든 성장 분석에서 제외합니다. 완료된 날짜별 마지막 측정값을 마감값으로 사용하고, 측정일 사이가 비면 증가분을 경과 일수로 나눕니다. 둔화는 최근 두 일간 증가량, 모멘텀은 최근 3개와 직전 3개 평균, 기울기는 선택 기간 전반부와 후반부 추세를 비교합니다.</p>
+      <p class="growth-method">오늘은 집계가 끝나지 않았으므로 모든 성장 분석과 증가량 차트에서 제외합니다. 완료된 날짜별 마지막 측정값을 마감값으로 사용하고, 첫 표시일의 변화는 기간 밖 직전 마감값과 비교합니다. 측정일 사이가 비면 증가분을 경과 일수로 나눕니다. 둔화는 최근 두 완료 구간의 하루 증가량 차이, 모멘텀은 최근 3개 완료 구간과 그 직전 3개 완료 구간의 하루 평균 증가량, 기울기는 선택 기간 전반부와 후반부 추세를 비교합니다.</p>
     </section>`;
 }
 
@@ -719,7 +740,10 @@ function buildGrowthChart(dailySamples, timeAxis) {
       <text class="detail-axis-label x" x="${x}" y="${height - 13}">${escapeHtml(formatChartDate(timestamp))}</text>`;
   }).join('');
   const bars = samples.map((sample) => {
-    const x = toX(sample.dayTimestamp) - barWidth / 2;
+    const x = Math.min(
+      plot.left + plotWidth - barWidth,
+      Math.max(plot.left, toX(sample.dayTimestamp) - barWidth / 2)
+    );
     const valueY = toChangeY(sample.dailyChange);
     const y = Math.min(valueY, zeroY);
     const barHeight = Math.max(1, Math.abs(zeroY - valueY));
@@ -747,7 +771,14 @@ function buildGrowthChart(dailySamples, timeAxis) {
     </div>`;
 }
 
-function buildDetailChart(samples, trend, timeAxis, dailySamples = [], selection = null) {
+function buildDetailChart(
+  samples,
+  trend,
+  timeAxis,
+  dailySamples = [],
+  selection = null,
+  displayMode = 'samples'
+) {
   const width = 840;
   const height = 320;
   const plot = { left: 68, right: 18, top: 18, bottom: 44 };
@@ -804,7 +835,7 @@ function buildDetailChart(samples, trend, timeAxis, dailySamples = [], selection
     : '<rect id="detail-selection" class="detail-selection hidden"/>';
 
   return {
-    model: { width, height, points, dayPoints, plot, timeAxis },
+    model: { width, height, points, dayPoints, plot, timeAxis, displayMode },
     svg: `
       <div class="detail-chart-wrap">
         <svg id="subscriber-detail-svg" class="detail-chart" viewBox="0 0 ${width} ${height}"
@@ -890,7 +921,9 @@ function handleDetailChartPointerMove(event) {
   tooltip.classList.remove('hidden');
   tooltip.innerHTML = `
     <strong>${escapeHtml(formatNumber(point.sample.count))}명</strong>
-    <span>${escapeHtml(formatChartDateTime(point.sample.timestamp))}</span>`;
+    <span>${escapeHtml(detailChartModel.displayMode === 'daily'
+      ? formatSelectionDate(point.sample.timestamp)
+      : formatChartDateTime(point.sample.timestamp))}</span>`;
   const pixelX = (point.x / detailChartModel.width) * bounds.width;
   const pixelY = (point.y / detailChartModel.height) * bounds.height;
   tooltip.style.left = `${Math.min(bounds.width - 84, Math.max(84, pixelX))}px`;
@@ -1040,6 +1073,9 @@ function openSettings() {
   elements.settingUpcoming.checked = settings.autoOpenUpcoming;
   elements.settingVideos.checked = settings.notifyNewVideos;
   elements.settingPosts.checked = settings.notifyNewPosts;
+  elements.settingSubscriberChartMode.value = settings.subscriberChartMode === 'daily'
+    ? 'daily'
+    : 'samples';
   elements.settingInterval.value = settings.pollIntervalSeconds;
   elements.settingApiKey.value = '';
   elements.settingApiKey.placeholder = settings.hasApiKey
@@ -1062,6 +1098,7 @@ async function handleSaveSettings(event) {
     autoOpenUpcoming: elements.settingUpcoming.checked,
     notifyNewVideos: elements.settingVideos.checked,
     notifyNewPosts: elements.settingPosts.checked,
+    subscriberChartMode: elements.settingSubscriberChartMode.value,
     pollIntervalSeconds: Number(elements.settingInterval.value)
   };
   if (elements.settingApiKey.value.trim()) update.apiKey = elements.settingApiKey.value.trim();

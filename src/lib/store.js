@@ -59,7 +59,8 @@ class JsonStore {
       settings: {
         ...DEFAULT_SETTINGS,
         ...(parsed?.settings || {}),
-        pollIntervalSeconds: clampInterval(parsed?.settings?.pollIntervalSeconds)
+        pollIntervalSeconds: clampInterval(parsed?.settings?.pollIntervalSeconds),
+        subscriberChartMode: normalizeSubscriberChartMode(parsed?.settings?.subscriberChartMode)
       },
       channels,
       events: dedupeEvents(parsed?.events, 100)
@@ -73,4 +74,8 @@ function clampInterval(value) {
   return Math.min(300, Math.max(15, Math.round(numeric)));
 }
 
-module.exports = { JsonStore, clampInterval };
+function normalizeSubscriberChartMode(value) {
+  return value === 'daily' ? 'daily' : DEFAULT_SETTINGS.subscriberChartMode;
+}
+
+module.exports = { JsonStore, clampInterval, normalizeSubscriberChartMode };

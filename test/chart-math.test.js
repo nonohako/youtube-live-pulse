@@ -4,8 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   analyzeGrowth,
+  analyzeGrowthForRange,
+  buildCompletedDayAxis,
   buildDailySeries,
   buildTimeAxis,
+  collapseSamplesByLocalDate,
   filterSamples,
   linearRegression,
   normalizeSamples,
@@ -37,6 +40,29 @@ test('선택한 날짜 구간에 포함되는 기록만 반환한다', () => {
   assert.deepEqual(filterSamples(history, '7d', now).map((sample) => sample.count), [140]);
   assert.deepEqual(filterSamples(history, '30d', now).map((sample) => sample.count), [120, 140]);
   assert.equal(filterSamples(history, 'all', now).length, 3);
+});
+
+test('7일 범위는 오늘을 포함한 로컬 달력 7일로 계산한다', () => {
+  const now = new Date(2026, 7, 1, 15, 0).getTime();
+  const history = [
+    { at: new Date(2026, 6, 25, 23, 59).toISOString(), count: 100 },
+    { at: new Date(2026, 6, 26, 0, 0).toISOString(), count: 110 },
+    { at: new Date(2026, 7, 1, 14, 0).toISOString(), count: 120 }
+  ];
+
+  assert.deepEqual(filterSamples(history, '7d', now).map((sample) => sample.count), [110, 120]);
+});
+
+test('날짜 기준 표시는 각 로컬 날짜의 마지막 값만 자정 위치에 둔다', () => {
+  const history = [
+    { at: new Date(2026, 6, 30, 9, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 6, 30, 21, 0).toISOString(), count: 115 },
+    { at: new Date(2026, 6, 31, 18, 0).toISOString(), count: 130 }
+  ];
+  const collapsed = collapseSamplesByLocalDate(history);
+
+  assert.deepEqual(collapsed.map((sample) => sample.count), [115, 130]);
+  assert.deepEqual(collapsed.map((sample) => new Date(sample.timestamp).getHours()), [0, 0]);
 });
 
 test('구독자 선형 추세와 기간 요약을 계산한다', () => {
@@ -171,6 +197,42 @@ test('완료되지 않은 오늘 기록은 성장 분석에서 제외한다', ()
   assert.equal(analysis.latestDailyChange, 15);
   assert.equal(analysis.excludedCurrentDay, true);
   assert.equal(analysis.latestCompletedAt, new Date(2026, 6, 31, 0, 0).getTime());
+});
+
+test('기간 밖 직전 마감값으로 첫 표시일 변화와 7일 모멘텀을 계산한다', () => {
+  const now = new Date(2026, 7, 1, 15, 0).getTime();
+  const counts = [100, 110, 120, 130, 140, 150, 160, 999];
+  const history = counts.map((count, index) => ({
+    at: new Date(2026, 6, 25 + index, 20, 0).toISOString(),
+    count
+  }));
+  const analysis = analyzeGrowthForRange(history, '7d', now);
+  const firstDay = analysis.daily[0].dayTimestamp;
+  const firstDaySummary = summarizeDailyRange(analysis.daily, firstDay, firstDay);
+
+  assert.deepEqual(analysis.daily.map((sample) => sample.count), [110, 120, 130, 140, 150, 160]);
+  assert.equal(analysis.daily[0].rawChange, 10);
+  assert.equal(analysis.previousMomentum, 10);
+  assert.equal(analysis.recentMomentum, 10);
+  assert.equal(analysis.momentumChange, 0);
+  assert.equal(firstDaySummary.totalChange, 10);
+});
+
+test('성장 차트 축은 오늘을 넣지 않고 마지막 완료일에서 끝난다', () => {
+  const now = new Date(2026, 7, 1, 15, 0).getTime();
+  const history = [
+    { at: new Date(2026, 6, 29, 20, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 6, 30, 20, 0).toISOString(), count: 110 },
+    { at: new Date(2026, 6, 31, 20, 0).toISOString(), count: 120 },
+    { at: new Date(2026, 7, 1, 14, 0).toISOString(), count: 999 }
+  ];
+  const analysis = analyzeGrowthForRange(history, '7d', now);
+  const axis = buildCompletedDayAxis(analysis.daily);
+  const lastCompleted = new Date(2026, 6, 31, 0, 0).getTime();
+
+  assert.equal(axis.endTime, lastCompleted);
+  assert.equal(axis.ticks.at(-1), lastCompleted);
+  assert.ok(axis.ticks.every((tick) => tick < new Date(2026, 7, 1, 0, 0).getTime()));
 });
 
 test('클릭하거나 드래그한 완료일 구간의 평균과 성장률을 요약한다', () => {

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { JsonStore, clampInterval } = require('../src/lib/store');
+const { JsonStore, clampInterval, normalizeSubscriberChartMode } = require('../src/lib/store');
 const { TARGET_CHANNEL_ID } = require('../src/lib/defaults');
 
 test('첫 실행 시 기본 채널과 설정을 만든다', (context) => {
@@ -18,7 +18,14 @@ test('첫 실행 시 기본 채널과 설정을 만든다', (context) => {
   assert.equal(data.channels[0].id, TARGET_CHANNEL_ID);
   assert.equal(data.settings.pollIntervalSeconds, 30);
   assert.equal(data.settings.startAtLogin, true);
+  assert.equal(data.settings.subscriberChartMode, 'samples');
   assert.equal(fs.existsSync(filePath), true);
+});
+
+test('구독자 차트 표시 기준은 허용된 날짜 기준만 보존한다', () => {
+  assert.equal(normalizeSubscriberChartMode('daily'), 'daily');
+  assert.equal(normalizeSubscriberChartMode('samples'), 'samples');
+  assert.equal(normalizeSubscriberChartMode('invalid'), 'samples');
 });
 
 test('확인 주기를 15~300초 범위로 제한한다', () => {

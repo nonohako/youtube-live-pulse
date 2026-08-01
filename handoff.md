@@ -4,15 +4,19 @@ Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version: `1.5.0`
+- Application version in source: `1.6.0` release candidate
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.5.0`
+- Current verified production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.5.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.5.0 GitHub Actions build, all 33 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. This release adds channel-scoped `.xlsx` subscriber-history import from the subscriber detail dialog. It reads sheets containing `날짜` and `전체 구독자`, ignores summary rows and the derived `신규 구독자` column, stores new dates at local 00:00, and never overwrites a local date that already has an app sample. Duplicate dates inside one workbook resolve to the last valid row, and the result reports added, preserved, invalid and duplicate counts. Workbook parsing stays in the main process behind a narrow preload IPC method.
+The v1.6.0 source candidate fixes preset ranges to use inclusive local-calendar dates and carries one hidden prior close into analytics so the first displayed day has a valid change baseline. The growth chart now ends at the latest completed day instead of reserving a blank current-day slot. Channel cards calculate total subscriber change from the complete stored history even though their sparkline remains bounded. Settings now offer `수집 시각 기준` and `날짜 기준`; the latter plots only each date’s last value without modifying stored raw history. Growth wording explains momentum as the recent three completed intervals’ average versus the preceding three, and presents acceleration as a difference between daily rates instead of the opaque `명/일²` label.
+
+Local verification covers all 38 tests, syntax checks, a warning-free live RESCENE public-channel diagnostic, the x64 NSIS build, and packaged dashboard, growth-chart, date-mode and settings-dialog smoke captures. `dist/latest.yml`, packaged `resources/app-update.yml`, packaged version `1.6.0` and the local installer SHA-512 were verified. GitHub publication and verification remain before this candidate replaces v1.5.0 as production.
+
+The v1.5.0 GitHub Actions build, all 33 tests and Release publication completed successfully. The published non-draft Release contains the installer, block map and `latest.yml`; the public installer was downloaded again and its SHA-512 matched the published update metadata. That release added channel-scoped `.xlsx` subscriber-history import from the subscriber detail dialog. It reads sheets containing `날짜` and `전체 구독자`, ignores summary rows and the derived `신규 구독자` column, stores new dates at local 00:00, and never overwrites a local date that already has an app sample. Duplicate dates inside one workbook resolve to the last valid row, and the result reports added, preserved, invalid and duplicate counts. Workbook parsing stays in the main process behind a narrow preload IPC method.
 
 Local verification also covered both provided workbooks (365 valid RESCENE dates and 176 valid 안원잘부 dates), a live RESCENE public-channel diagnostic without warnings, `npm audit` with zero vulnerabilities, the x64 NSIS build, packaged dashboard smoke test and a packaged-ASAR import of the 365-row workbook. `dist/latest.yml`, packaged `resources/app-update.yml` and the local installer SHA-512 were verified before tagging.
 
@@ -35,6 +39,9 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Shows actual subscriber values, a linear trendline, range change, high, low, daily trend and point tooltips.
 - Calculates daily change and growth rate, day-over-day acceleration/deceleration, three-period momentum change and first-half-versus-second-half slope change, with a secondary bar-and-line chart.
 - Excludes the incomplete current local day from analytics and supports click/drag completed-date selection with cumulative, average and slope summaries.
+- Uses an earlier close as a hidden range baseline so the first visible completed day can be selected and included in momentum, while keeping the incomplete current day off the growth-chart axis.
+- Lets users plot all collection timestamps or one final value per local date without mutating stored history.
+- Reports channel-card total subscriber change over the full stored history independently from the bounded sparkline.
 - Imports channel-specific historical subscriber totals from `.xlsx` without overwriting dates already stored by the app.
 - Tracks recently seen video and post IDs so feed reordering cannot create repeated notifications.
 - Removes already-stored duplicate recent notifications during the v2 store migration.

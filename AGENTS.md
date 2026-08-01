@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 after the verified v1.5.0 channel-scoped subscriber-history Excel import release.
+Last maintained: 2026-08-01 for the v1.6.0 calendar-range analytics and subscriber-chart display-mode release candidate.
 
 ## Project mission
 
@@ -53,6 +53,8 @@ Useful packaged-app smoke test:
 
 ```powershell
 .\dist\win-unpacked\라이브 펄스.exe --smoke-test
+.\dist\win-unpacked\라이브 펄스.exe --smoke-growth-chart
+.\dist\win-unpacked\라이브 펄스.exe --smoke-settings
 ```
 
 ## Architecture
@@ -88,6 +90,10 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - When recorded dates have gaps, divide change and growth by elapsed local calendar days; never invent or interpolate missing daily closes.
 - Date clicks select one completed day. Pointer drags select the inclusive span of actual completed-day records and must work in either direction.
 - A selected-day change includes that day’s change from the prior recorded close. If no prior close exists, show insufficient data instead of fabricating a baseline.
+- Preset ranges are inclusive local-calendar windows. For example, a 7-day range on August 1 starts on July 26, and analytics may use the last close before July 26 only as a hidden baseline for July 26 changes.
+- The growth-chart axis ends on the latest completed local date and must not reserve space or a tick for the incomplete current day.
+- `subscriberChartMode` accepts only `samples` or `daily`. Daily mode changes presentation only: it plots each local date’s final sample at local 00:00 without discarding raw stored samples.
+- Channel-card total change always compares the first and last valid samples in the full stored history; limiting sparkline points must not limit the reported total.
 - Subscriber-history imports are explicitly scoped to the channel whose detail dialog opened the file picker; never infer the target channel from a file name.
 - Import `.xlsx` rows only from sheets containing `날짜` and `전체 구독자` headers. Ignore `합계` and `평균`; `신규 구독자` is not a source of truth.
 - Store imported dates at local 00:00. If any sample already exists on that local date, keep the existing data and skip the imported row.

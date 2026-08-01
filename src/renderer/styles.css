@@ -36,7 +36,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -45,7 +46,8 @@ button {
 }
 
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid rgba(255, 77, 109, 0.8);
   outline-offset: 2px;
 }
@@ -935,6 +937,8 @@ dialog::backdrop {
 }
 
 #settings-form {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   padding: 24px;
 }
 
@@ -1608,6 +1612,17 @@ dialog::backdrop {
 .switch:checked::after {
   left: 19px;
   background: #fff;
+}
+
+.settings-select {
+  width: 138px;
+  flex: 0 0 138px;
+  padding: 8px 9px;
+  border: 1px solid #3a414e;
+  border-radius: 9px;
+  color: var(--text);
+  background: #1b1f28;
+  cursor: pointer;
 }
 
 .field-group {

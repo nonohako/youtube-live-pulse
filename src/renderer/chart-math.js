@@ -29,10 +29,44 @@
 
   function filterSamples(history, range = '30d', now = Date.now()) {
     const samples = normalizeSamples(history);
-    const days = RANGE_DAYS[range];
-    if (!days) return samples;
-    const cutoff = range === '1y' ? shiftLocalMonths(now, -12) : now - days * DAY_MS;
+    const cutoff = rangeStartTime(range, now);
+    if (!Number.isFinite(cutoff)) return samples;
     return samples.filter((sample) => sample.timestamp >= cutoff);
+  }
+
+  function rangeStartTime(range = '30d', now = Date.now()) {
+    const numericNow = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+    if (range === '1y') return startOfLocalDay(shiftLocalMonths(numericNow, -12));
+    const days = RANGE_DAYS[range];
+    if (!days) return null;
+    return shiftLocalDays(startOfLocalDay(numericNow), -(days - 1));
+  }
+
+  function filterSamplesWithBaseline(history, range = '30d', now = Date.now()) {
+    const samples = normalizeSamples(history);
+    const cutoff = rangeStartTime(range, now);
+    if (!Number.isFinite(cutoff)) return samples;
+    const firstVisibleIndex = samples.findIndex((sample) => sample.timestamp >= cutoff);
+    if (firstVisibleIndex < 0) return samples.length ? [samples.at(-1)] : [];
+    return samples.slice(Math.max(0, firstVisibleIndex - 1));
+  }
+
+  function collapseSamplesByLocalDate(history) {
+    const closes = [];
+    for (const sample of normalizeSamples(history)) {
+      const timestamp = startOfLocalDay(sample.timestamp);
+      const close = {
+        at: new Date(timestamp).toISOString(),
+        timestamp,
+        count: sample.count
+      };
+      if (closes.at(-1)?.timestamp === timestamp) {
+        closes[closes.length - 1] = close;
+      } else {
+        closes.push(close);
+      }
+    }
+    return closes;
   }
 
   function buildTimeAxis(samples, _range = '30d', now = Date.now()) {
@@ -45,6 +79,21 @@
       startTime: start,
       endTime: Math.max(end, start + 1),
       ticks: buildCalendarTicks(start, end, spanDays)
+    };
+  }
+
+  function buildCompletedDayAxis(dailySamples) {
+    const days = (Array.isArray(dailySamples) ? dailySamples : [])
+      .map((sample) => Number(sample?.dayTimestamp))
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right);
+    const start = days[0] ?? startOfLocalDay(Date.now());
+    const last = days.at(-1) ?? start;
+    const spanDays = Math.max(0, localCalendarDayDifference(start, last));
+    return {
+      startTime: start,
+      endTime: Math.max(last, start + 1),
+      ticks: buildCalendarTicks(start, last, spanDays)
     };
   }
 
@@ -167,10 +216,16 @@
     });
   }
 
-  function analyzeGrowth(samples, now = Date.now()) {
+  function analyzeGrowth(samples, now = Date.now(), visibleStartTime = null) {
     const currentDayStart = startOfLocalDay(now);
+    const visibleDayStart = visibleStartTime !== null
+      && visibleStartTime !== undefined
+      && Number.isFinite(Number(visibleStartTime))
+      ? startOfLocalDay(Number(visibleStartTime))
+      : null;
     const allDaily = buildDailySeries(samples);
-    const daily = allDaily.filter((sample) => sample.dayTimestamp < currentDayStart);
+    const daily = allDaily.filter((sample) => sample.dayTimestamp < currentDayStart
+      && (visibleDayStart === null || sample.dayTimestamp >= visibleDayStart));
     const changes = daily.filter((sample) => Number.isFinite(sample.dailyChange));
     const latest = changes.at(-1);
     const previous = changes.at(-2);
@@ -219,6 +274,14 @@
       laterSlope,
       slopeChange
     };
+  }
+
+  function analyzeGrowthForRange(history, range = '30d', now = Date.now()) {
+    return analyzeGrowth(
+      filterSamplesWithBaseline(history, range, now),
+      now,
+      rangeStartTime(range, now)
+    );
   }
 
   function summarizeDailyRange(dailySamples, startTime, endTime) {
@@ -296,11 +359,16 @@
   return {
     RANGE_DAYS,
     analyzeGrowth,
+    analyzeGrowthForRange,
+    buildCompletedDayAxis,
     buildDailySeries,
     buildTimeAxis,
+    collapseSamplesByLocalDate,
     filterSamples,
+    filterSamplesWithBaseline,
     linearRegression,
     normalizeSamples,
+    rangeStartTime,
     summarizeDailyRange,
     summarizeSamples
   };
