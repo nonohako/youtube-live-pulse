@@ -421,6 +421,8 @@ function renderSubscriberDetail() {
     math.linearRegression(samples),
     math.buildTimeAxis(samples, subscriberChartRange)
   );
+  const growth = math.analyzeGrowth(samples);
+  const growthChart = buildGrowthChart(growth.daily, math.buildTimeAxis(samples, subscriberChartRange));
   detailChartModel = chart.model;
   elements.subscriberDetailContent.innerHTML = `
     <div class="detail-metrics">
@@ -435,7 +437,8 @@ function renderSubscriberDetail() {
       <span><i class="legend-trend"></i>선형 추세선</span>
       <span>${samples.length}개 기록</span>
     </div>
-    ${chart.svg}`;
+    ${chart.svg}
+    ${renderGrowthAnalysis(growth, growthChart)}`;
 }
 
 function renderDetailMetric(label, value, className = '') {
@@ -443,6 +446,169 @@ function renderDetailMetric(label, value, className = '') {
     <div class="detail-metric">
       <span>${escapeHtml(label)}</span>
       <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+    </div>`;
+}
+
+function renderGrowthAnalysis(growth, chart) {
+  const dailyChange = formatSignedAnalysis(growth.latestDailyChange, '명/일');
+  const growthRate = formatSignedAnalysis(growth.latestGrowthRate, '%/일', formatPercent);
+  const acceleration = formatChangeState(
+    growth.accelerationChange,
+    '가속',
+    '둔화',
+    '명/일²'
+  );
+  const momentum = formatChangeState(
+    growth.momentumChange,
+    '강화',
+    '약화',
+    '명/일'
+  );
+  const slope = formatChangeState(
+    growth.slopeChange,
+    '상승',
+    '하락',
+    '명/일'
+  );
+  const momentumDetail = growth.momentumChange === null
+    ? '일간 변화 6개 필요'
+    : `이전 3개 평균 ${formatSignedAnalysis(growth.previousMomentum, '명/일').value} → 최근 3개 ${formatSignedAnalysis(growth.recentMomentum, '명/일').value}`;
+  const slopeDetail = growth.slopeChange === null
+    ? '일별 마감 기록 4개 필요'
+    : `전반 ${formatSignedAnalysis(growth.earlierSlope, '명/일').value} → 후반 ${formatSignedAnalysis(growth.laterSlope, '명/일').value}`;
+
+  return `
+    <section class="growth-analysis" aria-labelledby="growth-analysis-title">
+      <div class="growth-analysis-header">
+        <div>
+          <div class="eyebrow">GROWTH SIGNALS</div>
+          <h3 id="growth-analysis-title">성장 분석</h3>
+        </div>
+        <span>${growth.daily.length}개 일별 마감 기록</span>
+      </div>
+      <div class="growth-metrics">
+        ${renderGrowthMetric('일일 증가량', dailyChange.value, dailyChange.className, '직전 기록일 이후 하루 평균')}
+        ${renderGrowthMetric('성장률 추이', growthRate.value, growthRate.className, '최근 일일 증가율')}
+        ${renderGrowthMetric('증가세 둔화', acceleration.value, acceleration.className, '최근 증가량 − 직전 증가량')}
+        ${renderGrowthMetric('모멘텀 변화', momentum.value, momentum.className, momentumDetail)}
+        ${renderGrowthMetric('기울기 변화', slope.value, slope.className, slopeDetail)}
+      </div>
+      <div class="growth-chart-legend">
+        <strong>일별 증가량 · 성장률 추이</strong>
+        <span><i class="legend-growth-bar"></i>증가량</span>
+        <span><i class="legend-growth-rate"></i>성장률</span>
+      </div>
+      ${chart}
+      <p class="growth-method">날짜별 마지막 측정값을 일별 마감값으로 사용합니다. 측정일 사이가 비면 증가분을 경과 일수로 나눕니다. 둔화는 최근 두 일간 증가량, 모멘텀은 최근 3개와 직전 3개 평균, 기울기는 선택 기간 전반부와 후반부 추세를 비교합니다.</p>
+    </section>`;
+}
+
+function renderGrowthMetric(label, value, className, detail) {
+  return `
+    <div class="growth-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
+      <small title="${escapeAttribute(detail)}">${escapeHtml(detail)}</small>
+    </div>`;
+}
+
+function formatSignedAnalysis(value, suffix, formatter = formatTrend) {
+  if (!Number.isFinite(value)) return { value: '데이터 부족', className: '' };
+  const rounded = Math.abs(value) < 1e-9 ? 0 : value;
+  return {
+    value: `${rounded > 0 ? '+' : ''}${formatter(rounded)}${suffix}`,
+    className: rounded > 0 ? 'up' : rounded < 0 ? 'down' : ''
+  };
+}
+
+function formatChangeState(value, positiveLabel, negativeLabel, suffix) {
+  const formatted = formatSignedAnalysis(value, suffix);
+  if (!Number.isFinite(value)) return formatted;
+  const label = value > 0 ? positiveLabel : value < 0 ? negativeLabel : '변화 없음';
+  return { ...formatted, value: `${label} ${formatted.value}` };
+}
+
+function buildGrowthChart(dailySamples, timeAxis) {
+  const samples = dailySamples.filter((sample) => Number.isFinite(sample.dailyChange));
+  if (!samples.length) {
+    return `
+      <div class="growth-chart-empty">
+        일별 증가량 차트는 서로 다른 날짜의 기록이 2개 이상 모이면 표시됩니다.
+      </div>`;
+  }
+
+  const width = 840;
+  const height = 210;
+  const plot = { left: 68, right: 58, top: 18, bottom: 40 };
+  const plotWidth = width - plot.left - plot.right;
+  const plotHeight = height - plot.top - plot.bottom;
+  const startTime = timeAxis.startTime;
+  const endTime = timeAxis.endTime;
+  const timeRange = Math.max(1, endTime - startTime);
+  const toX = (timestamp) => plot.left + ((timestamp - startTime) / timeRange) * plotWidth;
+
+  const changes = samples.map((sample) => sample.dailyChange);
+  const changeMin = Math.min(0, ...changes);
+  const changeMax = Math.max(0, ...changes);
+  const changePadding = Math.max(1, (changeMax - changeMin) * 0.12);
+  const minChange = changeMin - changePadding;
+  const maxChange = changeMax + changePadding;
+  const changeRange = Math.max(1, maxChange - minChange);
+  const toChangeY = (value) => plot.top + ((maxChange - value) / changeRange) * plotHeight;
+  const zeroY = toChangeY(0);
+
+  const rates = samples.map((sample) => sample.growthRate).filter(Number.isFinite);
+  const rateMin = Math.min(0, ...rates);
+  const rateMax = Math.max(0, ...rates);
+  const ratePadding = Math.max(0.001, (rateMax - rateMin) * 0.12);
+  const minRate = rateMin - ratePadding;
+  const maxRate = rateMax + ratePadding;
+  const rateRange = Math.max(0.001, maxRate - minRate);
+  const toRateY = (value) => plot.top + ((maxRate - value) / rateRange) * plotHeight;
+  const barWidth = Math.max(1, Math.min(20, plotWidth / Math.max(8, samples.length * 1.7)));
+
+  const yTicks = Array.from({ length: 4 }, (_, index) => {
+    const ratio = index / 3;
+    const y = plot.top + ratio * plotHeight;
+    const changeValue = maxChange - ratio * changeRange;
+    const rateValue = maxRate - ratio * rateRange;
+    return `
+      <line class="detail-grid" x1="${plot.left}" y1="${y}" x2="${plot.left + plotWidth}" y2="${y}"/>
+      <text class="detail-axis-label y" x="${plot.left - 10}" y="${y + 3}">${escapeHtml(formatTrend(changeValue))}</text>
+      <text class="detail-axis-label growth-rate-axis" x="${plot.left + plotWidth + 10}" y="${y + 3}">${escapeHtml(formatPercent(rateValue))}%</text>`;
+  }).join('');
+  const xTicks = timeAxis.ticks.map((timestamp) => {
+    const x = toX(timestamp);
+    return `
+      <line class="detail-tick" x1="${x}" y1="${plot.top + plotHeight}" x2="${x}" y2="${plot.top + plotHeight + 5}"/>
+      <text class="detail-axis-label x" x="${x}" y="${height - 13}">${escapeHtml(formatChartDate(timestamp))}</text>`;
+  }).join('');
+  const bars = samples.map((sample) => {
+    const x = toX(sample.dayTimestamp) - barWidth / 2;
+    const valueY = toChangeY(sample.dailyChange);
+    const y = Math.min(valueY, zeroY);
+    const barHeight = Math.max(1, Math.abs(zeroY - valueY));
+    const className = sample.dailyChange >= 0 ? 'up' : 'down';
+    return `<rect class="growth-bar ${className}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2"><title>${escapeHtml(formatChartDate(sample.dayTimestamp))}: ${escapeHtml(formatSignedAnalysis(sample.dailyChange, '명/일').value)}</title></rect>`;
+  }).join('');
+  const ratePoints = samples.filter((sample) => Number.isFinite(sample.growthRate)).map((sample) => ({
+    x: toX(sample.dayTimestamp),
+    y: toRateY(sample.growthRate),
+    sample
+  }));
+  const rateLine = ratePoints.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+  const rateDots = ratePoints.map((point) => `<circle class="growth-rate-dot" cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3"><title>${escapeHtml(formatChartDate(point.sample.dayTimestamp))}: ${escapeHtml(formatSignedAnalysis(point.sample.growthRate, '%/일', formatPercent).value)}</title></circle>`).join('');
+
+  return `
+    <div class="growth-chart-wrap">
+      <svg class="growth-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="일별 구독자 증가량과 성장률 추이">
+        ${yTicks}
+        ${xTicks}
+        <line class="growth-zero-line" x1="${plot.left}" y1="${zeroY}" x2="${plot.left + plotWidth}" y2="${zeroY}"/>
+        ${bars}
+        <polyline class="growth-rate-line" points="${rateLine}"/>
+        ${rateDots}
+      </svg>
     </div>`;
 }
 
@@ -727,6 +893,14 @@ function formatTrend(value) {
   if (!Number.isFinite(numeric)) return '0';
   const absolute = Math.abs(numeric);
   const maximumFractionDigits = absolute < 1 ? 2 : absolute < 10 ? 1 : 0;
+  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits }).format(numeric);
+}
+
+function formatPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '—';
+  const absolute = Math.abs(numeric);
+  const maximumFractionDigits = absolute < 0.01 ? 3 : absolute < 1 ? 2 : 1;
   return new Intl.NumberFormat('ko-KR', { maximumFractionDigits }).format(numeric);
 }
 

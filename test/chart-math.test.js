@@ -3,6 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  analyzeGrowth,
+  buildDailySeries,
   buildTimeAxis,
   filterSamples,
   linearRegression,
@@ -116,4 +118,40 @@ test('보유 기간이 길어지면 현지 자정 기준의 읽기 좋은 고정
     axis.ticks.slice(1).map((tick, index) => (tick - axis.ticks[index]) / DAY_MS),
     Array(axis.ticks.length - 1).fill(5)
   );
+});
+
+test('하루의 마지막 기록으로 일별 증가량과 성장률을 계산한다', () => {
+  const samples = [
+    { at: new Date(2026, 6, 28, 5, 48).toISOString(), count: 100 },
+    { at: new Date(2026, 6, 28, 20, 10).toISOString(), count: 105 },
+    { at: new Date(2026, 6, 30, 18, 0).toISOString(), count: 125 }
+  ];
+  const daily = buildDailySeries(samples);
+
+  assert.equal(daily.length, 2);
+  assert.equal(daily[0].count, 105);
+  assert.equal(daily[0].dailyChange, null);
+  assert.equal(daily[1].elapsedDays, 2);
+  assert.equal(daily[1].rawChange, 20);
+  assert.equal(daily[1].dailyChange, 10);
+  assert.ok(Math.abs(daily[1].growthRate - (20 / 105 / 2) * 100) < 1e-10);
+});
+
+test('둔화, 3일 모멘텀과 기간 전후반 기울기 변화를 계산한다', () => {
+  const counts = [100, 110, 125, 137, 145, 150, 152];
+  const samples = counts.map((count, index) => ({
+    at: new Date(2026, 6, 20 + index, 20, 0).toISOString(),
+    count
+  }));
+  const analysis = analyzeGrowth(samples);
+
+  assert.equal(analysis.latestDailyChange, 2);
+  assert.ok(Math.abs(analysis.latestGrowthRate - (2 / 150) * 100) < 1e-10);
+  assert.equal(analysis.accelerationChange, -3);
+  assert.ok(Math.abs(analysis.previousMomentum - (10 + 15 + 12) / 3) < 1e-10);
+  assert.equal(analysis.recentMomentum, 5);
+  assert.ok(Math.abs(analysis.momentumChange - (5 - (10 + 15 + 12) / 3)) < 1e-10);
+  assert.ok(Number.isFinite(analysis.earlierSlope));
+  assert.ok(Number.isFinite(analysis.laterSlope));
+  assert.ok(analysis.slopeChange < 0);
 });
