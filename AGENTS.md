@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 after the verified v1.6.2 Windows taskbar pin identity and stale-shortcut repair release.
+Last maintained: 2026-08-01 for the v1.6.3 owned legacy-Electron taskbar shortcut migration.
 
 ## Project mission
 
@@ -105,7 +105,7 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Give each window explicit taskbar relaunch details: the current AppUserModelID, executable-plus-app relaunch command, product display name and product icon.
 - Packaged installs use the product executable as the relaunch command and icon; development runs include the application path and packaged `assets/pulse.ico` so a newly pinned item does not relaunch Electron without Live Pulse or fall back to Electron's icon.
 - At startup, an installed copy may repair the exact `라이브 펄스.lnk` Start Menu shortcut to its current executable only when the shortcut already targets the product executable name and the running executable is in the default NSIS install location. Never rewrite an unrelated shortcut.
-- Do not delete or rewrite an existing user-pinned taskbar item automatically. A stale Electron pin must be unpinned and pinned again once after installing the fixed version.
+- Never delete or rewrite an arbitrary user-pinned taskbar item. An installed copy may update an `Electron.lnk` in place only when it both targets `electron.exe` and carries Live Pulse’s exact production AppUserModelID; migrate its target, working directory, empty arguments, icon and toast identity to the current product executable.
 
 ## Windows notification invariants
 

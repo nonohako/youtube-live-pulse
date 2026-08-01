@@ -7,10 +7,12 @@ const {
   APP_USER_MODEL_ID,
   TOAST_ACTIVATOR_CLSID,
   buildDefaultInstallExecutablePath,
+  buildLegacyElectronShortcutPaths,
   buildStartMenuShortcutPath,
   buildWindowsTaskbarDetails,
   configureWindowsNotificationIdentity,
   quoteWindowsCommandArgument,
+  repairOwnedLegacyElectronShortcuts,
   sameWindowsPath
 } = require('../src/lib/windows-notifications');
 
@@ -54,6 +56,23 @@ test('기본 NSIS 설치 실행 파일 경로를 LocalAppData 아래에서 만�
     path.join(localAppDataPath, 'Programs', 'youtube-live-pulse', '라이브 펄스.exe')
   );
   assert.equal(buildDefaultInstallExecutablePath(''), null);
+});
+
+test('이전 Electron 바로가기는 시작 메뉴와 작업표시줄 고정 위치에서만 찾는다', () => {
+  const appDataPath = 'C:\\Users\\tester\\AppData\\Roaming';
+  assert.deepEqual(buildLegacyElectronShortcutPaths(appDataPath), [
+    path.join(appDataPath, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Electron.lnk'),
+    path.join(
+      appDataPath,
+      'Microsoft',
+      'Internet Explorer',
+      'Quick Launch',
+      'User Pinned',
+      'TaskBar',
+      'Electron.lnk'
+    )
+  ]);
+  assert.deepEqual(buildLegacyElectronShortcutPaths(''), []);
 });
 
 test('Windows 실행 파일 경로는 대소문자 차이를 무시해 비교한다', () => {
@@ -126,6 +145,46 @@ test('기본 설치 위치라도 다른 제품 바로가기는 복구하지 않�
 
   assert.equal(result.mode, 'development');
   assert.equal(harness.calls.some((call) => call[0] === 'write'), false);
+});
+
+test('설치본 시작 시 production 앱 ID를 가진 기존 작업표시줄 Electron 링크를 복구한다', () => {
+  const appDataPath = 'C:\\Users\\tester\\AppData\\Roaming';
+  const localAppDataPath = 'C:\\Users\\tester\\AppData\\Local';
+  const execPath = buildDefaultInstallExecutablePath(localAppDataPath);
+  const [legacyStartMenuPath, legacyTaskbarPath] = buildLegacyElectronShortcutPaths(appDataPath);
+  const productShortcutPath = buildStartMenuShortcutPath(appDataPath);
+  const harness = createHarness({ target: execPath });
+  harness.shell.readShortcutLink = (shortcutPath) => {
+    harness.calls.push(['read', shortcutPath]);
+    if (shortcutPath === productShortcutPath) return { target: execPath };
+    if (shortcutPath === legacyTaskbarPath) {
+      return {
+        target: 'C:\\project\\node_modules\\electron\\dist\\electron.exe',
+        appUserModelId: APP_USER_MODEL_ID
+      };
+    }
+    if (shortcutPath === legacyStartMenuPath) {
+      throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+    }
+    throw new Error(`unexpected shortcut: ${shortcutPath}`);
+  };
+
+  const result = configureWindowsNotificationIdentity({
+    ...harness,
+    platform: 'win32',
+    execPath,
+    appDataPath,
+    localAppDataPath,
+    legacyShortcutPathExists: () => true
+  });
+
+  assert.deepEqual(result.legacyShortcutsRepaired, [legacyTaskbarPath]);
+  const taskbarWrite = harness.calls.find(
+    (call) => call[0] === 'write' && call[1] === legacyTaskbarPath
+  );
+  assert.equal(taskbarWrite[3].target, execPath);
+  assert.equal(taskbarWrite[3].args, '');
+  assert.equal(taskbarWrite[3].appUserModelId, APP_USER_MODEL_ID);
 });
 
 test('개발 실행은 production 알림 등록을 덮어쓰지 않도록 electron.exe 경로를 쓴다', () => {
@@ -220,4 +279,89 @@ test('Windows 재실행 명령 인수의 공백, 따옴표와 끝 역슬래시�
   assert.equal(quoteWindowsCommandArgument('C:\\plain.exe'), 'C:\\plain.exe');
   assert.equal(quoteWindowsCommandArgument('C:\\with space\\'), '"C:\\with space\\\\"');
   assert.equal(quoteWindowsCommandArgument('say"hello'), '"say\\"hello"');
+});
+
+test('우리 production 앱 ID를 가진 이전 Electron 고정 링크만 제품 EXE로 복구한다', () => {
+  const execPath = 'C:\\Users\\tester\\AppData\\Local\\Programs\\youtube-live-pulse\\라이브 펄스.exe';
+  const ownedPath = 'C:\\Pinned\\Electron.lnk';
+  const unrelatedPath = 'C:\\Pinned\\Other.lnk';
+  const calls = [];
+  const shell = {
+    readShortcutLink(shortcutPath) {
+      calls.push(['read', shortcutPath]);
+      if (shortcutPath === ownedPath) {
+        return {
+          target: 'C:\\project\\node_modules\\electron\\dist\\electron.exe',
+          appUserModelId: APP_USER_MODEL_ID
+        };
+      }
+      return {
+        target: 'C:\\other\\electron.exe',
+        appUserModelId: 'electron.app.Other'
+      };
+    },
+    writeShortcutLink(shortcutPath, operation, details) {
+      calls.push(['write', shortcutPath, operation, details]);
+      return true;
+    }
+  };
+
+  const result = repairOwnedLegacyElectronShortcuts({
+    shell,
+    shortcutPaths: [ownedPath, unrelatedPath],
+    execPath
+  });
+
+  assert.deepEqual(result, { repairedPaths: [ownedPath], warning: '' });
+  const writes = calls.filter((call) => call[0] === 'write');
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0], ['write', ownedPath, 'update', {
+    target: execPath,
+    cwd: path.dirname(execPath),
+    args: '',
+    description: '라이브 펄스',
+    icon: execPath,
+    iconIndex: 0,
+    appUserModelId: APP_USER_MODEL_ID,
+    toastActivatorClsid: TOAST_ACTIVATOR_CLSID
+  }]);
+});
+
+test('이전 Electron 바로가기 복구 실패는 경고로 반환하고 계속 진행한다', () => {
+  const shell = {
+    readShortcutLink() {
+      return {
+        target: 'C:\\project\\electron.exe',
+        appUserModelId: APP_USER_MODEL_ID
+      };
+    },
+    writeShortcutLink() {
+      return false;
+    }
+  };
+  const result = repairOwnedLegacyElectronShortcuts({
+    shell,
+    shortcutPaths: ['C:\\Pinned\\Electron.lnk'],
+    execPath: 'C:\\Apps\\라이브 펄스.exe'
+  });
+
+  assert.deepEqual(result.repairedPaths, []);
+  assert.match(result.warning, /갱신 실패/);
+});
+
+test('존재하지 않는 이전 Electron 바로가기는 읽지 않고 조용히 건너뛴다', () => {
+  let readCalled = false;
+  const result = repairOwnedLegacyElectronShortcuts({
+    shell: {
+      readShortcutLink() {
+        readCalled = true;
+      }
+    },
+    shortcutPaths: ['C:\\Missing\\Electron.lnk'],
+    execPath: 'C:\\Apps\\라이브 펄스.exe',
+    pathExists: () => false
+  });
+
+  assert.equal(readCalled, false);
+  assert.deepEqual(result, { repairedPaths: [], warning: '' });
 });

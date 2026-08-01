@@ -4,15 +4,21 @@ Last updated: 2026-08-01
 
 ## Current production state
 
-- Application version: `1.6.2`
+- Application version: `1.6.3`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.2`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.2` (v1.6.3 verification and publication pending)
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
 
-The v1.6.2 source fixes a pinned taskbar item falling back to Electron’s default icon after the Live Pulse window is hidden. Each window now publishes explicit Windows taskbar relaunch details: AppUserModelID, executable-plus-app command, product name and product icon. A default-location installed copy also repairs an existing `라이브 펄스.lnk` Start Menu shortcut whose target still has the product executable name but points at a stale user path; unrelated shortcuts remain untouched. Windows does not permit the app to safely replace an already pinned Electron item, so that one stale pin must be unpinned and Live Pulse pinned again after the fixed version is installed.
+The v1.6.3 source fixes the remaining taskbar activation regression found after v1.6.2. The user’s existing pinned `Electron.lnk` still targeted the project’s bare `node_modules\\electron\\dist\\electron.exe` and had no application arguments, while its hidden AppUserModelID was Live Pulse’s production ID. Windows therefore kept grouping the installed window into that old pin and relaunched Electron’s default-app screen. On installed startup, v1.6.3 checks only the old Start Menu and pinned-taskbar `Electron.lnk` locations and updates a link in place only when it both launches `electron.exe` and owns the exact Live Pulse production AppUserModelID. The target, working directory, arguments, product icon and toast identity are then migrated to the installed Live Pulse executable; unrelated Electron links remain untouched.
+
+The migration was integration-tested against a byte-for-byte copy of the affected taskbar link using Electron’s real `readShortcutLink`/`writeShortcutLink` APIs. The copied link changed from bare project Electron to the packaged Live Pulse executable with empty arguments, the product working directory and icon, while retaining `kr.local.youtubelivepulse`.
+
+Local v1.6.3 verification covers all 55 tests, syntax checks, a warning-free live RESCENE diagnostic, the x64 NSIS build and packaged smoke test. The affected-link integration test was repeated after the final build using the migration code directly from the packaged ASAR and targeting the packaged v1.6.3 executable. The packaged executable reports version `1.6.3`, contains the migration module and icon, and both `dist/latest.yml` and packaged `resources/app-update.yml` are correct. The local installer SHA-512 matches its generated update metadata; GitHub publication and public-installer verification remain pending.
+
+The v1.6.2 release added explicit taskbar relaunch details: AppUserModelID, executable-plus-app command, product name and product icon. A default-location installed copy also repairs an existing `라이브 펄스.lnk` Start Menu shortcut whose target still has the product executable name but points at a stale user path; unrelated shortcuts remain untouched.
 
 Verification covers all 50 tests, syntax checks, a warning-free live RESCENE diagnostic, a valid nine-size `pulse.ico`, the x64 NSIS build and packaged smoke test. The packaged executable reports version `1.6.2`, contains the new taskbar/shortcut module and ICO, and exposes the expected Live Pulse waveform icon. `dist/latest.yml`, packaged `resources/app-update.yml` and the local installer SHA-512 were verified. GitHub Actions run `30698262186` completed successfully; the public non-draft Release contains the installer, block map and `latest.yml`. A fresh public installer download matched both the SHA-512 in its published update metadata and the SHA-256 reported for the GitHub Release asset.
 

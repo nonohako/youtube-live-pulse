@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('node:fs');
 const path = require('node:path');
 
 const APP_USER_MODEL_ID = 'kr.local.youtubelivepulse';
@@ -7,6 +8,7 @@ const TOAST_ACTIVATOR_CLSID = '{EAFF6767-89DB-4AC0-98A0-9F4FBE3AC3D7}';
 const START_MENU_SHORTCUT_NAME = '라이브 펄스.lnk';
 const PRODUCT_EXECUTABLE_NAME = '라이브 펄스.exe';
 const PRODUCT_NAME = '라이브 펄스';
+const LEGACY_ELECTRON_SHORTCUT_NAME = 'Electron.lnk';
 
 function configureWindowsNotificationIdentity({
   app,
@@ -15,7 +17,8 @@ function configureWindowsNotificationIdentity({
   platform = process.platform,
   execPath = process.execPath,
   appDataPath,
-  localAppDataPath
+  localAppDataPath,
+  legacyShortcutPathExists = fs.existsSync
 }) {
   if (platform !== 'win32') return { mode: 'unsupported' };
 
@@ -59,6 +62,14 @@ function configureWindowsNotificationIdentity({
     warning = `Windows 알림용 시작 메뉴 바로가기 갱신 실패: ${error.message}`;
   }
 
+  const legacyRepair = repairOwnedLegacyElectronShortcuts({
+    shell,
+    shortcutPaths: buildLegacyElectronShortcutPaths(appDataPath),
+    execPath,
+    pathExists: legacyShortcutPathExists
+  });
+  warning = [warning, legacyRepair.warning].filter(Boolean).join(' ');
+
   return {
     mode: 'production',
     appUserModelId: APP_USER_MODEL_ID,
@@ -66,6 +77,7 @@ function configureWindowsNotificationIdentity({
     shortcutPath,
     shortcutUpdated,
     shortcutTargetRepaired,
+    legacyShortcutsRepaired: legacyRepair.repairedPaths,
     warning
   };
 }
@@ -121,6 +133,77 @@ function buildDefaultInstallExecutablePath(localAppDataPath) {
   return path.join(localAppDataPath, 'Programs', 'youtube-live-pulse', PRODUCT_EXECUTABLE_NAME);
 }
 
+function buildLegacyElectronShortcutPaths(appDataPath) {
+  if (typeof appDataPath !== 'string' || !appDataPath.trim()) return [];
+  return [
+    path.join(
+      appDataPath,
+      'Microsoft',
+      'Windows',
+      'Start Menu',
+      'Programs',
+      LEGACY_ELECTRON_SHORTCUT_NAME
+    ),
+    path.join(
+      appDataPath,
+      'Microsoft',
+      'Internet Explorer',
+      'Quick Launch',
+      'User Pinned',
+      'TaskBar',
+      LEGACY_ELECTRON_SHORTCUT_NAME
+    )
+  ];
+}
+
+function repairOwnedLegacyElectronShortcuts({
+  shell,
+  shortcutPaths,
+  execPath,
+  pathExists = () => true
+}) {
+  const repairedPaths = [];
+  const warnings = [];
+  if (!Array.isArray(shortcutPaths) || typeof execPath !== 'string' || !execPath.trim()) {
+    return { repairedPaths, warning: '' };
+  }
+
+  for (const shortcutPath of shortcutPaths) {
+    try {
+      if (!pathExists(shortcutPath)) continue;
+      const shortcut = shell.readShortcutLink(shortcutPath);
+      const ownsProductionIdentity = (
+        typeof shortcut?.appUserModelId === 'string'
+        && shortcut.appUserModelId.toLowerCase() === APP_USER_MODEL_ID.toLowerCase()
+      );
+      const launchesBareElectron = sameWindowsPath(
+        path.win32.basename(shortcut?.target || ''),
+        'electron.exe'
+      );
+      if (!ownsProductionIdentity || !launchesBareElectron) continue;
+
+      const updated = shell.writeShortcutLink(shortcutPath, 'update', {
+        target: execPath,
+        cwd: path.dirname(execPath),
+        args: '',
+        description: PRODUCT_NAME,
+        icon: execPath,
+        iconIndex: 0,
+        appUserModelId: APP_USER_MODEL_ID,
+        toastActivatorClsid: TOAST_ACTIVATOR_CLSID
+      });
+      if (updated) repairedPaths.push(shortcutPath);
+      else warnings.push(`이전 Electron 바로가기 갱신 실패: ${shortcutPath}`);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        warnings.push(`이전 Electron 바로가기 확인 실패: ${shortcutPath} (${error.message})`);
+      }
+    }
+  }
+
+  return { repairedPaths, warning: warnings.join(' ') };
+}
+
 function readShortcut({ shell, shortcutPath, enabled }) {
   if (!enabled || !shortcutPath) return null;
   try {
@@ -157,13 +240,16 @@ function sameWindowsPath(left, right) {
 
 module.exports = {
   APP_USER_MODEL_ID,
+  LEGACY_ELECTRON_SHORTCUT_NAME,
   PRODUCT_EXECUTABLE_NAME,
   START_MENU_SHORTCUT_NAME,
   TOAST_ACTIVATOR_CLSID,
   buildDefaultInstallExecutablePath,
+  buildLegacyElectronShortcutPaths,
   buildStartMenuShortcutPath,
   buildWindowsTaskbarDetails,
   configureWindowsNotificationIdentity,
   quoteWindowsCommandArgument,
+  repairOwnedLegacyElectronShortcuts,
   sameWindowsPath
 };
