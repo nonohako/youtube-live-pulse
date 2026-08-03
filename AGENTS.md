@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-03 after the v1.6.4 cursor-centered subscriber-chart zoom implementation and local packaged verification.
+Last maintained: 2026-08-03 after the verified v1.6.4 cursor-centered subscriber-chart zoom release.
 
 ## Project mission
 
