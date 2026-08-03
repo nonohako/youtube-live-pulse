@@ -1,16 +1,20 @@
 # Live Pulse handoff
 
-Last updated: 2026-08-01
+Last updated: 2026-08-03
 
 ## Current production state
 
-- Application version: `1.6.3`
+- Application version: `1.6.4`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
 - Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.3`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
+
+The v1.6.4 source adds mouse-wheel zoom to both subscriber detail charts. Scrolling up zooms around the time under the pointer, scrolling down zooms out, and the active preset remains the maximum extent. Zoom stops at a one-day span. The visible subscriber summary, trendline and completed-day growth analysis all recalculate for the zoomed window, while the first visible growth day still uses the prior daily close as its hidden baseline. Changing a preset or clicking `확대 초기화` restores the full range; wheel zoom clears an existing click/drag date selection so the two interactions cannot leave conflicting ranges.
+
+Local verification covers all 58 tests, syntax checks, a warning-free live RESCENE diagnostic, the x64 NSIS build, update metadata and installer SHA-512, plus packaged dashboard and wheel-zoom smoke captures. The packaged executable reports version `1.6.4`, `dist/latest.yml` and packaged `resources/app-update.yml` are correct, and the local installer SHA-512 matches its generated update metadata. The public v1.6.4 Release is pending.
 
 The v1.6.3 source fixes the remaining taskbar activation regression found after v1.6.2. The user’s existing pinned `Electron.lnk` still targeted the project’s bare `node_modules\\electron\\dist\\electron.exe` and had no application arguments, while its hidden AppUserModelID was Live Pulse’s production ID. Windows therefore kept grouping the installed window into that old pin and relaunched Electron’s default-app screen. On installed startup, v1.6.3 checks only the old Start Menu and pinned-taskbar `Electron.lnk` locations and updates a link in place only when it both launches `electron.exe` and owns the exact Live Pulse production AppUserModelID. The target, working directory, arguments, product icon and toast identity are then migrated to the installed Live Pulse executable; unrelated Electron links remain untouched.
 
@@ -51,6 +55,7 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Shows live/offline/checking indicators.
 - Records local subscriber-count history and renders a clickable detail chart with 7-day, 30-day, 90-day, 1-year and all-history ranges.
 - Shows actual subscriber values, a linear trendline, range change, high, low, daily trend and point tooltips.
+- Supports cursor-centered mouse-wheel zoom on the subscriber and growth charts, with a one-day minimum and an explicit zoom reset.
 - Calculates daily change and growth rate, day-over-day acceleration/deceleration, three-period momentum change and first-half-versus-second-half slope change, with a secondary bar-and-line chart.
 - Excludes the incomplete current local day from analytics and supports click/drag completed-date selection with cumulative, average and slope summaries.
 - Uses an earlier close as a hidden range baseline so the first visible completed day can be selected and included in momentum, while keeping the incomplete current day off the growth-chart axis.

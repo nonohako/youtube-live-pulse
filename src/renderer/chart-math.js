@@ -51,6 +51,25 @@
     return samples.slice(Math.max(0, firstVisibleIndex - 1));
   }
 
+  function filterSamplesInTimeWindow(history, startTime, endTime) {
+    const lower = Math.min(Number(startTime), Number(endTime));
+    const upper = Math.max(Number(startTime), Number(endTime));
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) return [];
+    return normalizeSamples(history).filter((sample) => (
+      sample.timestamp >= lower && sample.timestamp <= upper
+    ));
+  }
+
+  function filterSamplesWithBaselineInTimeWindow(history, startTime, endTime) {
+    const lower = Math.min(Number(startTime), Number(endTime));
+    const upper = Math.max(Number(startTime), Number(endTime));
+    if (!Number.isFinite(lower) || !Number.isFinite(upper)) return [];
+    const samples = normalizeSamples(history).filter((sample) => sample.timestamp <= upper);
+    const firstVisibleIndex = samples.findIndex((sample) => sample.timestamp >= lower);
+    if (firstVisibleIndex < 0) return [];
+    return samples.slice(Math.max(0, firstVisibleIndex - 1));
+  }
+
   function collapseSamplesByLocalDate(history) {
     const closes = [];
     for (const sample of normalizeSamples(history)) {
@@ -95,6 +114,70 @@
       endTime: Math.max(last, start + 1),
       ticks: buildCalendarTicks(start, last, spanDays)
     };
+  }
+
+  function buildTimeWindowAxis(startTime, endTime) {
+    const lower = Math.min(Number(startTime), Number(endTime));
+    const upper = Math.max(Number(startTime), Number(endTime));
+    const safeStart = Number.isFinite(lower) ? lower : Date.now();
+    const safeEnd = Number.isFinite(upper) ? Math.max(upper, safeStart + 1) : safeStart + 1;
+    const firstDay = startOfLocalDay(safeStart);
+    const firstTick = firstDay < safeStart ? shiftLocalDays(firstDay, 1) : firstDay;
+    const spanDays = Math.max(0, Math.ceil((safeEnd - safeStart) / DAY_MS));
+    return {
+      startTime: safeStart,
+      endTime: safeEnd,
+      ticks: buildCalendarTicks(firstTick, safeEnd, spanDays)
+        .filter((tick) => tick >= safeStart && tick <= safeEnd)
+    };
+  }
+
+  function zoomTimeWindow(currentWindow, fullWindow, anchorTime, scale, minimumSpan = DAY_MS) {
+    const fullStart = Math.min(Number(fullWindow?.startTime), Number(fullWindow?.endTime));
+    const fullEnd = Math.max(Number(fullWindow?.startTime), Number(fullWindow?.endTime));
+    if (!Number.isFinite(fullStart) || !Number.isFinite(fullEnd) || fullEnd <= fullStart) {
+      return null;
+    }
+
+    const currentStart = Math.max(fullStart, Math.min(
+      Number(currentWindow?.startTime),
+      Number(currentWindow?.endTime)
+    ));
+    const currentEnd = Math.min(fullEnd, Math.max(
+      Number(currentWindow?.startTime),
+      Number(currentWindow?.endTime)
+    ));
+    const safeCurrentStart = Number.isFinite(currentStart) && currentEnd > currentStart
+      ? currentStart
+      : fullStart;
+    const safeCurrentEnd = Number.isFinite(currentEnd) && currentEnd > currentStart
+      ? currentEnd
+      : fullEnd;
+    const fullSpan = fullEnd - fullStart;
+    const currentSpan = safeCurrentEnd - safeCurrentStart;
+    const safeScale = Number.isFinite(Number(scale)) && Number(scale) > 0 ? Number(scale) : 1;
+    const minSpan = Math.min(fullSpan, Math.max(1, Number(minimumSpan) || DAY_MS));
+    const nextSpan = Math.min(fullSpan, Math.max(minSpan, currentSpan * safeScale));
+    if (nextSpan >= fullSpan - 1) {
+      return { startTime: fullStart, endTime: fullEnd };
+    }
+
+    const safeAnchor = Math.min(safeCurrentEnd, Math.max(
+      safeCurrentStart,
+      Number.isFinite(Number(anchorTime)) ? Number(anchorTime) : (safeCurrentStart + safeCurrentEnd) / 2
+    ));
+    const anchorRatio = currentSpan > 0 ? (safeAnchor - safeCurrentStart) / currentSpan : 0.5;
+    let nextStart = safeAnchor - nextSpan * anchorRatio;
+    let nextEnd = nextStart + nextSpan;
+    if (nextStart < fullStart) {
+      nextStart = fullStart;
+      nextEnd = fullStart + nextSpan;
+    }
+    if (nextEnd > fullEnd) {
+      nextEnd = fullEnd;
+      nextStart = fullEnd - nextSpan;
+    }
+    return { startTime: nextStart, endTime: nextEnd };
   }
 
   function buildCalendarTicks(startTime, endTime, spanDays) {
@@ -284,6 +367,18 @@
     );
   }
 
+  function analyzeGrowthForTimeWindow(history, startTime, endTime, now = Date.now()) {
+    const lower = Math.min(Number(startTime), Number(endTime));
+    const upper = Math.max(Number(startTime), Number(endTime));
+    const visibleDayStart = startOfLocalDay(lower);
+    const visibleDayEnd = shiftLocalDays(startOfLocalDay(upper), 1) - 1;
+    return analyzeGrowth(
+      filterSamplesWithBaselineInTimeWindow(history, visibleDayStart, visibleDayEnd),
+      now,
+      visibleDayStart
+    );
+  }
+
   function summarizeDailyRange(dailySamples, startTime, endTime) {
     const lower = Math.min(Number(startTime), Number(endTime));
     const upper = Math.max(Number(startTime), Number(endTime));
@@ -360,16 +455,21 @@
     RANGE_DAYS,
     analyzeGrowth,
     analyzeGrowthForRange,
+    analyzeGrowthForTimeWindow,
     buildCompletedDayAxis,
     buildDailySeries,
     buildTimeAxis,
+    buildTimeWindowAxis,
     collapseSamplesByLocalDate,
     filterSamples,
+    filterSamplesInTimeWindow,
     filterSamplesWithBaseline,
+    filterSamplesWithBaselineInTimeWindow,
     linearRegression,
     normalizeSamples,
     rangeStartTime,
     summarizeDailyRange,
-    summarizeSamples
+    summarizeSamples,
+    zoomTimeWindow
   };
 }));

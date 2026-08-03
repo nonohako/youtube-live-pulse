@@ -5,15 +5,20 @@ const assert = require('node:assert/strict');
 const {
   analyzeGrowth,
   analyzeGrowthForRange,
+  analyzeGrowthForTimeWindow,
   buildCompletedDayAxis,
   buildDailySeries,
   buildTimeAxis,
+  buildTimeWindowAxis,
   collapseSamplesByLocalDate,
   filterSamples,
+  filterSamplesInTimeWindow,
+  filterSamplesWithBaselineInTimeWindow,
   linearRegression,
   normalizeSamples,
   summarizeDailyRange,
-  summarizeSamples
+  summarizeSamples,
+  zoomTimeWindow
 } = require('../src/renderer/chart-math');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -253,4 +258,63 @@ test('클릭하거나 드래그한 완료일 구간의 평균과 성장률을 �
   assert.ok(Math.abs(summary.averageGrowthRate - ((20 / 110) + (15 / 130) + (20 / 145)) / 3 * 100) < 1e-10);
   assert.equal(summary.periodGrowthRate, 50);
   assert.ok(Math.abs(summary.slopePerDay - 17.5) < 1e-10);
+});
+
+test('확대 구간은 구간 안 기록만 표시하고 성장 계산에는 직전 기록 하나를 숨은 기준값으로 둔다', () => {
+  const history = [
+    { at: new Date(2026, 6, 25, 20, 0).toISOString(), count: 100 },
+    { at: new Date(2026, 6, 26, 8, 0).toISOString(), count: 105 },
+    { at: new Date(2026, 6, 26, 20, 0).toISOString(), count: 110 },
+    { at: new Date(2026, 6, 27, 20, 0).toISOString(), count: 125 },
+    { at: new Date(2026, 6, 28, 20, 0).toISOString(), count: 140 }
+  ];
+  const startTime = new Date(2026, 6, 26, 12, 0).getTime();
+  const endTime = new Date(2026, 6, 27, 23, 0).getTime();
+
+  assert.deepEqual(
+    filterSamplesInTimeWindow(history, startTime, endTime).map((sample) => sample.count),
+    [110, 125]
+  );
+  assert.deepEqual(
+    filterSamplesWithBaselineInTimeWindow(history, startTime, endTime).map((sample) => sample.count),
+    [105, 110, 125]
+  );
+
+  const analysis = analyzeGrowthForTimeWindow(
+    history,
+    startTime,
+    endTime,
+    new Date(2026, 6, 29, 15, 0).getTime()
+  );
+  assert.deepEqual(analysis.daily.map((sample) => sample.count), [110, 125]);
+  assert.equal(analysis.daily[0].rawChange, 10);
+  assert.equal(analysis.daily[1].rawChange, 15);
+});
+
+test('확대된 시간축은 화면 구간 안의 현지 자정만 눈금으로 사용한다', () => {
+  const startTime = new Date(2026, 6, 26, 12, 0).getTime();
+  const endTime = new Date(2026, 6, 29, 6, 0).getTime();
+  const axis = buildTimeWindowAxis(startTime, endTime);
+
+  assert.equal(axis.startTime, startTime);
+  assert.equal(axis.endTime, endTime);
+  assert.deepEqual(
+    axis.ticks.map((tick) => {
+      const date = new Date(tick);
+      return [date.getDate(), date.getHours(), date.getMinutes()];
+    }),
+    [[27, 0, 0], [28, 0, 0], [29, 0, 0]]
+  );
+});
+
+test('휠 확대는 커서가 가리킨 시점을 같은 비율에 유지하고 축소는 전체 범위에서 멈춘다', () => {
+  const fullWindow = { startTime: 0, endTime: 10 * DAY_MS };
+  const zoomed = zoomTimeWindow(fullWindow, fullWindow, 2.5 * DAY_MS, 0.5, DAY_MS);
+
+  assert.equal(zoomed.endTime - zoomed.startTime, 5 * DAY_MS);
+  assert.equal((2.5 * DAY_MS - zoomed.startTime) / (zoomed.endTime - zoomed.startTime), 0.25);
+  assert.deepEqual(
+    zoomTimeWindow(zoomed, fullWindow, 2.5 * DAY_MS, 10, DAY_MS),
+    fullWindow
+  );
 });

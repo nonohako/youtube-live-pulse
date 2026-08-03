@@ -211,10 +211,11 @@
         <button type="button" data-chart-range="90d">90일</button>
         <button type="button" data-chart-range="1y">1년</button>
         <button type="button" data-chart-range="all">전체</button>
+        <button class="chart-zoom-reset" type="button" data-reset-chart-zoom hidden>확대 초기화</button>
       </div>
 
       <div id="subscriber-detail-content"></div>
-      <p class="chart-disclaimer">“날짜 / 신규 구독자 / 전체 구독자” 형식의 .xlsx 파일을 가져올 수 있습니다. 전체 구독자 수를 해당 날짜 00:00 기록으로 추가하며, 이미 기록이 있는 날짜는 바꾸지 않습니다. 차트는 선택 기간 안에서 보유한 첫 기록 날짜부터 시작하며, 날짜 눈금은 해당 날짜의 00시를 가리킵니다. 구독자 수는 채널 확인 때 조회하지만 같은 숫자는 반복 저장하지 않고 6시간마다 한 번만 기록합니다. 오늘 수치는 원본 차트에는 표시하지만 집계가 끝나지 않았으므로 성장 분석과 구간 계산에서는 제외합니다. API 키의 공식 통계는 10분마다 갱신되며, YouTube 공개 수치는 반올림될 수 있어 작은 증감과 성장 지표도 근사치입니다.</p>
+      <p class="chart-disclaimer">“날짜 / 신규 구독자 / 전체 구독자” 형식의 .xlsx 파일을 가져올 수 있습니다. 전체 구독자 수를 해당 날짜 00:00 기록으로 추가하며, 이미 기록이 있는 날짜는 바꾸지 않습니다. 차트는 선택 기간 안에서 보유한 첫 기록 날짜부터 시작하며, 날짜 눈금은 해당 날짜의 00시를 가리킵니다. 상세 차트 위에서 마우스 휠을 위로 굴리면 커서 위치를 중심으로 확대되고 아래로 굴리면 축소됩니다. 구독자 수는 채널 확인 때 조회하지만 같은 숫자는 반복 저장하지 않고 6시간마다 한 번만 기록합니다. 오늘 수치는 원본 차트에는 표시하지만 집계가 끝나지 않았으므로 성장 분석과 구간 계산에서는 제외합니다. API 키의 공식 통계는 10분마다 갱신되며, YouTube 공개 수치는 반올림될 수 있어 작은 증감과 성장 지표도 근사치입니다.</p>
     </div>
   </dialog>
 

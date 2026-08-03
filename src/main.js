@@ -26,8 +26,12 @@ const {
 
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
 const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
+const isSmokeZoomChart = process.argv.includes('--smoke-chart-zoom');
 const isSmokeSettings = process.argv.includes('--smoke-settings');
-const isSmokeChart = process.argv.includes('--smoke-chart') || isSmokeSparseChart || isSmokeGrowthChart;
+const isSmokeChart = process.argv.includes('--smoke-chart')
+  || isSmokeSparseChart
+  || isSmokeGrowthChart
+  || isSmokeZoomChart;
 const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart || isSmokeSettings;
 if (isSmokeTest) {
   app.setPath('userData', path.join(process.cwd(), '.smoke-user-data'));
@@ -110,7 +114,7 @@ app.on('window-all-closed', () => {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
-    height: isSmokeGrowthChart ? 1200 : 800,
+    height: isSmokeGrowthChart || isSmokeZoomChart ? 1200 : 800,
     minWidth: 900,
     minHeight: 660,
     show: false,
@@ -141,7 +145,8 @@ function createWindow() {
         ...(isSmokeChart ? {
           smokeChart: '1',
           chartRange: isSmokeSparseChart ? '1y' : '30d',
-          chartSelection: isSmokeGrowthChart ? '1' : '0'
+          chartSelection: isSmokeGrowthChart ? '1' : '0',
+          chartZoom: isSmokeZoomChart ? '1' : '0'
         } : {}),
         ...(isSmokeSettings ? { smokeSettings: '1' } : {})
       }
@@ -175,6 +180,8 @@ function scheduleSmokeCapture() {
             ? 'settings-smoke.png'
             : isSmokeGrowthChart
             ? 'subscriber-growth-smoke.png'
+            : isSmokeZoomChart
+            ? 'subscriber-chart-zoom-smoke.png'
             : isSmokeSparseChart
             ? 'subscriber-chart-sparse-smoke.png'
             : isSmokeChart ? 'subscriber-chart-smoke.png' : 'dashboard-smoke.png'

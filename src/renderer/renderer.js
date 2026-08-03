@@ -5,8 +5,11 @@ let countdownTimer = null;
 let subscriberChartChannelId = null;
 let subscriberChartRange = '30d';
 let subscriberChartSelection = null;
+let subscriberChartViewport = null;
 let detailChartModel = null;
 let detailChartDrag = null;
+
+const CHART_MINIMUM_SPAN_MS = 24 * 60 * 60 * 1000;
 
 const elements = {};
 
@@ -28,6 +31,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         smokeParams.get('chartRange') || '30d',
         smokeParams.get('chartSelection') === '1'
       );
+      if (smokeParams.get('chartZoom') === '1') {
+        window.requestAnimationFrame(() => {
+          const svg = elements.subscriberDialog.querySelector('#subscriber-detail-svg');
+          const bounds = svg?.getBoundingClientRect();
+          if (!svg || !bounds?.width) return;
+          svg.dispatchEvent(new WheelEvent('wheel', {
+            bubbles: true,
+            cancelable: true,
+            clientX: bounds.left + bounds.width * 0.65,
+            clientY: bounds.top + bounds.height * 0.5,
+            deltaY: -120
+          }));
+        });
+      }
     }
     if (smokeParams.has('smokeSettings')) openSettings();
   } catch (error) {
@@ -70,6 +87,7 @@ function bindEvents() {
   elements.subscriberDialog.addEventListener('close', () => {
     subscriberChartChannelId = null;
     subscriberChartSelection = null;
+    subscriberChartViewport = null;
     detailChartModel = null;
     detailChartDrag = null;
     elements.subscriberImportStatus.textContent = '';
@@ -79,6 +97,7 @@ function bindEvents() {
   elements.subscriberDialog.addEventListener('pointerup', handleDetailChartPointerUp);
   elements.subscriberDialog.addEventListener('pointercancel', handleDetailChartPointerCancel);
   elements.subscriberDialog.addEventListener('pointerleave', hideDetailChartTooltip);
+  elements.subscriberDialog.addEventListener('wheel', handleDetailChartWheel, { passive: false });
   elements.settingsForm.addEventListener('submit', handleSaveSettings);
   elements.clearApiKey.addEventListener('click', handleClearApiKey);
   elements.hideButton.addEventListener('click', () => window.livePulse.hideWindow());
@@ -113,6 +132,16 @@ function bindEvents() {
     const rangeButton = event.target.closest('[data-chart-range]');
     if (rangeButton) {
       subscriberChartRange = rangeButton.dataset.chartRange;
+      subscriberChartSelection = null;
+      subscriberChartViewport = null;
+      detailChartDrag = null;
+      renderSubscriberDetail();
+      return;
+    }
+
+    const resetChartZoom = event.target.closest('[data-reset-chart-zoom]');
+    if (resetChartZoom) {
+      subscriberChartViewport = null;
       subscriberChartSelection = null;
       detailChartDrag = null;
       renderSubscriberDetail();
@@ -407,6 +436,7 @@ function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange =
     ? initialRange
     : '30d';
   subscriberChartSelection = null;
+  subscriberChartViewport = null;
   detailChartDrag = null;
   elements.subscriberImportStatus.textContent = '';
   if (selectSmokeRange) {
@@ -475,10 +505,12 @@ function renderSubscriberDetail() {
   const displayHistory = displayMode === 'daily'
     ? math.collapseSamplesByLocalDate(channel.subscriberHistory || [])
     : channel.subscriberHistory || [];
-  const samples = math.filterSamples(displayHistory, subscriberChartRange, now);
-  const summary = math.summarizeSamples(samples);
-  if (!samples.length) {
+  const baseSamples = math.filterSamples(displayHistory, subscriberChartRange, now);
+  const baseTimeAxis = math.buildTimeAxis(baseSamples, subscriberChartRange, now);
+  if (!baseSamples.length) {
+    subscriberChartViewport = null;
     detailChartModel = null;
+    elements.subscriberDialog.querySelector('[data-reset-chart-zoom]').hidden = true;
     elements.subscriberDetailContent.innerHTML = `
       <div class="detail-chart-empty">
         <strong>아직 이 기간의 구독자 기록이 없습니다.</strong>
@@ -487,23 +519,60 @@ function renderSubscriberDetail() {
     return;
   }
 
+  if (subscriberChartViewport) {
+    subscriberChartViewport = math.zoomTimeWindow(
+      subscriberChartViewport,
+      baseTimeAxis,
+      (subscriberChartViewport.startTime + subscriberChartViewport.endTime) / 2,
+      1,
+      CHART_MINIMUM_SPAN_MS
+    );
+    if (isSameTimeWindow(subscriberChartViewport, baseTimeAxis)) subscriberChartViewport = null;
+  }
+  let samples = subscriberChartViewport
+    ? math.filterSamplesInTimeWindow(
+      baseSamples,
+      subscriberChartViewport.startTime,
+      subscriberChartViewport.endTime
+    )
+    : baseSamples;
+  if (!samples.length) {
+    subscriberChartViewport = null;
+    samples = baseSamples;
+  }
+  const timeAxis = subscriberChartViewport
+    ? math.buildTimeWindowAxis(
+      subscriberChartViewport.startTime,
+      subscriberChartViewport.endTime
+    )
+    : baseTimeAxis;
+  const summary = math.summarizeSamples(samples);
+  const resetZoomButton = elements.subscriberDialog.querySelector('[data-reset-chart-zoom]');
+  resetZoomButton.hidden = !subscriberChartViewport;
+
   const changeClass = summary.change > 0 ? 'up' : summary.change < 0 ? 'down' : '';
   const changeText = `${summary.change >= 0 ? '+' : ''}${formatNumber(summary.change)}`;
   const slopeText = `${summary.slopePerDay >= 0 ? '+' : ''}${formatTrend(summary.slopePerDay)}/일`;
-  const rangeLabel = {
+  const rangeLabel = subscriberChartViewport ? '확대 구간' : ({
     '7d': '7일',
     '30d': '30일',
     '90d': '90일',
     '1y': '1년',
     all: '전체'
-  }[subscriberChartRange] || '선택 기간';
+  }[subscriberChartRange] || '선택 기간');
 
-  const growth = math.analyzeGrowthForRange(
-    channel.subscriberHistory || [],
-    subscriberChartRange,
-    now
-  );
-  const timeAxis = math.buildTimeAxis(samples, subscriberChartRange, now);
+  const growth = subscriberChartViewport
+    ? math.analyzeGrowthForTimeWindow(
+      channel.subscriberHistory || [],
+      subscriberChartViewport.startTime,
+      subscriberChartViewport.endTime,
+      now
+    )
+    : math.analyzeGrowthForRange(
+      channel.subscriberHistory || [],
+      subscriberChartRange,
+      now
+    );
   const growthTimeAxis = math.buildCompletedDayAxis(growth.daily);
   let selectionSummary = subscriberChartSelection
     ? math.summarizeDailyRange(
@@ -525,10 +594,14 @@ function renderSubscriberDetail() {
     displayMode
   );
   const growthChart = buildGrowthChart(growth.daily, growthTimeAxis);
-  detailChartModel = chart.model;
+  detailChartModel = {
+    ...chart.model,
+    baseSamples,
+    fullTimeAxis: baseTimeAxis
+  };
   elements.subscriberDetailContent.innerHTML = `
     <div class="detail-metrics">
-      ${renderDetailMetric('현재', formatNumber(summary.current))}
+      ${renderDetailMetric(subscriberChartViewport ? '구간 마지막' : '현재', formatNumber(summary.current))}
       ${renderDetailMetric(`${rangeLabel} 증감`, changeText, changeClass)}
       ${renderDetailMetric('기간 고점', formatNumber(summary.high))}
       ${renderDetailMetric('기간 저점', formatNumber(summary.low))}
@@ -537,8 +610,8 @@ function renderSubscriberDetail() {
     <div class="detail-chart-legend">
       <span><i class="legend-actual"></i>실제 구독자 수</span>
       <span><i class="legend-trend"></i>선형 추세선</span>
-      <span class="detail-selection-hint">날짜 클릭 · 구간 드래그</span>
-      <span>${displayMode === 'daily' ? '날짜 기준' : '수집 시각 기준'} · ${samples.length}개 기록</span>
+      <span class="detail-selection-hint">마우스 휠 확대·축소 · 날짜 클릭 · 구간 드래그</span>
+      <span>${subscriberChartViewport ? `${formatChartDate(timeAxis.startTime)}–${formatChartDate(timeAxis.endTime)} · ` : ''}${displayMode === 'daily' ? '날짜 기준' : '수집 시각 기준'} · ${samples.length}개 기록</span>
     </div>
     ${chart.svg}
     ${renderSelectionSummary(selectionSummary)}
@@ -760,7 +833,7 @@ function buildGrowthChart(dailySamples, timeAxis) {
 
   return `
     <div class="growth-chart-wrap">
-      <svg class="growth-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="일별 구독자 증가량과 성장률 추이">
+      <svg id="subscriber-growth-svg" class="growth-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="일별 구독자 증가량과 성장률 추이">
         ${yTicks}
         ${xTicks}
         <line class="growth-zero-line" x1="${plot.left}" y1="${zeroY}" x2="${plot.left + plotWidth}" y2="${zeroY}"/>
@@ -804,8 +877,12 @@ function buildDetailChart(
     y: toY(sample.count),
     sample
   }));
-  const dayPoints = dailySamples.map((sample) => ({
-    x: toX(sample.dayTimestamp),
+  const dayPoints = dailySamples.filter((sample) => {
+    const nextDay = new Date(sample.dayTimestamp);
+    nextDay.setDate(nextDay.getDate() + 1);
+    return sample.dayTimestamp <= endTime && nextDay.getTime() > startTime;
+  }).map((sample) => ({
+    x: Math.min(plot.left + plotWidth, Math.max(plot.left, toX(sample.dayTimestamp))),
     sample
   }));
   const linePoints = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
@@ -868,7 +945,7 @@ function buildSelectionMarkup(selection, toX, endTime, plot, plotHeight) {
   const selectedEnd = Math.max(selection.startTime, selection.endTime);
   const nextDay = new Date(selectedEnd);
   nextDay.setDate(nextDay.getDate() + 1);
-  const x = toX(startTime);
+  const x = Math.max(plot.left, toX(startTime));
   const endX = toX(Math.min(endTime, nextDay.getTime()));
   return `<rect id="detail-selection" class="detail-selection" x="${x.toFixed(2)}" y="${plot.top}" width="${Math.max(2, endX - x).toFixed(2)}" height="${plotHeight}" rx="4"/>`;
 }
@@ -953,6 +1030,49 @@ function handleDetailChartPointerCancel(event) {
   if (!detailChartDrag || detailChartDrag.pointerId !== event.pointerId) return;
   detailChartDrag = null;
   renderSubscriberDetail();
+}
+
+function handleDetailChartWheel(event) {
+  const svg = event.target.closest?.('#subscriber-detail-svg, #subscriber-growth-svg');
+  const model = detailChartModel;
+  if (!svg || !model?.points?.length || !model?.fullTimeAxis || !event.deltaY) return;
+  const bounds = svg.getBoundingClientRect();
+  if (!bounds.width) return;
+
+  event.preventDefault();
+  const plotRight = svg.id === 'subscriber-growth-svg' ? 58 : model.plot.right;
+  const plotWidth = model.width - model.plot.left - plotRight;
+  const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
+  const anchorRatio = Math.min(1, Math.max(0, (viewX - model.plot.left) / plotWidth));
+  const currentWindow = subscriberChartViewport || model.fullTimeAxis;
+  const anchorTime = currentWindow.startTime
+    + (currentWindow.endTime - currentWindow.startTime) * anchorRatio;
+  const nextWindow = window.LivePulseChartMath.zoomTimeWindow(
+    currentWindow,
+    model.fullTimeAxis,
+    anchorTime,
+    event.deltaY < 0 ? 0.8 : 1.25,
+    CHART_MINIMUM_SPAN_MS
+  );
+  if (!nextWindow || isSameTimeWindow(nextWindow, currentWindow)) return;
+
+  const nextSamples = window.LivePulseChartMath.filterSamplesInTimeWindow(
+    model.baseSamples,
+    nextWindow.startTime,
+    nextWindow.endTime
+  );
+  if (!nextSamples.length) return;
+  subscriberChartViewport = isSameTimeWindow(nextWindow, model.fullTimeAxis) ? null : nextWindow;
+  subscriberChartSelection = null;
+  detailChartDrag = null;
+  hideDetailChartTooltip();
+  renderSubscriberDetail();
+}
+
+function isSameTimeWindow(left, right) {
+  return Boolean(left && right
+    && Math.abs(left.startTime - right.startTime) < 1
+    && Math.abs(left.endTime - right.endTime) < 1);
 }
 
 function nearestSelectableDay(event, svg) {

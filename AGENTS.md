@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-01 after the verified v1.6.3 owned legacy-Electron taskbar shortcut migration release.
+Last maintained: 2026-08-03 after the v1.6.4 cursor-centered subscriber-chart zoom implementation and local packaged verification.
 
 ## Project mission
 
@@ -54,6 +54,7 @@ Useful packaged-app smoke test:
 ```powershell
 .\dist\win-unpacked\라이브 펄스.exe --smoke-test
 .\dist\win-unpacked\라이브 펄스.exe --smoke-growth-chart
+.\dist\win-unpacked\라이브 펄스.exe --smoke-chart-zoom
 .\dist\win-unpacked\라이브 펄스.exe --smoke-settings
 ```
 
@@ -95,6 +96,7 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - The growth-chart axis ends on the latest completed local date and must not reserve space or a tick for the incomplete current day.
 - `subscriberChartMode` accepts only `samples` or `daily`. Daily mode changes presentation only: it plots each local date’s final sample at local 00:00 without discarding raw stored samples.
 - Channel-card total change always compares the first and last valid samples in the full stored history; limiting sparkline points must not limit the reported total.
+- Mouse-wheel zoom on either subscriber detail chart is cursor-centered, never exceeds the active preset range and stops at a one-day minimum span. The visible subscriber summary and completed-day growth analysis must follow the zoomed window; changing the preset or using `확대 초기화` restores the full preset range.
 - Subscriber-history imports are explicitly scoped to the channel whose detail dialog opened the file picker; never infer the target channel from a file name.
 - Import `.xlsx` rows only from sheets containing `날짜` and `전체 구독자` headers. Ignore `합계` and `평균`; `신규 구독자` is not a source of truth.
 - Store imported dates at local 00:00. If any sample already exists on that local date, keep the existing data and skip the imported row.
