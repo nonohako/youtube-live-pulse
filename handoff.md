@@ -6,7 +6,7 @@ Last updated: 2026-08-11
 
 - Application version: `1.7.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.4` (`v1.7.0` pending)
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.7.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
@@ -18,7 +18,7 @@ v1.7.0 also records exact public view-count samples for up to eight current regu
 
 The settings and documentation now state the API boundary explicitly: an API key grants no account access and does not make another channel's subscriber total exact. YouTube's official channel API still rounds the public subscriber count down to three significant figures. Its practical v1.7.0 benefit is batching public video statistics and using official public metadata; the app continues to detect videos, live broadcasts and view counts without a key.
 
-Local verification covers all 69 tests, syntax checks, a warning-free live snapshot of the affected `안녕하세요원이입니다잘부탁드립니다` channel whose `WTdyA5N4K0k` lockup was detected first with exact public-page views, and a warning-free currently-live Lofi Girl snapshot whose live item stayed out of regular videos. The x64 NSIS build succeeded, packaged version is `1.7.0`, both update metadata files target the public GitHub repository, the local installer SHA-512 matches `dist/latest.yml`, and Authenticode remains intentionally `NotSigned`. Packaged dashboard and zoomed video-view smoke captures passed. The public v1.7.0 Release is pending.
+Verification covers all 69 tests locally and in GitHub Actions, syntax checks, a warning-free live snapshot of the affected `안녕하세요원이입니다잘부탁드립니다` channel whose `WTdyA5N4K0k` lockup was detected first with exact public-page views, and a warning-free currently-live Lofi Girl snapshot whose live item stayed out of regular videos. The x64 NSIS build succeeded, packaged version is `1.7.0`, both update metadata files target the public GitHub repository, the local installer SHA-512 matches `dist/latest.yml`, and Authenticode remains intentionally `NotSigned`. Packaged dashboard and zoomed video-view smoke captures passed. GitHub Actions run `31493226230` completed successfully; the public non-draft, non-prerelease v1.7.0 Release contains the installer, block map and `latest.yml`. A fresh public installer download matched both the SHA-512 in its published update metadata and the SHA-256 reported for the GitHub Release asset, and the downloaded installer was confirmed unsigned as documented.
 
 The v1.6.4 source adds mouse-wheel zoom to both subscriber detail charts. Scrolling up zooms around the time under the pointer, scrolling down zooms out, and the active preset remains the maximum extent. Zoom stops at a one-day span. The visible subscriber summary, trendline and completed-day growth analysis all recalculate for the zoomed window, while the first visible growth day still uses the prior daily close as its hidden baseline. Changing a preset or clicking `확대 초기화` restores the full range; wheel zoom clears an existing click/drag date selection so the two interactions cannot leave conflicting ranges.
 

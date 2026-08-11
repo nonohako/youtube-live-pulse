@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-11 for the v1.7.0 video-detection and per-video view-history release candidate.
+Last maintained: 2026-08-11 after the verified v1.7.0 video-detection and per-video view-history release.
 
 ## Project mission
 
