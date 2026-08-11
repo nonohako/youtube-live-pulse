@@ -23,13 +23,14 @@ function createDefaultChannel() {
     lastVideoId: null,
     lastPostId: null,
     openedBroadcastIds: [],
-    subscriberHistory: []
+    subscriberHistory: [],
+    videoViewHistories: []
   };
 }
 
 function createDefaultData() {
   return {
-    version: 2,
+    version: 3,
     settings: { ...DEFAULT_SETTINGS },
     channels: [createDefaultChannel()],
     events: []

@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-03 after the verified v1.6.4 cursor-centered subscriber-chart zoom release.
+Last maintained: 2026-08-11 for the v1.7.0 video-detection and per-video view-history release candidate.
 
 ## Project mission
 
@@ -55,6 +55,7 @@ Useful packaged-app smoke test:
 .\dist\win-unpacked\라이브 펄스.exe --smoke-test
 .\dist\win-unpacked\라이브 펄스.exe --smoke-growth-chart
 .\dist\win-unpacked\라이브 펄스.exe --smoke-chart-zoom
+.\dist\win-unpacked\라이브 펄스.exe --smoke-video-views
 .\dist\win-unpacked\라이브 펄스.exe --smoke-settings
 ```
 
@@ -68,6 +69,7 @@ Useful packaged-app smoke test:
 - `src/lib/store.js`: atomic local JSON persistence and settings normalization
 - `src/lib/windows-notifications.js`: installed-shortcut validation, production/development AppUserModelID isolation and stable toast activation
 - `src/lib/subscriber-import.js`: `.xlsx` parsing, local-date normalization and non-destructive subscriber-history merging
+- `src/lib/video-history.js`: bounded per-video view-count history normalization, compaction and merging
 - `src/renderer/`: Korean dashboard and settings UI
 - `src/renderer/chart-math.js`: local-date axes, completed-day growth analytics and selected-range summaries
 - `test/`: parser and persistence regression tests
@@ -78,10 +80,13 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 
 - The default channel is `UCtKtCiaWRz-d3EZn2xd1mdA`.
 - Core monitoring uses public YouTube pages and the official channel RSS feed.
-- The optional YouTube Data API key only improves official channel metadata and subscriber statistics.
+- The optional YouTube Data API key only improves public channel metadata and batches public video statistics. It is not OAuth, grants no account access and does not reveal exact subscriber totals for another channel; the official API rounds public subscriber counts down to three significant figures.
+- Fetch both `/videos` and `/streams`. Parse both legacy video renderers and the current `lockupViewModel` structure; do not rely on RSS publication delay as the only new-video signal.
+- Regular-video notification candidates must exclude every item currently classified as live or upcoming, even when the same ID appears in RSS, `/videos` and `/streams`.
+- When `/live` responds successfully, require its player response to confirm the current live before opening; do not trust a possibly stale list badge over a successful non-live player result. A list live item is only a network-failure fallback when `/live` itself could not be fetched.
 - Community-post detection is experimental because the official Data API does not expose community posts.
 - A player item is upcoming only when a real future `startTimestamp` exists.
-- A stream-list item with a timestamp is upcoming only when that timestamp is in the future.
+- A stream-list item is upcoming only when a real start timestamp exists and that timestamp is in the future. An upcoming-looking badge without a time is ambiguous and must not auto-open.
 - Missing or past timestamps must never be treated as `Number.MAX_SAFE_INTEGER` or otherwise coerced into the future.
 - Keep a regression test for finished live video `hm6LLaIfMho`.
 
@@ -101,6 +106,15 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Import `.xlsx` rows only from sheets containing `날짜` and `전체 구독자` headers. Ignore `합계` and `평균`; `신규 구독자` is not a source of truth.
 - Store imported dates at local 00:00. If any sample already exists on that local date, keep the existing data and skip the imported row.
 - Parse workbooks in the main process and expose only the narrow import action through preload; never give the renderer filesystem or Node.js access.
+
+## Video view analytics invariants
+
+- Collect public view statistics for up to the eight current regular-video candidates every five minutes. With an API key, prefer one official `videos.list` batch and fill any missing items from public watch pages; without a key, use public watch pages directly.
+- Store view history per channel and video. Record a sample when the count changes, or once every six hours as an unchanged heartbeat.
+- Preserve the first and last sample when compacting a history to its bounded sample limit so long-range charts do not silently become recent-only charts.
+- Never fabricate or backfill pre-installation view history. YouTube exposes the current public view count, not historical point-in-time counts.
+- The view chart supports 7-day, 30-day, 90-day, 1-year and all-history ranges. Mouse-wheel zoom is cursor-centered, cannot exceed the selected preset and stops at a one-day minimum or the full available span when shorter.
+- Keep all view-history parsing and persistence in the main process/store. The renderer receives only normalized state through the existing isolated preload boundary.
 
 ## Windows shell identity invariants
 

@@ -2,8 +2,10 @@
 
 const { fetchChannelSnapshot } = require('./youtube');
 const { eventDedupKey } = require('./events');
+const { mergeVideoViewStatistics } = require('./video-history');
 
 const OFFICIAL_STATS_INTERVAL_MS = 10 * 60 * 1000;
+const VIDEO_STATS_INTERVAL_MS = 5 * 60 * 1000;
 const HISTORY_HEARTBEAT_MS = 6 * 60 * 60 * 1000;
 const HISTORY_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -16,6 +18,7 @@ class ChannelMonitor {
     this.runtime = new Map();
     this.officialCache = new Map();
     this.officialCheckedAt = new Map();
+    this.videoStatsCheckedAt = new Map();
     this.timer = null;
     this.running = false;
     this.stopped = true;
@@ -90,8 +93,10 @@ class ChannelMonitor {
   async #checkChannel(channel, forceOfficial) {
     const now = Date.now();
     const lastOfficial = this.officialCheckedAt.get(channel.id) || 0;
+    const lastVideoStats = this.videoStatsCheckedAt.get(channel.id) || 0;
     const includeOfficialStats = Boolean(this.store.data.settings.apiKey)
       && (forceOfficial || now - lastOfficial >= OFFICIAL_STATS_INTERVAL_MS);
+    const includeVideoStats = forceOfficial || now - lastVideoStats >= VIDEO_STATS_INTERVAL_MS;
 
     this.runtime.set(channel.id, {
       ...(this.runtime.get(channel.id) || {}),
@@ -103,7 +108,8 @@ class ChannelMonitor {
     try {
       const snapshot = await fetchChannelSnapshot(channel, {
         apiKey: this.store.data.settings.apiKey,
-        includeOfficialStats
+        includeOfficialStats,
+        includeVideoStats
       });
       if (snapshot.metadata?.source === 'api') {
         this.officialCache.set(channel.id, snapshot.metadata);
@@ -115,7 +121,9 @@ class ChannelMonitor {
         };
       }
       if (includeOfficialStats) this.officialCheckedAt.set(channel.id, now);
+      if (includeVideoStats) this.videoStatsCheckedAt.set(channel.id, now);
 
+      this.#mergeStoredVideoViews(channel, snapshot);
       this.#processChanges(channel, snapshot);
       this.runtime.set(channel.id, {
         status: snapshot.warnings.length ? 'degraded' : 'online',
@@ -246,8 +254,34 @@ class ChannelMonitor {
       stored.seenVideoIds = [...seenVideoIds].slice(-100);
       stored.seenPostIds = [...seenPostIds].slice(-100);
       stored.openedBroadcastIds = [...opened].slice(-100);
+      stored.videoViewHistories = mergeVideoViewStatistics(
+        stored.videoViewHistories,
+        snapshot.videoStats,
+        snapshot.checkedAt
+      );
       this.#recordSubscriberSample(stored, snapshot.metadata.subscriberCount, snapshot.checkedAt);
     });
+  }
+
+  #mergeStoredVideoViews(channel, snapshot) {
+    const exactIds = new Set((snapshot.videoStats || []).map((item) => item.id));
+    const histories = new Map((channel.videoViewHistories || []).map((history) => [
+      history.videoId,
+      history
+    ]));
+    snapshot.recentVideos = (snapshot.recentVideos || []).map((video) => {
+      if (exactIds.has(video.id)) return video;
+      const history = histories.get(video.id);
+      const sample = history?.samples?.at(-1);
+      if (!sample || !Number.isFinite(Number(sample.count))) return video;
+      return {
+        ...video,
+        viewCount: Number(sample.count),
+        source: history.source,
+        viewCountCheckedAt: sample.at
+      };
+    });
+    snapshot.latestVideo = snapshot.recentVideos[0] || snapshot.latestVideo || null;
   }
 
   #recordSubscriberSample(channel, count, checkedAt) {

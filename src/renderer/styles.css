@@ -590,6 +590,7 @@ input::placeholder {
 
 .open-overlay {
   position: absolute;
+  z-index: 1;
   inset: 0;
   border: 0;
   background: transparent;
@@ -753,6 +754,29 @@ input::placeholder {
 .row-time {
   color: var(--dim);
   font-size: 9px;
+}
+
+.video-row-actions {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.video-chart-button {
+  padding: 3px 7px;
+  border: 1px solid rgba(111, 168, 255, 0.28);
+  border-radius: 6px;
+  color: #9fc3ff;
+  background: rgba(111, 168, 255, 0.08);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.video-chart-button:hover {
+  color: #fff;
+  background: rgba(111, 168, 255, 0.15);
 }
 
 .card-footer {
@@ -947,18 +971,46 @@ dialog::backdrop {
   max-height: calc(100vh - 48px);
 }
 
-.subscriber-detail {
+#video-view-dialog {
+  width: min(940px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+}
+
+.subscriber-detail,
+.video-view-detail {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   padding: 24px;
 }
 
-.subscriber-dialog-actions {
+.subscriber-dialog-actions,
+.video-view-dialog-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.subscriber-dialog-actions .ghost-button {
+.subscriber-dialog-actions .ghost-button,
+.video-view-dialog-actions .ghost-button {
   height: 38px;
+}
+
+.video-view-select-label {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 14px;
+}
+
+.video-view-select-label span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.video-view-select-label select {
+  width: 100%;
 }
 
 .subscriber-import-status {

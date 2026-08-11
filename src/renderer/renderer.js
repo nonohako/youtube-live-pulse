@@ -8,6 +8,11 @@ let subscriberChartSelection = null;
 let subscriberChartViewport = null;
 let detailChartModel = null;
 let detailChartDrag = null;
+let videoViewChartChannelId = null;
+let videoViewChartVideoId = null;
+let videoViewChartRange = '30d';
+let videoViewChartViewport = null;
+let videoViewChartModel = null;
 
 const CHART_MINIMUM_SPAN_MS = 24 * 60 * 60 * 1000;
 
@@ -46,6 +51,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       }
     }
+    if (smokeParams.has('smokeVideoViews') && appState.channels[0]) {
+      const history = appState.channels[0].videoViewHistories?.[0];
+      if (history) {
+        openVideoViewChart(appState.channels[0].id, history.videoId);
+        window.requestAnimationFrame(() => {
+          const svg = elements.videoViewDialog.querySelector('#video-view-detail-svg');
+          const bounds = svg?.getBoundingClientRect();
+          if (!svg || !bounds?.width) return;
+          svg.dispatchEvent(new WheelEvent('wheel', {
+            bubbles: true,
+            cancelable: true,
+            clientX: bounds.left + bounds.width * 0.7,
+            clientY: bounds.top + bounds.height * 0.5,
+            deltaY: -120
+          }));
+        });
+      }
+    }
     if (smokeParams.has('smokeSettings')) openSettings();
   } catch (error) {
     showError(cleanError(error));
@@ -70,7 +93,9 @@ function cacheElements() {
     'setting-api-key', 'api-key-status',
     'startup-help', 'app-version', 'update-button', 'update-status',
     'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
-    'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content'
+    'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content',
+    'video-view-dialog', 'video-view-close', 'video-view-dialog-title',
+    'video-view-open', 'video-view-select', 'video-view-detail-content'
   ];
   for (const id of ids) elements[toCamel(id)] = document.getElementById(id);
 }
@@ -98,6 +123,21 @@ function bindEvents() {
   elements.subscriberDialog.addEventListener('pointercancel', handleDetailChartPointerCancel);
   elements.subscriberDialog.addEventListener('pointerleave', hideDetailChartTooltip);
   elements.subscriberDialog.addEventListener('wheel', handleDetailChartWheel, { passive: false });
+  elements.videoViewClose.addEventListener('click', () => elements.videoViewDialog.close());
+  elements.videoViewDialog.addEventListener('close', () => {
+    videoViewChartChannelId = null;
+    videoViewChartVideoId = null;
+    videoViewChartViewport = null;
+    videoViewChartModel = null;
+  });
+  elements.videoViewSelect.addEventListener('change', () => {
+    videoViewChartVideoId = elements.videoViewSelect.value;
+    videoViewChartViewport = null;
+    renderVideoViewDetail();
+  });
+  elements.videoViewDialog.addEventListener('pointermove', handleVideoViewPointerMove);
+  elements.videoViewDialog.addEventListener('pointerleave', hideVideoViewTooltip);
+  elements.videoViewDialog.addEventListener('wheel', handleVideoViewWheel, { passive: false });
   elements.settingsForm.addEventListener('submit', handleSaveSettings);
   elements.clearApiKey.addEventListener('click', handleClearApiKey);
   elements.hideButton.addEventListener('click', () => window.livePulse.hideWindow());
@@ -136,6 +176,30 @@ function bindEvents() {
       subscriberChartViewport = null;
       detailChartDrag = null;
       renderSubscriberDetail();
+      return;
+    }
+
+    const videoViewButton = event.target.closest('[data-video-view-chart]');
+    if (videoViewButton) {
+      openVideoViewChart(
+        videoViewButton.dataset.videoViewChannel,
+        videoViewButton.dataset.videoViewChart
+      );
+      return;
+    }
+
+    const videoViewRangeButton = event.target.closest('[data-video-view-range]');
+    if (videoViewRangeButton) {
+      videoViewChartRange = videoViewRangeButton.dataset.videoViewRange;
+      videoViewChartViewport = null;
+      renderVideoViewDetail();
+      return;
+    }
+
+    const resetVideoViewZoom = event.target.closest('[data-reset-video-view-zoom]');
+    if (resetVideoViewZoom) {
+      videoViewChartViewport = null;
+      renderVideoViewDetail();
       return;
     }
 
@@ -178,6 +242,7 @@ function render() {
   renderChannels();
   renderEvents();
   if (elements.subscriberDialog.open) renderSubscriberDetail();
+  if (elements.videoViewDialog.open) renderVideoViewDetail();
 }
 
 function renderMonitorStatus() {
@@ -284,7 +349,7 @@ function renderChannelCard(channel) {
 
         <div class="content-list">
           ${(snapshot?.upcoming || []).slice(0, 2).map(renderUpcomingRow).join('')}
-          ${renderVideoRow(snapshot?.latestVideo)}
+          ${renderVideoRow(snapshot?.latestVideo, channel)}
           ${renderPostRow(snapshot?.latestPost)}
         </div>
 
@@ -325,7 +390,7 @@ function renderUpcomingRow(upcoming) {
     </div>`;
 }
 
-function renderVideoRow(video) {
+function renderVideoRow(video, channel) {
   if (!video) {
     return `
       <div class="content-row">
@@ -333,14 +398,22 @@ function renderVideoRow(video) {
         <div class="content-copy"><span>최근 동영상</span><strong>정보 확인 중</strong></div>
       </div>`;
   }
+  const history = (channel?.videoViewHistories || []).find((item) => item.videoId === video.id);
+  const latestSample = history?.samples?.at(-1);
+  const viewCount = Number.isFinite(Number(video.viewCount))
+    ? Number(video.viewCount)
+    : Number(latestSample?.count);
   return `
     <div class="content-row">
       <span class="content-icon">▶</span>
       <div class="content-copy">
-        <span>최근 동영상</span>
+        <span>최근 동영상${Number.isFinite(viewCount) ? ` · 조회수 ${escapeHtml(formatNumber(viewCount))}회` : ''}</span>
         <strong>${escapeHtml(video.title)}</strong>
       </div>
-      <span class="row-time">${escapeHtml(formatRelativeTime(video.publishedAt || video.updatedAt))}</span>
+      <div class="video-row-actions">
+        <span class="row-time">${escapeHtml(formatRelativeTime(video.publishedAt || video.updatedAt))}</span>
+        ${history?.samples?.length ? `<button type="button" class="video-chart-button" data-video-view-channel="${escapeAttribute(channel.id)}" data-video-view-chart="${escapeAttribute(video.id)}">조회수 추이</button>` : ''}
+      </div>
       <button class="open-overlay" data-open-url="${escapeAttribute(video.url)}" aria-label="동영상 열기"></button>
     </div>`;
 }
@@ -454,6 +527,20 @@ function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange =
   }
   renderSubscriberDetail();
   if (!elements.subscriberDialog.open) elements.subscriberDialog.showModal();
+}
+
+function openVideoViewChart(channelId, videoId) {
+  const channel = appState?.channels.find((item) => item.id === channelId);
+  const histories = (channel?.videoViewHistories || []).filter((history) => history.samples?.length);
+  if (!channel || !histories.length) return;
+  videoViewChartChannelId = channelId;
+  videoViewChartVideoId = histories.some((history) => history.videoId === videoId)
+    ? videoId
+    : histories[0].videoId;
+  videoViewChartRange = '30d';
+  videoViewChartViewport = null;
+  renderVideoViewDetail();
+  if (!elements.videoViewDialog.open) elements.videoViewDialog.showModal();
 }
 
 async function handleSubscriberImport() {
@@ -616,6 +703,124 @@ function renderSubscriberDetail() {
     ${chart.svg}
     ${renderSelectionSummary(selectionSummary)}
     ${renderGrowthAnalysis(growth, growthChart)}`;
+}
+
+function renderVideoViewDetail() {
+  const channel = appState?.channels.find((item) => item.id === videoViewChartChannelId);
+  const histories = (channel?.videoViewHistories || []).filter((history) => history.samples?.length);
+  if (!channel || !histories.length) {
+    if (elements.videoViewDialog.open) elements.videoViewDialog.close();
+    return;
+  }
+
+  let history = histories.find((item) => item.videoId === videoViewChartVideoId) || histories[0];
+  videoViewChartVideoId = history.videoId;
+  elements.videoViewSelect.innerHTML = histories.map((item) => (
+    `<option value="${escapeAttribute(item.videoId)}"${item.videoId === history.videoId ? ' selected' : ''}>${escapeHtml(item.title || item.videoId)}</option>`
+  )).join('');
+  elements.videoViewDialogTitle.textContent = history.title || '영상 조회수 추이';
+  elements.videoViewOpen.dataset.openUrl = history.url || `https://www.youtube.com/watch?v=${history.videoId}`;
+  elements.videoViewDialog.querySelectorAll('[data-video-view-range]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.videoViewRange === videoViewChartRange);
+  });
+
+  const math = window.LivePulseChartMath;
+  const now = Date.now();
+  const baseSamples = math.filterSamples(history.samples || [], videoViewChartRange, now);
+  const resetZoomButton = elements.videoViewDialog.querySelector('[data-reset-video-view-zoom]');
+  if (!baseSamples.length) {
+    videoViewChartViewport = null;
+    videoViewChartModel = null;
+    resetZoomButton.hidden = true;
+    elements.videoViewDetailContent.innerHTML = `
+      <div class="detail-chart-empty">
+        <strong>이 기간에 수집된 조회수 기록이 없습니다.</strong>
+        <span>더 긴 기간을 선택하거나, 앱이 최근 영상의 조회수를 수집할 때까지 기다려 주세요.</span>
+      </div>`;
+    return;
+  }
+
+  const lastSampleTime = baseSamples.at(-1).timestamp;
+  const baseTimeAxis = math.buildTimeAxis(baseSamples, videoViewChartRange, lastSampleTime);
+  if (videoViewChartViewport) {
+    videoViewChartViewport = math.zoomTimeWindow(
+      videoViewChartViewport,
+      baseTimeAxis,
+      (videoViewChartViewport.startTime + videoViewChartViewport.endTime) / 2,
+      1,
+      CHART_MINIMUM_SPAN_MS
+    );
+    if (isSameTimeWindow(videoViewChartViewport, baseTimeAxis)) videoViewChartViewport = null;
+  }
+
+  let samples = videoViewChartViewport
+    ? math.filterSamplesInTimeWindow(
+      baseSamples,
+      videoViewChartViewport.startTime,
+      videoViewChartViewport.endTime
+    )
+    : baseSamples;
+  if (!samples.length) {
+    videoViewChartViewport = null;
+    samples = baseSamples;
+  }
+  const timeAxis = videoViewChartViewport
+    ? math.buildTimeWindowAxis(videoViewChartViewport.startTime, videoViewChartViewport.endTime)
+    : baseTimeAxis;
+  const summary = math.summarizeSamples(samples);
+  const periodGrowth = samples[0].count > 0
+    ? (summary.change / samples[0].count) * 100
+    : null;
+  const changeClass = summary.change > 0 ? 'up' : summary.change < 0 ? 'down' : '';
+  const rangeLabel = videoViewChartViewport ? '확대 구간' : ({
+    '7d': '7일',
+    '30d': '30일',
+    '90d': '90일',
+    '1y': '1년',
+    all: '전체'
+  }[videoViewChartRange] || '선택 기간');
+  const chart = buildDetailChart(
+    samples,
+    math.linearRegression(samples),
+    timeAxis,
+    [],
+    null,
+    'samples',
+    {
+      svgId: 'video-view-detail-svg',
+      crosshairId: 'video-view-crosshair',
+      dotId: 'video-view-hover-dot',
+      tooltipId: 'video-view-tooltip',
+      selectionId: 'video-view-selection',
+      gradientId: 'video-view-chart-gradient',
+      titleId: 'video-view-chart-title',
+      descId: 'video-view-chart-desc',
+      title: '영상 조회수 상세 추이',
+      description: '선택한 기간의 실제 영상 조회수와 선형 추세선을 나타낸 차트입니다.',
+      selectionEnabled: false
+    }
+  );
+  videoViewChartModel = {
+    ...chart.model,
+    baseSamples,
+    fullTimeAxis: baseTimeAxis
+  };
+  resetZoomButton.hidden = !videoViewChartViewport;
+  elements.videoViewDetailContent.innerHTML = `
+    <div class="detail-metrics video-view-metrics">
+      ${renderDetailMetric(videoViewChartViewport ? '구간 마지막' : '최근 조회수', formatNumber(summary.current))}
+      ${renderDetailMetric(`${rangeLabel} 증감`, `${summary.change >= 0 ? '+' : ''}${formatNumber(summary.change)}`, changeClass)}
+      ${renderDetailMetric('기간 증가율', periodGrowth === null ? '—' : `${periodGrowth >= 0 ? '+' : ''}${formatPercent(periodGrowth)}%`, changeClass)}
+      ${renderDetailMetric('기간 고점', formatNumber(summary.high))}
+      ${renderDetailMetric('추세', `${summary.slopePerDay >= 0 ? '+' : ''}${formatTrend(summary.slopePerDay)}/일`, summary.slopePerDay > 0 ? 'up' : summary.slopePerDay < 0 ? 'down' : '')}
+    </div>
+    <div class="detail-chart-legend">
+      <span><i class="legend-actual"></i>실제 조회수</span>
+      <span><i class="legend-trend"></i>선형 추세선</span>
+      <span class="detail-selection-hint">마우스 휠 확대·축소</span>
+      <span>${videoViewChartViewport ? `${formatChartDate(timeAxis.startTime)}–${formatChartDate(timeAxis.endTime)} · ` : ''}${samples.length}개 기록</span>
+    </div>
+    ${chart.svg}`;
 }
 
 function renderDetailMetric(label, value, className = '') {
@@ -850,8 +1055,17 @@ function buildDetailChart(
   timeAxis,
   dailySamples = [],
   selection = null,
-  displayMode = 'samples'
+  displayMode = 'samples',
+  options = {}
 ) {
+  const svgId = options.svgId || 'subscriber-detail-svg';
+  const crosshairId = options.crosshairId || 'detail-crosshair';
+  const dotId = options.dotId || 'detail-hover-dot';
+  const tooltipId = options.tooltipId || 'detail-chart-tooltip';
+  const selectionId = options.selectionId || 'detail-selection';
+  const gradientId = options.gradientId || 'detail-chart-gradient';
+  const titleId = options.titleId || 'detail-chart-title';
+  const descId = options.descId || 'detail-chart-desc';
   const width = 840;
   const height = 320;
   const plot = { left: 68, right: 18, top: 18, bottom: 44 };
@@ -907,47 +1121,49 @@ function buildDetailChart(
   const pointDots = points.length <= 40
     ? points.map((point) => `<circle class="detail-point" cx="${point.x}" cy="${point.y}" r="2.5"/>`).join('')
     : '';
-  const selectionMarkup = selection
-    ? buildSelectionMarkup(selection, toX, endTime, plot, plotHeight)
-    : '<rect id="detail-selection" class="detail-selection hidden"/>';
+  const selectionMarkup = options.selectionEnabled === false
+    ? ''
+    : selection
+      ? buildSelectionMarkup(selection, toX, endTime, plot, plotHeight, selectionId)
+      : `<rect id="${escapeAttribute(selectionId)}" class="detail-selection hidden"/>`;
 
   return {
     model: { width, height, points, dayPoints, plot, timeAxis, displayMode },
     svg: `
       <div class="detail-chart-wrap">
-        <svg id="subscriber-detail-svg" class="detail-chart" viewBox="0 0 ${width} ${height}"
-          preserveAspectRatio="none" role="img" aria-labelledby="detail-chart-title detail-chart-desc">
-          <title id="detail-chart-title">구독자 수 상세 추이</title>
-          <desc id="detail-chart-desc">선택한 기간의 실제 구독자 수와 선형 추세선을 나타낸 차트입니다.</desc>
+        <svg id="${escapeAttribute(svgId)}" class="detail-chart" viewBox="0 0 ${width} ${height}"
+          preserveAspectRatio="none" role="img" aria-labelledby="${escapeAttribute(titleId)} ${escapeAttribute(descId)}">
+          <title id="${escapeAttribute(titleId)}">${escapeHtml(options.title || '구독자 수 상세 추이')}</title>
+          <desc id="${escapeAttribute(descId)}">${escapeHtml(options.description || '선택한 기간의 실제 구독자 수와 선형 추세선을 나타낸 차트입니다.')}</desc>
           <defs>
-            <linearGradient id="detail-chart-gradient" x1="0" y1="0" x2="0" y2="1">
+            <linearGradient id="${escapeAttribute(gradientId)}" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#38d995" stop-opacity="0.23"/>
               <stop offset="100%" stop-color="#38d995" stop-opacity="0"/>
             </linearGradient>
           </defs>
           ${yTicks}
           ${xTicks}
-          <polygon class="detail-chart-area" points="${areaPoints}"/>
+          <polygon class="detail-chart-area" style="fill:url(#${escapeAttribute(gradientId)})" points="${areaPoints}"/>
           <polyline class="detail-trend-line" points="${trendPoints}"/>
           <polyline class="detail-actual-line" points="${linePoints}"/>
           ${pointDots}
           ${selectionMarkup}
-          <line id="detail-crosshair" class="detail-crosshair hidden" y1="${plot.top}" y2="${plot.top + plotHeight}"/>
-          <circle id="detail-hover-dot" class="detail-hover-dot hidden" r="5"/>
+          <line id="${escapeAttribute(crosshairId)}" class="detail-crosshair hidden" y1="${plot.top}" y2="${plot.top + plotHeight}"/>
+          <circle id="${escapeAttribute(dotId)}" class="detail-hover-dot hidden" r="5"/>
         </svg>
-        <div id="detail-chart-tooltip" class="detail-chart-tooltip hidden"></div>
+        <div id="${escapeAttribute(tooltipId)}" class="detail-chart-tooltip hidden"></div>
       </div>`
   };
 }
 
-function buildSelectionMarkup(selection, toX, endTime, plot, plotHeight) {
+function buildSelectionMarkup(selection, toX, endTime, plot, plotHeight, selectionId = 'detail-selection') {
   const startTime = Math.min(selection.startTime, selection.endTime);
   const selectedEnd = Math.max(selection.startTime, selection.endTime);
   const nextDay = new Date(selectedEnd);
   nextDay.setDate(nextDay.getDate() + 1);
   const x = Math.max(plot.left, toX(startTime));
   const endX = toX(Math.min(endTime, nextDay.getTime()));
-  return `<rect id="detail-selection" class="detail-selection" x="${x.toFixed(2)}" y="${plot.top}" width="${Math.max(2, endX - x).toFixed(2)}" height="${plotHeight}" rx="4"/>`;
+  return `<rect id="${escapeAttribute(selectionId)}" class="detail-selection" x="${x.toFixed(2)}" y="${plot.top}" width="${Math.max(2, endX - x).toFixed(2)}" height="${plotHeight}" rx="4"/>`;
 }
 
 function handleDetailChartPointerDown(event) {
@@ -1067,6 +1283,76 @@ function handleDetailChartWheel(event) {
   detailChartDrag = null;
   hideDetailChartTooltip();
   renderSubscriberDetail();
+}
+
+function handleVideoViewPointerMove(event) {
+  const svg = event.target.closest?.('#video-view-detail-svg');
+  const model = videoViewChartModel;
+  if (!svg || !model?.points?.length) return;
+  const bounds = svg.getBoundingClientRect();
+  if (!bounds.width) return;
+  const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
+  const point = model.points.reduce((nearest, candidate) => (
+    Math.abs(candidate.x - viewX) < Math.abs(nearest.x - viewX) ? candidate : nearest
+  ));
+  const crosshair = elements.videoViewDialog.querySelector('#video-view-crosshair');
+  const dot = elements.videoViewDialog.querySelector('#video-view-hover-dot');
+  const tooltip = elements.videoViewDialog.querySelector('#video-view-tooltip');
+  if (!crosshair || !dot || !tooltip) return;
+
+  crosshair.setAttribute('x1', point.x);
+  crosshair.setAttribute('x2', point.x);
+  dot.setAttribute('cx', point.x);
+  dot.setAttribute('cy', point.y);
+  crosshair.classList.remove('hidden');
+  dot.classList.remove('hidden');
+  tooltip.classList.remove('hidden');
+  tooltip.innerHTML = `
+    <strong>${escapeHtml(formatNumber(point.sample.count))}회</strong>
+    <span>${escapeHtml(formatChartDateTime(point.sample.timestamp))}</span>`;
+  const pixelX = (point.x / model.width) * bounds.width;
+  const pixelY = (point.y / model.height) * bounds.height;
+  tooltip.style.left = `${Math.min(bounds.width - 84, Math.max(84, pixelX))}px`;
+  tooltip.style.top = `${Math.max(8, pixelY - 62)}px`;
+}
+
+function handleVideoViewWheel(event) {
+  const svg = event.target.closest?.('#video-view-detail-svg');
+  const model = videoViewChartModel;
+  if (!svg || !model?.points?.length || !model?.fullTimeAxis || !event.deltaY) return;
+  const bounds = svg.getBoundingClientRect();
+  if (!bounds.width) return;
+
+  event.preventDefault();
+  const plotWidth = model.width - model.plot.left - model.plot.right;
+  const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
+  const anchorRatio = Math.min(1, Math.max(0, (viewX - model.plot.left) / plotWidth));
+  const currentWindow = videoViewChartViewport || model.fullTimeAxis;
+  const anchorTime = currentWindow.startTime
+    + (currentWindow.endTime - currentWindow.startTime) * anchorRatio;
+  const nextWindow = window.LivePulseChartMath.zoomTimeWindow(
+    currentWindow,
+    model.fullTimeAxis,
+    anchorTime,
+    event.deltaY < 0 ? 0.8 : 1.25,
+    CHART_MINIMUM_SPAN_MS
+  );
+  if (!nextWindow || isSameTimeWindow(nextWindow, currentWindow)) return;
+  const nextSamples = window.LivePulseChartMath.filterSamplesInTimeWindow(
+    model.baseSamples,
+    nextWindow.startTime,
+    nextWindow.endTime
+  );
+  if (!nextSamples.length) return;
+  videoViewChartViewport = isSameTimeWindow(nextWindow, model.fullTimeAxis) ? null : nextWindow;
+  hideVideoViewTooltip();
+  renderVideoViewDetail();
+}
+
+function hideVideoViewTooltip() {
+  elements.videoViewDialog.querySelector('#video-view-crosshair')?.classList.add('hidden');
+  elements.videoViewDialog.querySelector('#video-view-hover-dot')?.classList.add('hidden');
+  elements.videoViewDialog.querySelector('#video-view-tooltip')?.classList.add('hidden');
 }
 
 function isSameTimeWindow(left, right) {
@@ -1202,8 +1488,8 @@ function openSettings() {
     ? '저장된 키 유지 (변경할 때만 입력)'
     : '입력하지 않아도 작동합니다';
   elements.apiKeyStatus.textContent = settings.hasApiKey
-    ? 'API 키 저장됨 · 공식 구독자 통계를 10분마다 보강합니다.'
-    : 'API 키 없음 · 공개 페이지에서 통계를 읽습니다.';
+    ? 'API 키 저장됨 · 공식 채널·영상 통계를 사용합니다. 구독자 수는 공개 정책상 반올림됩니다.'
+    : 'API 키 없음 · 공개 페이지로 영상 감지와 조회수 수집을 계속합니다.';
   elements.startupHelp.textContent = appState.app?.isPackaged
     ? 'Windows 시작 앱 설정에 반영됩니다.'
     : '개발 실행 중에는 등록하지 않으며, 설치본에서 적용됩니다.';
@@ -1237,7 +1523,7 @@ async function handleClearApiKey() {
     appState = await window.livePulse.updateSettings({ apiKey: '' });
     elements.settingApiKey.value = '';
     elements.settingApiKey.placeholder = '입력하지 않아도 작동합니다';
-    elements.apiKeyStatus.textContent = 'API 키 없음 · 공개 페이지에서 통계를 읽습니다.';
+    elements.apiKeyStatus.textContent = 'API 키 없음 · 공개 페이지로 영상 감지와 조회수 수집을 계속합니다.';
     render();
   });
 }

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DEFAULT_SETTINGS, createDefaultData } = require('./defaults');
 const { dedupeEvents } = require('./events');
+const { normalizeVideoViewHistories } = require('./video-history');
 
 class JsonStore {
   constructor(filePath) {
@@ -51,11 +52,14 @@ class JsonStore {
   #normalize(parsed) {
     const fallback = createDefaultData();
     const channels = Array.isArray(parsed?.channels)
-      ? parsed.channels.filter((channel) => typeof channel?.id === 'string')
+      ? parsed.channels.filter((channel) => typeof channel?.id === 'string').map((channel) => ({
+        ...channel,
+        videoViewHistories: normalizeVideoViewHistories(channel.videoViewHistories)
+      }))
       : fallback.channels;
 
     return {
-      version: 2,
+      version: 3,
       settings: {
         ...DEFAULT_SETTINGS,
         ...(parsed?.settings || {}),

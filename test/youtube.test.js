@@ -11,10 +11,13 @@ const {
   parseChannelMetadata,
   parseLocalizedCount,
   parsePlayerBroadcast,
+  parseVideoStatistics,
   parsePostsFromInitialData,
   parseVideoFeed,
   parseVideosFromInitialData,
-  safeVideoIdFromUrl
+  safeVideoIdFromUrl,
+  selectLiveBroadcast,
+  selectRecentVideos
 } = require('../src/lib/youtube');
 
 const CHANNEL_ID = 'UCtKtCiaWRz-d3EZn2xd1mdA';
@@ -84,6 +87,166 @@ test('라이브, 예약 방송, 일반 영상을 렌더러에서 구분한다', 
   assert.equal(videos[2].isUpcoming, false);
 });
 
+test('새 lockup 동영상 카드에서 영상 ID, 조회수와 게시 시각을 읽는다', () => {
+  const data = {
+    richItemRenderer: {
+      content: {
+        lockupViewModel: {
+          contentId: 'abcdefghijk',
+          contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+          contentImage: {
+            thumbnailViewModel: {
+              image: { sources: [{ url: 'https://img/video.jpg', width: 336 }] },
+              overlays: [{
+                thumbnailBottomOverlayViewModel: {
+                  badges: [{
+                    thumbnailBadgeViewModel: {
+                      text: '12:34',
+                      badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_DEFAULT'
+                    }
+                  }]
+                }
+              }]
+            }
+          },
+          metadata: {
+            lockupMetadataViewModel: {
+              title: { content: '새 일반 영상' },
+              metadata: {
+                contentMetadataViewModel: {
+                  metadataRows: [{ metadataParts: [
+                    { text: { content: '조회수 15만회' } },
+                    { text: { content: '8분 전' } }
+                  ] }]
+                }
+              }
+            }
+          },
+          rendererContext: {
+            commandContext: {
+              onTap: { innertubeCommand: { watchEndpoint: { videoId: 'abcdefghijk' } } }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const [video] = parseVideosFromInitialData(data);
+  assert.equal(video.id, 'abcdefghijk');
+  assert.equal(video.title, '새 일반 영상');
+  assert.equal(video.viewCount, 150_000);
+  assert.equal(video.publishedText, '8분 전');
+  assert.equal(video.isLive, false);
+  assert.equal(video.isUpcoming, false);
+});
+
+test('새 lockup 방송 카드에서 현재 라이브와 미래 예약만 구분한다', () => {
+  const lockup = (id, badge, startTimeSeconds = null) => ({
+    lockupViewModel: {
+      contentId: id,
+      contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+      contentImage: {
+        thumbnailViewModel: {
+          image: { sources: [] },
+          overlays: [{ thumbnailBottomOverlayViewModel: { badges: [
+            { thumbnailBadgeViewModel: badge }
+          ] } }]
+        }
+      },
+      metadata: { lockupMetadataViewModel: { title: { content: id } } },
+      rendererContext: {
+        commandContext: {
+          onTap: { innertubeCommand: { watchEndpoint: { videoId: id, startTimeSeconds } } }
+        }
+      }
+    }
+  });
+  const data = {
+    contents: [
+      lockup('abcdefghijk', {
+        text: '실시간',
+        badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_LIVE'
+      }),
+      lockup('lmnopqrstuv', {
+        text: '공개 예정',
+        badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_UPCOMING'
+      }, '4102444800'),
+      lockup('12345678901', {
+        text: '공개 예정',
+        badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_UPCOMING'
+      }, '1577836800')
+    ]
+  };
+
+  const videos = parseVideosFromInitialData(data);
+  assert.equal(videos[0].isLive, true);
+  assert.equal(videos[1].isUpcoming, true);
+  assert.equal(videos[1].scheduledStart, '2100-01-01T00:00:00.000Z');
+  assert.equal(videos[2].isUpcoming, false);
+});
+
+test('예약 배지만 있고 실제 미래 시작 시각이 없으면 예약 방송으로 열지 않는다', () => {
+  const [legacy, lockup] = parseVideosFromInitialData({
+    contents: [
+      {
+        videoRenderer: {
+          videoId: 'abcdefghijk',
+          title: { simpleText: '시각 없는 기존 카드' },
+          badges: [{ metadataBadgeRenderer: { label: 'UPCOMING' } }]
+        }
+      },
+      {
+        lockupViewModel: {
+          contentId: 'lmnopqrstuv',
+          contentType: 'LOCKUP_CONTENT_TYPE_VIDEO',
+          contentImage: {
+            thumbnailViewModel: {
+              overlays: [{ thumbnailBottomOverlayViewModel: { badges: [{
+                thumbnailBadgeViewModel: {
+                  text: '공개 예정',
+                  badgeStyle: 'THUMBNAIL_OVERLAY_BADGE_STYLE_UPCOMING'
+                }
+              }] } }]
+            }
+          },
+          metadata: { lockupMetadataViewModel: { title: { content: '시각 없는 새 카드' } } }
+        }
+      }
+    ]
+  });
+
+  assert.equal(legacy.isUpcoming, false);
+  assert.equal(lockup.isUpcoming, false);
+});
+
+test('일반 영상 알림 후보에서 현재 라이브와 예약 방송을 제외하고 ID 중복을 제거한다', () => {
+  const ordinary = { id: 'abcdefghijk', title: '일반 영상', isLive: false, isUpcoming: false };
+  const live = { id: 'lmnopqrstuv', title: '라이브', isLive: true, isUpcoming: false };
+  const upcoming = { id: '12345678901', title: '예약', isLive: false, isUpcoming: true };
+  const recent = selectRecentVideos([ordinary, live, upcoming], [ordinary], [live]);
+
+  assert.deepEqual(recent.map((video) => video.id), ['abcdefghijk']);
+});
+
+test('정상 응답한 live 재생기가 라이브가 아니면 목록의 라이브 배지만 믿지 않는다', () => {
+  const pageLive = {
+    id: 'abcdefghijk',
+    title: '목록에만 남은 LIVE',
+    isLive: true
+  };
+  assert.equal(selectLiveBroadcast(null, pageLive, true), null);
+  assert.equal(selectLiveBroadcast(null, pageLive, false), pageLive);
+
+  const playerLive = {
+    id: 'abcdefghijk',
+    title: '재생기로 확인한 LIVE',
+    isLive: true,
+    url: 'https://www.youtube.com/watch?v=abcdefghijk'
+  };
+  assert.equal(selectLiveBroadcast(playerLive, pageLive, true).title, '재생기로 확인한 LIVE');
+});
+
 test('플레이어 응답에서 현재 라이브와 예약 방송을 파싱한다', () => {
   const livePlayer = {
     videoDetails: {
@@ -106,6 +269,32 @@ test('플레이어 응답에서 현재 라이브와 예약 방송을 파싱한�
   assert.equal(parsed.id, 'abcdefghijk');
   assert.equal(parsed.isLive, true);
   assert.equal(parsed.isUpcoming, false);
+});
+
+test('공개 플레이어 응답에서 영상별 정확한 조회수와 게시 시각을 읽는다', () => {
+  const player = {
+    playabilityStatus: { status: 'OK' },
+    videoDetails: {
+      videoId: 'abcdefghijk',
+      title: '조회수 영상',
+      viewCount: '102886',
+      thumbnail: { thumbnails: [{ url: 'https://img/video.jpg', width: 320 }] }
+    },
+    microformat: {
+      playerMicroformatRenderer: {
+        publishDate: '2026-08-11T05:00:29-07:00'
+      }
+    }
+  };
+  const parsed = parseVideoStatistics(
+    `var ytInitialPlayerResponse = ${JSON.stringify(player)};`,
+    'https://www.youtube.com/watch?v=abcdefghijk'
+  );
+
+  assert.equal(parsed.id, 'abcdefghijk');
+  assert.equal(parsed.viewCount, 102_886);
+  assert.equal(parsed.publishedAt, '2026-08-11T05:00:29-07:00');
+  assert.equal(parsed.source, 'page');
 });
 
 test('시작 시각이 없거나 이미 지난 라이브를 예약 방송으로 분류하지 않는다', () => {

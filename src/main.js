@@ -27,12 +27,16 @@ const {
 const isSmokeSparseChart = process.argv.includes('--smoke-chart-sparse');
 const isSmokeGrowthChart = process.argv.includes('--smoke-growth-chart');
 const isSmokeZoomChart = process.argv.includes('--smoke-chart-zoom');
+const isSmokeVideoViews = process.argv.includes('--smoke-video-views');
 const isSmokeSettings = process.argv.includes('--smoke-settings');
 const isSmokeChart = process.argv.includes('--smoke-chart')
   || isSmokeSparseChart
   || isSmokeGrowthChart
   || isSmokeZoomChart;
-const isSmokeTest = process.argv.includes('--smoke-test') || isSmokeChart || isSmokeSettings;
+const isSmokeTest = process.argv.includes('--smoke-test')
+  || isSmokeChart
+  || isSmokeVideoViews
+  || isSmokeSettings;
 if (isSmokeTest) {
   app.setPath('userData', path.join(process.cwd(), '.smoke-user-data'));
 }
@@ -62,7 +66,7 @@ app.on('second-instance', () => showWindow());
 app.whenReady().then(() => {
   store = new JsonStore(path.join(app.getPath('userData'), 'live-pulse.json'));
   store.load();
-  if (isSmokeChart) seedSmokeChartData();
+  if (isSmokeChart || isSmokeVideoViews) seedSmokeChartData();
 
   createWindow();
   registerIpc();
@@ -114,7 +118,7 @@ app.on('window-all-closed', () => {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1180,
-    height: isSmokeGrowthChart || isSmokeZoomChart ? 1200 : 800,
+    height: isSmokeGrowthChart || isSmokeZoomChart || isSmokeVideoViews ? 1200 : 800,
     minWidth: 900,
     minHeight: 660,
     show: false,
@@ -140,7 +144,7 @@ function createWindow() {
 
   mainWindow.loadFile(
     path.join(__dirname, 'renderer', 'index.html'),
-    isSmokeChart || isSmokeSettings ? {
+    isSmokeChart || isSmokeVideoViews || isSmokeSettings ? {
       query: {
         ...(isSmokeChart ? {
           smokeChart: '1',
@@ -148,6 +152,7 @@ function createWindow() {
           chartSelection: isSmokeGrowthChart ? '1' : '0',
           chartZoom: isSmokeZoomChart ? '1' : '0'
         } : {}),
+        ...(isSmokeVideoViews ? { smokeVideoViews: '1' } : {}),
         ...(isSmokeSettings ? { smokeSettings: '1' } : {})
       }
     } : undefined
@@ -178,6 +183,8 @@ function scheduleSmokeCapture() {
           outputDirectory,
           isSmokeSettings
             ? 'settings-smoke.png'
+            : isSmokeVideoViews
+            ? 'video-view-smoke.png'
             : isSmokeGrowthChart
             ? 'subscriber-growth-smoke.png'
             : isSmokeZoomChart
@@ -215,6 +222,22 @@ function seedSmokeChartData() {
         count: Math.round(245000 + index * 73 + Math.sin(index / 4) * 310)
       };
     });
+    if (isSmokeVideoViews) {
+      const viewSampleCount = 85;
+      channel.videoViewHistories = [{
+        videoId: 'WTdyA5N4K0k',
+        title: '제나야 말 좀 해라!!!!!!!!!!!!!!',
+        url: 'https://www.youtube.com/watch?v=WTdyA5N4K0k',
+        thumbnailUrl: '',
+        publishedAt: new Date(now - 14 * dayMs).toISOString(),
+        lastCheckedAt: new Date(now).toISOString(),
+        source: 'page',
+        samples: Array.from({ length: viewSampleCount }, (_, index) => ({
+          at: new Date(now - (viewSampleCount - 1 - index) * 4 * 60 * 60 * 1000).toISOString(),
+          count: Math.round(7200 + index * 2800 + Math.sin(index / 5) * 4200)
+        }))
+      }];
+    }
   });
 }
 
@@ -276,7 +299,8 @@ function registerIpc() {
         lastVideoId: null,
         lastPostId: null,
         openedBroadcastIds: [],
-        subscriberHistory: []
+        subscriberHistory: [],
+        videoViewHistories: []
       });
     });
     broadcastState(monitor.publicState());

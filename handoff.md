@@ -1,16 +1,24 @@
 # Live Pulse handoff
 
-Last updated: 2026-08-03
+Last updated: 2026-08-11
 
 ## Current production state
 
-- Application version: `1.6.4`
+- Application version: `1.7.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.4`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.6.4` (`v1.7.0` pending)
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
 - License: MIT
+
+The v1.7.0 source fixes delayed regular-video detection caused by YouTube's newer `richItemRenderer -> lockupViewModel` cards. Monitoring now reads both `/videos` and `/streams`, supports both current lockups and legacy video renderers, and uses RSS as an additional rather than sole regular-video signal. Live and genuinely future upcoming items are removed from regular-video notification candidates. Stream-list upcoming items now require a real future start timestamp; an ambiguous upcoming badge without a time is not auto-opened. When `/live` responds normally, its player must confirm the current live; a possibly stale list badge is used only if the `/live` request itself fails.
+
+v1.7.0 also records exact public view-count samples for up to eight current regular videos every five minutes. An API key batches official `videos.list` statistics and public watch pages fill missing results; without a key, public watch pages provide the same core feature. The store migrates to version 3 and retains channel-scoped histories with change-based samples, six-hour unchanged heartbeats, 365-day retention, 100-video and 2,000-sample bounds, and whole-span compaction that preserves endpoints. The latest-video row opens a video selector and 7-day, 30-day, 90-day, 1-year or all-history chart with change, growth percentage, high, daily trend, tooltips and cursor-centered wheel zoom. Historical point-in-time views before v1.7.0 cannot be backfilled.
+
+The settings and documentation now state the API boundary explicitly: an API key grants no account access and does not make another channel's subscriber total exact. YouTube's official channel API still rounds the public subscriber count down to three significant figures. Its practical v1.7.0 benefit is batching public video statistics and using official public metadata; the app continues to detect videos, live broadcasts and view counts without a key.
+
+Local verification covers all 69 tests, syntax checks, a warning-free live snapshot of the affected `안녕하세요원이입니다잘부탁드립니다` channel whose `WTdyA5N4K0k` lockup was detected first with exact public-page views, and a warning-free currently-live Lofi Girl snapshot whose live item stayed out of regular videos. The x64 NSIS build succeeded, packaged version is `1.7.0`, both update metadata files target the public GitHub repository, the local installer SHA-512 matches `dist/latest.yml`, and Authenticode remains intentionally `NotSigned`. Packaged dashboard and zoomed video-view smoke captures passed. The public v1.7.0 Release is pending.
 
 The v1.6.4 source adds mouse-wheel zoom to both subscriber detail charts. Scrolling up zooms around the time under the pointer, scrolling down zooms out, and the active preset remains the maximum extent. Zoom stops at a one-day span. The visible subscriber summary, trendline and completed-day growth analysis all recalculate for the zoomed window, while the first visible growth day still uses the prior daily close as its hidden baseline. Changing a preset or clicking `확대 초기화` restores the full range; wheel zoom clears an existing click/drag date selection so the two interactions cannot leave conflicting ranges.
 
@@ -52,6 +60,7 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Opens Chrome once when a genuinely future scheduled broadcast is discovered.
 - Supports YouTube channel URLs, handles and channel IDs.
 - Displays recent videos and experimental community posts.
+- Reads both `/videos` and `/streams`, including current `lockupViewModel` cards, so RSS delay is not the only new-video signal.
 - Shows live/offline/checking indicators.
 - Records local subscriber-count history and renders a clickable detail chart with 7-day, 30-day, 90-day, 1-year and all-history ranges.
 - Shows actual subscriber values, a linear trendline, range change, high, low, daily trend and point tooltips.
@@ -65,6 +74,7 @@ Existing v1.0.x installations do not contain the updater and require one manual 
 - Tracks recently seen video and post IDs so feed reordering cannot create repeated notifications.
 - Removes already-stored duplicate recent notifications during the v2 store migration.
 - Uses an optional YouTube Data API key to improve official channel statistics.
+- Records recent per-video view-count histories and renders selectable detail charts with cursor-centered wheel zoom.
 - Stores configuration, deduplication state, events and history in local Electron user data.
 - Checks and installs updates from public GitHub Releases.
 - Keeps development and unpacked Electron runs isolated from the installed app’s Windows notification activation identity.
@@ -88,7 +98,7 @@ Current invariant:
 
 - Missing timestamps are not upcoming.
 - Past timestamps are not upcoming.
-- Only an explicit future timestamp, or an explicit upcoming badge when no timestamp exists in a stream-list renderer, can be upcoming.
+- Only an explicit future timestamp can be upcoming; a badge without a real start time is treated as ambiguous.
 
 Regression coverage is in `test/youtube.test.js`.
 
@@ -110,9 +120,10 @@ Regression coverage is in `test/events.test.js` and `test/store.test.js`.
 YouTube monitoring currently combines:
 
 - Channel and stream public pages
+- Channel video public pages and public video watch pages
 - `/channel/{id}/live` player response
 - Official YouTube channel RSS
-- Optional YouTube Data API channel statistics
+- Optional YouTube Data API channel and batched video statistics
 
 Known limitations:
 
@@ -120,6 +131,8 @@ Known limitations:
 - Public YouTube page structures can change.
 - Community-post detection is experimental.
 - Public subscriber numbers are rounded and may differ briefly between YouTube endpoints.
+- The optional API key is not OAuth and does not reveal private or exact subscriber totals for another channel; official public subscriber totals remain rounded to three significant figures.
+- View-history charts start when v1.7.0 first observes a video. YouTube is not used to fabricate historical point-in-time views.
 - Subscriber history starts when the app first runs unless the user imports a matching channel history `.xlsx`; YouTube itself is not used to backfill historical data.
 - Growth analytics use completed local-date closing samples, normalize missing-day gaps by elapsed calendar days and exclude the current partial day from calculations while leaving it visible on the raw chart.
 - The Windows installer is not code-signed and can trigger SmartScreen on first installation.
@@ -165,6 +178,7 @@ npm test
 npm run build
 node scripts/check-channel.js
 .\dist\win-unpacked\라이브 펄스.exe --smoke-test
+.\dist\win-unpacked\라이브 펄스.exe --smoke-video-views
 ```
 
 On this workstation, use the full npm CLI path documented in `AGENTS.md` if the npm shim fails.

@@ -86,6 +86,7 @@ async function fetchChannelSnapshot(channel, options = {}) {
   const channelUrl = `${YOUTUBE_ORIGIN}/channel/${channel.id}`;
   const tasks = {
     streams: fetchText(`${channelUrl}/streams`),
+    videos: fetchText(`${channelUrl}/videos`),
     posts: fetchText(`${channelUrl}/posts`),
     feed: fetchText(`https://www.youtube.com/feeds/videos.xml?channel_id=${channel.id}`),
     live: fetchText(`${channelUrl}/live`, { includeFinalUrl: true })
@@ -102,8 +103,13 @@ async function fetchChannelSnapshot(channel, options = {}) {
 
   const streamsHtml = settled.streams.status === 'fulfilled' ? settled.streams.value : '';
   const streamsData = streamsHtml ? parseInitialData(streamsHtml) : null;
-  const videos = streamsData ? parseVideosFromInitialData(streamsData) : [];
+  const streamVideos = streamsData ? parseVideosFromInitialData(streamsData) : [];
   if (settled.streams.status === 'rejected') warnings.push(formatRequestWarning('방송 목록', settled.streams.reason));
+
+  const videosHtml = settled.videos.status === 'fulfilled' ? settled.videos.value : '';
+  const videosData = videosHtml ? parseInitialData(videosHtml) : null;
+  const uploadedVideos = videosData ? parseVideosFromInitialData(videosData) : [];
+  if (settled.videos.status === 'rejected') warnings.push(formatRequestWarning('동영상 목록', settled.videos.reason));
 
   const postsHtml = settled.posts.status === 'fulfilled' ? settled.posts.value : '';
   const postsData = postsHtml ? parseInitialData(postsHtml) : null;
@@ -121,9 +127,9 @@ async function fetchChannelSnapshot(channel, options = {}) {
     warnings.push(formatRequestWarning('현재 라이브', settled.live.reason));
   }
 
-  const scrapedMetadata = streamsData
-    ? parseChannelMetadata(streamsData, streamsHtml)
-    : parseChannelMetadata(null, streamsHtml);
+  const metadataData = streamsData || videosData;
+  const metadataHtml = streamsHtml || videosHtml;
+  const scrapedMetadata = parseChannelMetadata(metadataData, metadataHtml);
   let metadata = scrapedMetadata;
   if (settled.official?.status === 'fulfilled') {
     metadata = { ...scrapedMetadata, ...settled.official.value, source: 'api' };
@@ -131,12 +137,15 @@ async function fetchChannelSnapshot(channel, options = {}) {
     warnings.push(formatRequestWarning('공식 채널 통계', settled.official.reason));
   }
 
-  const pageLive = videos.find((video) => video.isLive) || null;
-  const live = playerBroadcast?.isLive
-    ? mergeBroadcast(playerBroadcast, pageLive)
-    : pageLive;
+  const listedVideos = uniqueById([...streamVideos, ...uploadedVideos]);
+  const pageLive = listedVideos.find((video) => video.isLive) || null;
+  const live = selectLiveBroadcast(
+    playerBroadcast,
+    pageLive,
+    settled.live.status === 'fulfilled'
+  );
 
-  const upcomingCandidates = videos
+  const upcomingCandidates = listedVideos
     .filter((video) => video.isUpcoming && (!live || video.id !== live.id))
     .sort((a, b) => dateValue(a.scheduledStart) - dateValue(b.scheduledStart));
   if (playerBroadcast?.isUpcoming && (!live || playerBroadcast.id !== live.id)) {
@@ -144,14 +153,38 @@ async function fetchChannelSnapshot(channel, options = {}) {
     upcomingCandidates.sort((a, b) => dateValue(a.scheduledStart) - dateValue(b.scheduledStart));
   }
 
+  let recentVideos = selectRecentVideos(uploadedVideos, feed, streamVideos);
+  let videoStats = [];
+  if (options.includeVideoStats && recentVideos.length) {
+    try {
+      const result = await fetchVideoStatistics(
+        recentVideos.slice(0, 8).map((video) => video.id),
+        options.apiKey
+      );
+      videoStats = result.items;
+      if (result.warning) warnings.push(result.warning);
+      const statsById = new Map(videoStats.map((item) => [item.id, item]));
+      recentVideos = recentVideos.map((video) => ({
+        ...video,
+        ...(statsById.get(video.id) || {}),
+        title: statsById.get(video.id)?.title || video.title,
+        thumbnailUrl: statsById.get(video.id)?.thumbnailUrl || video.thumbnailUrl,
+        publishedAt: statsById.get(video.id)?.publishedAt || video.publishedAt
+      }));
+    } catch (error) {
+      warnings.push(formatRequestWarning('영상 조회수', error));
+    }
+  }
+
   return {
     checkedAt: new Date().toISOString(),
     metadata,
     live: live || null,
     upcoming: uniqueById(upcomingCandidates).slice(0, 5),
-    latestVideo: feed[0] || videos.find((video) => !video.isLive && !video.isUpcoming) || null,
+    latestVideo: recentVideos[0] || null,
     latestPost: posts[0] || null,
-    recentVideos: uniqueById([...feed, ...videos]).slice(0, 8),
+    recentVideos,
+    videoStats,
     recentPosts: posts.slice(0, 8),
     warnings: warnings.filter(Boolean)
   };
@@ -230,6 +263,11 @@ function extractBalancedObject(source, startIndex) {
 function parseVideosFromInitialData(data) {
   const videos = [];
   walkObject(data, (key, renderer) => {
+    if (key === 'lockupViewModel') {
+      const video = parseLockupVideo(renderer);
+      if (video) videos.push(video);
+      return;
+    }
     if (!['videoRenderer', 'gridVideoRenderer', 'compactVideoRenderer'].includes(key)) return;
     if (!renderer?.videoId) return;
     const labels = [
@@ -249,15 +287,9 @@ function parseVideosFromInitialData(data) {
       : null;
     const isLive = overlayStyles.includes('LIVE')
       || /\bLIVE NOW\b|실시간|생방송/.test(labelText);
-    const hasExplicitUpcomingBadge = (
-      overlayStyles.includes('UPCOMING')
-      || /UPCOMING|예정|공개 예정|PREMIERE/.test(labelText)
-    );
-    const isUpcoming = !isLive && (
-      scheduledStart
-        ? scheduledTimestamp > Date.now()
-        : hasExplicitUpcomingBadge
-    );
+    const isUpcoming = !isLive
+      && Boolean(scheduledStart)
+      && scheduledTimestamp > Date.now();
 
     videos.push({
       id: renderer.videoId,
@@ -265,12 +297,59 @@ function parseVideosFromInitialData(data) {
       url: `${YOUTUBE_ORIGIN}/watch?v=${renderer.videoId}`,
       thumbnailUrl: bestThumbnail(renderer.thumbnail?.thumbnails),
       publishedText: textFrom(renderer.publishedTimeText),
+      viewCount: parseLocalizedCount(textFrom(renderer.viewCountText)),
       scheduledStart,
       isLive,
       isUpcoming
     });
   });
   return uniqueById(videos);
+}
+
+function parseLockupVideo(lockup) {
+  if (!lockup || lockup.contentType !== 'LOCKUP_CONTENT_TYPE_VIDEO') return null;
+  const videoId = lockup.contentId
+    || lockup.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint?.videoId;
+  if (!/^[\w-]{11}$/.test(videoId || '')) return null;
+
+  const metadata = lockup.metadata?.lockupMetadataViewModel;
+  const metadataParts = (metadata?.metadata?.contentMetadataViewModel?.metadataRows || [])
+    .flatMap((row) => row?.metadataParts || []);
+  const metadataTexts = metadataParts.map((part) => textFrom(part?.text)).filter(Boolean);
+  const viewText = metadataTexts.find((text) => /조회수|views?/i.test(text)) || '';
+  const publishedText = metadataTexts.find((text) => text !== viewText) || '';
+  const labels = [];
+  const styles = [];
+  walkObject(lockup.contentImage, (key, value) => {
+    if (key !== 'thumbnailBadgeViewModel' || !value) return;
+    labels.push(value.text, value.rendererContext?.accessibilityContext?.label);
+    styles.push(value.badgeStyle);
+  });
+  const labelText = labels.filter(Boolean).join(' ').toUpperCase();
+  const styleText = styles.filter(Boolean).join(' ').toUpperCase();
+  const endpoint = lockup.rendererContext?.commandContext?.onTap?.innertubeCommand?.watchEndpoint;
+  const scheduledSeconds = endpoint?.startTimeSeconds;
+  const scheduledTimestamp = scheduledSeconds ? Number(scheduledSeconds) * 1000 : Number.NaN;
+  const scheduledStart = Number.isFinite(scheduledTimestamp)
+    ? new Date(scheduledTimestamp).toISOString()
+    : null;
+  const isLive = /(?:^|_)LIVE(?:_|$)/.test(styleText)
+    || /\bLIVE NOW\b|실시간|생방송/.test(labelText);
+  const isUpcoming = !isLive
+    && Boolean(scheduledStart)
+    && scheduledTimestamp > Date.now();
+
+  return {
+    id: videoId,
+    title: textFrom(metadata?.title) || '제목 없음',
+    url: `${YOUTUBE_ORIGIN}/watch?v=${videoId}`,
+    thumbnailUrl: bestThumbnail(lockup.contentImage?.thumbnailViewModel?.image?.sources),
+    publishedText,
+    viewCount: parseLocalizedCount(viewText),
+    scheduledStart,
+    isLive,
+    isUpcoming
+  };
 }
 
 function parsePostsFromInitialData(data) {
@@ -328,7 +407,7 @@ function parseChannelMetadata(data, html = '') {
   };
 }
 
-function parsePlayerBroadcast(html, finalUrl = '') {
+function parsePlayerResponse(html) {
   if (!html) return null;
   const markers = ['var ytInitialPlayerResponse =', 'ytInitialPlayerResponse ='];
   let player = null;
@@ -344,6 +423,11 @@ function parsePlayerBroadcast(html, finalUrl = '') {
       // Ignore malformed embedded data.
     }
   }
+  return player;
+}
+
+function parsePlayerBroadcast(html, finalUrl = '') {
+  const player = parsePlayerResponse(html);
   if (!player) return null;
 
   const videoId = player.videoDetails?.videoId
@@ -371,6 +455,81 @@ function parsePlayerBroadcast(html, finalUrl = '') {
     isLive,
     isUpcoming
   };
+}
+
+function parseVideoStatistics(html, finalUrl = '', source = 'page') {
+  const player = parsePlayerResponse(html);
+  if (!player || player.playabilityStatus?.status !== 'OK') return null;
+  const videoId = player.videoDetails?.videoId || safeVideoIdFromUrl(finalUrl);
+  if (!/^[\w-]{11}$/.test(videoId || '')) return null;
+  const microformat = player.microformat?.playerMicroformatRenderer || {};
+  return {
+    id: videoId,
+    title: player.videoDetails?.title || textFrom(microformat.title) || '제목 없음',
+    url: `${YOUTUBE_ORIGIN}/watch?v=${videoId}`,
+    thumbnailUrl: bestThumbnail(player.videoDetails?.thumbnail?.thumbnails)
+      || bestThumbnail(microformat.thumbnail?.thumbnails),
+    publishedAt: microformat.publishDate || microformat.uploadDate || null,
+    viewCount: numberOrNull(player.videoDetails?.viewCount ?? microformat.viewCount),
+    source
+  };
+}
+
+async function fetchVideoStatistics(videoIds, apiKey = '') {
+  const ids = [...new Set((videoIds || []).filter((id) => /^[\w-]{11}$/.test(id)))].slice(0, 8);
+  if (!ids.length) return { items: [], warning: null };
+  let apiError = null;
+  if (apiKey) {
+    try {
+      const officialItems = await fetchOfficialVideos(ids, apiKey);
+      const officialIds = new Set(officialItems.map((item) => item.id));
+      const missingIds = ids.filter((id) => !officialIds.has(id));
+      if (!missingIds.length) return { items: officialItems, warning: null };
+      const fallbackItems = await fetchPublicVideoStatistics(missingIds);
+      return { items: [...officialItems, ...fallbackItems], warning: null };
+    } catch (error) {
+      apiError = error;
+    }
+  }
+  const items = await fetchPublicVideoStatistics(ids);
+  return {
+    items,
+    warning: apiError ? formatRequestWarning('공식 영상 통계 · 공개 페이지로 대체', apiError) : null
+  };
+}
+
+async function fetchOfficialVideos(videoIds, apiKey) {
+  const endpoint = new URL('https://www.googleapis.com/youtube/v3/videos');
+  endpoint.search = new URLSearchParams({
+    part: 'snippet,statistics,status',
+    id: videoIds.join(','),
+    key: apiKey
+  }).toString();
+  const payload = await fetchJson(endpoint.toString());
+  return (payload.items || []).map((item) => ({
+    id: item.id,
+    title: item.snippet?.title || '제목 없음',
+    url: `${YOUTUBE_ORIGIN}/watch?v=${item.id}`,
+    thumbnailUrl: bestThumbnail(item.snippet?.thumbnails),
+    publishedAt: item.snippet?.publishedAt || null,
+    viewCount: numberOrNull(item.statistics?.viewCount),
+    source: 'api'
+  })).filter((item) => /^[\w-]{11}$/.test(item.id || '') && Number.isFinite(item.viewCount));
+}
+
+async function fetchPublicVideoStatistics(videoIds) {
+  const results = await Promise.allSettled(videoIds.map(async (videoId) => {
+    const response = await fetchText(`${YOUTUBE_ORIGIN}/watch?v=${videoId}`, { includeFinalUrl: true });
+    return parseVideoStatistics(response.body, response.url, 'page');
+  }));
+  const items = results
+    .filter((result) => result.status === 'fulfilled' && result.value)
+    .map((result) => result.value)
+    .filter((item) => Number.isFinite(item.viewCount));
+  if (!items.length && results.some((result) => result.status === 'rejected')) {
+    throw results.find((result) => result.status === 'rejected').reason;
+  }
+  return items;
 }
 
 function parseVideoFeed(xml) {
@@ -521,6 +680,20 @@ function uniqueById(items) {
   });
 }
 
+function selectRecentVideos(uploadedVideos, feedVideos, streamVideos, limit = 8) {
+  return uniqueById([
+    ...(uploadedVideos || []).filter((video) => !video.isLive && !video.isUpcoming),
+    ...(feedVideos || []).filter((video) => !video.isLive && !video.isUpcoming),
+    ...(streamVideos || []).filter((video) => !video.isLive && !video.isUpcoming)
+  ]).slice(0, limit);
+}
+
+function selectLiveBroadcast(playerBroadcast, pageLive, livePageAvailable = true) {
+  if (playerBroadcast?.isLive) return mergeBroadcast(playerBroadcast, pageLive);
+  if (!livePageAvailable && pageLive?.isLive) return pageLive;
+  return null;
+}
+
 function mergeBroadcast(primary, secondary) {
   if (!secondary || primary.id !== secondary.id) return primary;
   return {
@@ -591,15 +764,19 @@ module.exports = {
   extractBalancedObject,
   extractHandle,
   fetchChannelSnapshot,
+  fetchVideoStatistics,
   findChannelId,
   normalizeChannelId,
   parseChannelMetadata,
   parseInitialData,
   parseLocalizedCount,
   parsePlayerBroadcast,
+  parseVideoStatistics,
   parsePostsFromInitialData,
   parseVideoFeed,
   parseVideosFromInitialData,
   resolveChannelInput,
-  safeVideoIdFromUrl
+  safeVideoIdFromUrl,
+  selectLiveBroadcast,
+  selectRecentVideos
 };

@@ -17,6 +17,7 @@ test('첫 실행 시 기본 채널과 설정을 만든다', (context) => {
 
   assert.equal(data.channels[0].id, TARGET_CHANNEL_ID);
   assert.equal(data.settings.pollIntervalSeconds, 30);
+  assert.equal(data.version, 3);
   assert.equal(data.settings.startAtLogin, true);
   assert.equal(data.settings.subscriberChartMode, 'samples');
   assert.equal(fs.existsSync(filePath), true);
@@ -35,7 +36,7 @@ test('확인 주기를 15~300초 범위로 제한한다', () => {
   assert.equal(clampInterval('invalid'), 30);
 });
 
-test('기존 저장 파일을 열 때 중복 알림을 최신 한 건으로 정리한다', (context) => {
+test('기존 저장 파일을 열 때 중복 알림을 정리하고 영상 조회수 이력을 마이그레이션한다', (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'live-pulse-store-'));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const filePath = path.join(directory, 'settings.json');
@@ -43,7 +44,10 @@ test('기존 저장 파일을 열 때 중복 알림을 최신 한 건으로 정�
   fs.writeFileSync(filePath, JSON.stringify({
     version: 1,
     settings: {},
-    channels: [{ id: TARGET_CHANNEL_ID }],
+    channels: [{ id: TARGET_CHANNEL_ID, videoViewHistories: [{
+      videoId: 'abcdefghijk',
+      samples: [{ at: '2026-08-11T00:00:00Z', count: 100 }]
+    }] }],
     events: [
       { id: 'newer', channelId: TARGET_CHANNEL_ID, type: 'video', url: duplicateUrl },
       { id: 'older', channelId: TARGET_CHANNEL_ID, type: 'video', url: duplicateUrl }
@@ -52,6 +56,7 @@ test('기존 저장 파일을 열 때 중복 알림을 최신 한 건으로 정�
 
   const data = new JsonStore(filePath).load();
 
-  assert.equal(data.version, 2);
+  assert.equal(data.version, 3);
   assert.deepEqual(data.events.map((event) => event.id), ['newer']);
+  assert.equal(data.channels[0].videoViewHistories[0].samples[0].count, 100);
 });
