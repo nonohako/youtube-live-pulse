@@ -1,0 +1,37 @@
+{
+  "shortsLockupViewModel": {
+    "onTap": {
+      "innertubeCommand": {
+        "reelWatchEndpoint": {
+          "videoId": "mFM2hP5LEhM"
+        }
+      }
+    },
+    "overlayMetadata": {
+      "primaryText": {
+        "content": "스팸 원이 에디션(?)"
+      },
+      "secondaryText": {
+        "content": "조회수 30만회"
+      }
+    },
+    "thumbnailViewModel": {
+      "thumbnailViewModel": {
+        "image": {
+          "sources": [
+            {
+              "url": "https://i.ytimg.com/vi/mFM2hP5LEhM/oardefault.jpg?sqp=-oaymwEkCJUDENAFSFqQAgHyq4qpAxMIARUAAAAAJQAAyEI9AICiQ3gB&rs=AOn4CLCDKDjsaAsMLiQZz2pub_KEafaNPA&usqp=CCk",
+              "width": 405,
+              "height": 720
+            },
+            {
+              "url": "https://i.ytimg.com/vi/mFM2hP5LEhM/oardefault.jpg?sqp=-oaymwEnCJUDEOAESFqQAgHyq4qpAxYIARUAAAAAJQAAyEI9AICiQ3gByAEB&rs=AOn4CLCfItPK1rbYYYtcVCmK0Ql1nLucTw&usqp=CCk",
+              "width": 405,
+              "height": 608
+            }
+          ]
+        }
+      }
+    }
+  }
+}

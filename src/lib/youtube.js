@@ -87,6 +87,7 @@ async function fetchChannelSnapshot(channel, options = {}) {
   const tasks = {
     streams: fetchText(`${channelUrl}/streams`),
     videos: fetchText(`${channelUrl}/videos`),
+    shorts: fetchText(`${channelUrl}/shorts`),
     posts: fetchText(`${channelUrl}/posts`),
     feed: fetchText(`https://www.youtube.com/feeds/videos.xml?channel_id=${channel.id}`),
     live: fetchText(`${channelUrl}/live`, { includeFinalUrl: true })
@@ -110,6 +111,10 @@ async function fetchChannelSnapshot(channel, options = {}) {
   const videosData = videosHtml ? parseInitialData(videosHtml) : null;
   const uploadedVideos = videosData ? parseVideosFromInitialData(videosData) : [];
   if (settled.videos.status === 'rejected') warnings.push(formatRequestWarning('동영상 목록', settled.videos.reason));
+
+  const shortsData = settled.shorts.status === 'fulfilled' ? parseInitialData(settled.shorts.value) : null;
+  const shortVideos = shortsData ? parseVideosFromInitialData(shortsData) : [];
+  if (settled.shorts.status === 'rejected') warnings.push(formatRequestWarning('쇼츠 목록', settled.shorts.reason));
 
   const postsHtml = settled.posts.status === 'fulfilled' ? settled.posts.value : '';
   const postsData = postsHtml ? parseInitialData(postsHtml) : null;
@@ -153,7 +158,7 @@ async function fetchChannelSnapshot(channel, options = {}) {
     upcomingCandidates.sort((a, b) => dateValue(a.scheduledStart) - dateValue(b.scheduledStart));
   }
 
-  let recentVideos = selectRecentVideos(uploadedVideos, feed, streamVideos);
+  let recentVideos = selectRecentVideos(uploadedVideos, feed, streamVideos, 32, shortVideos);
   let videoStats = [];
   if (options.includeVideoStats && recentVideos.length) {
     try {
@@ -263,6 +268,24 @@ function extractBalancedObject(source, startIndex) {
 function parseVideosFromInitialData(data) {
   const videos = [];
   walkObject(data, (key, renderer) => {
+    if (key === 'shortsLockupViewModel' || key === 'reelItemRenderer') {
+      const id = renderer?.onTap?.innertubeCommand?.reelWatchEndpoint?.videoId
+        || renderer?.navigationEndpoint?.reelWatchEndpoint?.videoId || renderer?.videoId;
+      if (!/^[\w-]{11}$/.test(id || '')) return;
+      videos.push({
+        id,
+        title: textFrom(renderer.overlayMetadata?.primaryText) || textFrom(renderer.headline) || '제목 없음',
+        url: `${YOUTUBE_ORIGIN}/watch?v=${id}`,
+        thumbnailUrl: bestThumbnail(renderer.thumbnailViewModel?.thumbnailViewModel?.image?.sources
+          || renderer.thumbnail?.thumbnails),
+        publishedText: textFrom(renderer.publishedTimeText),
+        viewCount: parseLocalizedCount(textFrom(renderer.overlayMetadata?.secondaryText) || textFrom(renderer.viewCountText)),
+        scheduledStart: null,
+        isLive: false,
+        isUpcoming: false
+      });
+      return;
+    }
     if (key === 'lockupViewModel') {
       const video = parseLockupVideo(renderer);
       if (video) videos.push(video);
@@ -680,12 +703,16 @@ function uniqueById(items) {
   });
 }
 
-function selectRecentVideos(uploadedVideos, feedVideos, streamVideos, limit = 8) {
-  return uniqueById([
-    ...(uploadedVideos || []).filter((video) => !video.isLive && !video.isUpcoming),
-    ...(feedVideos || []).filter((video) => !video.isLive && !video.isUpcoming),
-    ...(streamVideos || []).filter((video) => !video.isLive && !video.isUpcoming)
-  ]).slice(0, limit);
+function selectRecentVideos(uploadedVideos, feedVideos, streamVideos, limit = 32, shortVideos = []) {
+  const sources = [feedVideos || [], shortVideos, uploadedVideos || [], streamVideos || []];
+  const excluded = new Set(sources.flat().filter((video) => video.isLive || video.isUpcoming).map((video) => video.id));
+  const candidates = sources.map((items) => items.filter((video) => !excluded.has(video.id)).slice(0, 8));
+  // Give every source room, including when a channel has more than eight long videos.
+  const interleaved = [];
+  for (let index = 0; index < 8; index += 1) {
+    for (const items of candidates) if (items[index]) interleaved.push(items[index]);
+  }
+  return uniqueById(interleaved).slice(0, limit);
 }
 
 function selectLiveBroadcast(playerBroadcast, pageLive, livePageAvailable = true) {

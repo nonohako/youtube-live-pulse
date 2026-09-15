@@ -1,6 +1,14 @@
 # Live Pulse handoff
 
-Last updated: 2026-08-11
+Last updated: 2026-09-15
+
+## v1.7.1 Shorts detection repair
+
+The reported `mFM2hP5LEhM` public player timestamp is September 15 at 18:00:21 KST; the installed app recorded detection at 20:17:14 KST (about 137 minutes later), despite a 15-second polling interval. The old code never fetched `/shorts`, and its parser returned zero items from the actual Shorts tab. RSS arrival history is not retained, so the exact past feed arrival time cannot be proved.
+
+The fix polls `/shorts`, parses current Shorts lockups and legacy reel cards, and interleaves up to eight items from each source into a bounded 32-item detection list. Public view statistics remain limited to eight items. Live/upcoming IDs are excluded across sources. A reduced public-card fixture and RSS-failure snapshot regression were added. All 72 tests and changed-file syntax checks pass. Both monitored public channels returned warning-free snapshots and the reported video was detected. Build, packaged smoke and public release verification are pending below; the currently installed application is not modified by source edits.
+
+Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exited with code 0 and produced a reviewed capture, updater metadata targets the existing repository, and installer SHA-512 matches `dist/latest.yml`. The installer remains unsigned. Automatic approval review rejected the combined commit/push/tag command before execution because public main/tag publication needs explicit user approval. Source changes and local installer are ready; public release remains v1.7.0. Next step after approval: commit/push main, publish v1.7.1 tag, wait for Actions, and download/verify public installer SHA-512. The installed app has not been updated and a real future-upload-to-Windows-toast check is still pending.
 
 ## Current production state
 

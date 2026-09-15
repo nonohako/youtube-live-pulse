@@ -22,6 +22,43 @@ const {
 
 const CHANNEL_ID = 'UCtKtCiaWRz-d3EZn2xd1mdA';
 
+test('실제 쇼츠 카드와 구형 reel 카드를 읽고 중복 및 잘못된 ID를 제거한다', () => {
+  const fixture = require('./fixtures/shorts-lockup.json');
+  const videos = parseVideosFromInitialData([fixture, fixture, {
+    reelItemRenderer: { videoId: 'abcdefghijk', headline: { simpleText: '구형 쇼츠' } }
+  }, { shortsLockupViewModel: { videoId: 'invalid' } }]);
+  assert.equal(videos.length, 2);
+  assert.equal(videos[0].id, 'mFM2hP5LEhM');
+  assert.equal(videos[0].title, '스팸 원이 에디션(?)');
+  assert.equal(videos[0].viewCount, 300000);
+  assert.equal(videos[0].isLive, false);
+  assert.equal(videos[1].title, '구형 쇼츠');
+});
+
+test('RSS에 없는 쇼츠도 일반 영상 8개에 밀리지 않으며 중복 라이브는 제외한다', () => {
+  const uploads = Array.from({ length: 12 }, (_, i) => ({ id: `upload${i}` }));
+  const shorts = parseVideosFromInitialData(require('./fixtures/shorts-lockup.json'));
+  const recent = selectRecentVideos(uploads, [{ id: 'live' }], [{ id: 'live', isLive: true }], 32, shorts);
+  assert.ok(recent.some((video) => video.id === 'mFM2hP5LEhM'));
+  assert.ok(!recent.some((video) => video.id === 'live'));
+  assert.equal(recent.length, 9);
+});
+
+test('RSS 실패 중에도 스냅샷이 shorts 탭에서 영상을 감지한다', async (t) => {
+  const requested = [];
+  const fixture = require('./fixtures/shorts-lockup.json');
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    requested.push(String(url));
+    if (String(url).includes('/feeds/')) throw new Error('RSS unavailable');
+    return { ok: true, url: String(url), text: async () => `var ytInitialData = ${JSON.stringify(String(url).endsWith('/shorts') ? fixture : {})};` };
+  });
+  const snapshot = await require('../src/lib/youtube').fetchChannelSnapshot({ id: CHANNEL_ID });
+  assert.ok(requested.some((url) => url.endsWith('/shorts')));
+  assert.equal(snapshot.latestVideo.id, 'mFM2hP5LEhM');
+  assert.equal(snapshot.recentVideos.length, 1);
+  assert.ok(snapshot.warnings.length > 0);
+});
+
 test('채널 ID와 핸들 입력을 안전하게 판별한다', () => {
   assert.deepEqual(normalizeChannelId(CHANNEL_ID), {
     id: CHANNEL_ID,

@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-08-11 after the verified v1.7.0 video-detection and per-video view-history release.
+Last maintained: 2026-09-15 for the v1.7.1 Shorts detection fix.
 
 ## Project mission
 
@@ -82,6 +82,7 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Core monitoring uses public YouTube pages and the official channel RSS feed.
 - The optional YouTube Data API key only improves public channel metadata and batches public video statistics. It is not OAuth, grants no account access and does not reveal exact subscriber totals for another channel; the official API rounds public subscriber counts down to three significant figures.
 - Fetch both `/videos` and `/streams`. Parse both legacy video renderers and the current `lockupViewModel` structure; do not rely on RSS publication delay as the only new-video signal.
+- Also fetch `/shorts` every polling cycle and parse `shortsLockupViewModel` and legacy `reelItemRenderer`. Interleave up to eight candidates per source (32 total) so long video lists cannot starve Shorts or RSS. Exclude IDs classified as live/upcoming by any source before merging. Regression coverage includes `mFM2hP5LEhM` with RSS unavailable.
 - Regular-video notification candidates must exclude every item currently classified as live or upcoming, even when the same ID appears in RSS, `/videos` and `/streams`.
 - When `/live` responds successfully, require its player response to confirm the current live before opening; do not trust a possibly stale list badge over a successful non-live player result. A list live item is only a network-failure fallback when `/live` itself could not be fetched.
 - Community-post detection is experimental because the official Data API does not expose community posts.
