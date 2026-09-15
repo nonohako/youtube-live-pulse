@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-15 for the v1.7.1 Shorts detection fix.
+Last maintained: 2026-09-15 after the verified public v1.7.1 Shorts detection release.
 
 ## Project mission
 
