@@ -5,14 +5,14 @@ const VIDEO_HISTORY_HEARTBEAT_MS = 6 * 60 * 60 * 1000;
 const MAX_VIDEO_HISTORIES = 100;
 const MAX_VIDEO_SAMPLES = 2000;
 
-function normalizeVideoViewHistories(histories, now = Date.now()) {
+function normalizeVideoViewHistories(histories, now = Date.now(), options = {}) {
   const referenceTime = Number.isFinite(Number(now)) ? Number(now) : Date.now();
-  const cutoff = referenceTime - VIDEO_HISTORY_RETENTION_MS;
+  const cutoff = options.retainAll ? 0 : referenceTime - VIDEO_HISTORY_RETENTION_MS;
   return (Array.isArray(histories) ? histories : [])
-    .map((history) => normalizeVideoHistory(history, cutoff))
+    .map((history) => normalizeVideoHistory(history, cutoff, options.sampleLimit ?? MAX_VIDEO_SAMPLES))
     .filter((history) => history?.samples?.length)
     .sort(compareHistories)
-    .slice(0, MAX_VIDEO_HISTORIES);
+    .slice(0, options.retainAll ? Infinity : MAX_VIDEO_HISTORIES);
 }
 
 function mergeVideoViewStatistics(histories, statistics, checkedAt = new Date().toISOString()) {
@@ -67,12 +67,12 @@ function mergeVideoViewStatistics(histories, statistics, checkedAt = new Date().
     .slice(0, MAX_VIDEO_HISTORIES);
 }
 
-function normalizeVideoHistory(history, cutoff = Date.now() - VIDEO_HISTORY_RETENTION_MS) {
+function normalizeVideoHistory(history, cutoff = Date.now() - VIDEO_HISTORY_RETENTION_MS, sampleLimit = MAX_VIDEO_SAMPLES) {
   const videoId = String(history?.videoId || history?.id || '');
   if (!/^[\w-]{11}$/.test(videoId)) return null;
   const samples = compactSamples(
     normalizeSamples(history.samples).filter((sample) => sample.timestamp >= cutoff),
-    MAX_VIDEO_SAMPLES
+    sampleLimit
   );
   return {
     videoId,

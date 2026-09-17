@@ -2,6 +2,10 @@
 
 Last updated: 2026-09-17
 
+## v1.8.1 adaptive collection and local archives
+
+User requested 100 videos per channel and no automatic local cleanup. Collector discovers up to 150 candidates to select 100 eligible videos, schedules 25 per channel at one minute with remaining videos at 5/60 minutes, and smooths observed views/minute to promote rising videos. Sparse samples keep Redis command counts independent of video count (about 232,128/month at 31 days with metadata caching for one desktop). Server expiry stays 30 days; desktop archive samples and rotated videos no longer expire or compact. Chart projection alone compacts points. This user-requested retention behavior does not waive API policy obligations. v1.8.1 replays the server window once to recover expanded rows truncated by older desktop clients. All 85 tests pass, including paginated 100-video scheduling, rate promotion, Redis metadata cache command budget, and retaining 500-day-old/2,100-sample/105-video archives. Packaged settings smoke and update metadata/hash verification passed. Live server returned 100 stored video metadata entries for each channel. The scheduler aligns due times to minute boundaries so response latency does not skip alternating fast polls. Public release and installed upgrade are pending.
+
 ## v1.8.0 cloud statistics work
 
 Added a separate Node-only Fly collector with Upstash REST storage, one-minute official channel/video statistics, five-minute uploads discovery, bounded authenticated sync and 30-day cloud retention. Desktop keeps local data separate and combines histories only in its public chart state; existing notification collection remains unchanged. Settings expose a Fly URL and a dedicated read token, never the Redis writer or server API key. Cloud cache compacts video charts to 2,000 points and preserves 30 days of subscriber minute samples for daily-close analytics; the server retains minute samples for 30 days. Server channel scope is configured explicitly, currently the two monitored channels. See `cloud/README.md`.

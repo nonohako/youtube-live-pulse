@@ -43,7 +43,7 @@ test('공식 API는 통계를 묶어 조회하고 비공개 수를 0으로 만�
   assert.deepEqual(saved.channels[0].views, { [VID]: 1234 });
   await collector.collect();
   assert.equal(paths.filter((path) => path.endsWith('/playlistItems')).length, 1);
-  assert.equal(paths.filter((path) => path.endsWith('/videos')).length, 2);
+  assert.equal(paths.filter((path) => path.endsWith('/videos')).length, 1);
   assert.equal(validCount(null), null);
   assert.equal(validCount('0'), 0);
 });
@@ -84,7 +84,7 @@ test('클라우드 동기화는 채널을 구분하고 기존 로컬 기록을 �
   assert.equal(displayed.videoViewHistories[0].samples[0].count, 1234);
   assert.equal(JSON.stringify(local), before);
   assert.deepEqual(mergePage({}, makePage(), [], NOW).channels, {});
-  assert.equal(pruneCloud(cloud, NOW + RETENTION_MS + 1).channels[CID].subscriberHistory.length, 0);
+  assert.equal(pruneCloud(cloud, NOW + RETENTION_MS + 1).channels[CID].subscriberHistory.length, 1);
   assert.deepEqual(pruneCloud(null).channels, {});
 });
 
@@ -143,4 +143,70 @@ test('HTTP 동기화 API는 인증, 커서 검증과 저장소 장애 응답을 
   assert.equal((await fetch(`${url}/v1/sync?after=-1`, { headers })).status, 400);
   assert.equal((await fetch(`${url}/v1/sync`, { headers })).status, 200);
   assert.equal(reads, 1);
+});
+
+test('100 videos paginate discovery, use variable intervals and promote rising videos', async () => {
+  let now = NOW + 1500, saved, lastIds = [];
+  const ids = Array.from({length: 120}, (_, i) => String(i).padStart(11, '0'));
+  const collector = new Collector({channelIds: [CID], apiKey: 'test', now: () => now,
+    store: {save: async sample => { saved = sample; }},
+    fetcher: async url => {
+      let data;
+      if (url.pathname.endsWith('/channels')) data = {items: [{id: CID, statistics: {subscriberCount: '100'}, contentDetails: {relatedPlaylists: {uploads: 'uploads'}}}]};
+      else if (url.pathname.endsWith('/playlistItems')) {
+        const start = Number(url.searchParams.get('pageToken') || 0);
+        data = {items: ids.slice(start, start + 50).map(videoId => ({contentDetails: {videoId}})), ...(start + 50 < ids.length ? {nextPageToken: String(start + 50)} : {})};
+      } else {
+        lastIds.push(...url.searchParams.get('id').split(','));
+        data = {items: url.searchParams.get('id').split(',').map(id => ({id, snippet: {channelId: CID, liveBroadcastContent: 'none'}, statistics: {viewCount: String(id === ids[80] && now >= NOW + 60 * 60000 ? 100000 : 100)}}))};
+      }
+      return {ok: true, json: async () => data};
+    }});
+  assert.equal(await collector.collect(), true);
+  assert.equal(Object.keys(saved.channels[0].views).length, 100);
+  now = NOW + 60000; lastIds = [];
+  await collector.collect(); assert.equal(lastIds.length, 25);
+  now = NOW + 5 * 60000; lastIds = [];
+  await collector.collect(); assert.equal(lastIds.length, 50);
+  now = NOW + 60 * 60000; lastIds = [];
+  await collector.collect(); assert.equal(lastIds.length, 100);
+  now += 60000; lastIds = [];
+  await collector.collect();
+  assert.ok(lastIds.includes(ids[80])); assert.equal(lastIds.length, 25);
+});
+
+test('downloaded archives preserve old samples and rotated videos without expiry or compaction', () => {
+  const old = NOW - 500 * 86400000;
+  const samples = Array.from({length: 2100}, (_, i) => ({at: new Date(old + i * 60000).toISOString(), count: i}));
+  const histories = Array.from({length: 105}, (_, i) => ({videoId: String(i).padStart(11, '0'), samples}));
+  const archive = pruneCloud({channels: {[CID]: {subscriberHistory: samples, videoViewHistories: histories}}}, NOW);
+  assert.equal(archive.channels[CID].subscriberHistory.length, 2100);
+  assert.equal(archive.channels[CID].videoViewHistories.length, 105);
+  assert.equal(archive.channels[CID].videoViewHistories[0].samples.length, 2100);
+  const views = Object.fromEntries(histories.slice(0,100).map(v => [v.videoId, 9999]));
+  const page = makePage(); page.samples[0].channels[0].views = views;
+  const merged = mergePage(archive, page, [CID], NOW);
+  assert.equal(merged.channels[CID].videoViewHistories.filter(v => v.samples.at(-1).count === 9999).length, 100);
+  assert.equal(merged.channels[CID].videoViewHistories.length, 105);
+});
+
+test('Redis caches metadata and stays within the one-desktop free command budget', async () => {
+  let commands = 0, gets = 0, sets = 0;
+  const store = new RedisStore('https://example.upstash.io', 'secret', async (_url, options) => {
+    const batch = JSON.parse(options.body);
+    commands += batch.length;
+    gets += batch.filter(c => c[0] === 'GET').length;
+    sets += batch.filter(c => c[0] === 'SET').length;
+    return {ok: true, json: async () => batch.map(c => ({result: c[0] === 'ZRANGEBYSCORE' ? [] : null}))};
+  });
+  for (let minute = 0; minute < 60; minute++) {
+    await store.save({at: NOW + minute * 60000, channels: []}, {[CID]: {title: 'Channel', videos: {[VID]: {title: 'Video'}}}});
+    await store.read(0, NOW + minute * 60000);
+  }
+  assert.equal(gets, 1);
+  assert.equal(sets, 12);
+  assert.equal(commands, 313);
+  assert.ok((commands - 1) * 24 * 31 < 250000);
+  const restarted = new RedisStore('https://example.upstash.io', 'secret', async (_url, options) => ({ok: true, json: async () => JSON.parse(options.body).map(c => ({result: c[0] === 'GET' ? JSON.stringify(store.metadataCache) : []}))}));
+  assert.equal((await restarted.read(0)).metadata[CID].videos[VID].title, 'Video');
 });

@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-17 after v1.8.0 public release and installed-app cloud synchronization verification.
+Last maintained: 2026-09-17 for v1.8.1 adaptive 100-video collection and persistent local archives.
 
 ## Project mission
 
@@ -134,12 +134,12 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 ## Cloud statistics invariants
 
 - `cloud/` is a separate Node-only Fly.io service; never deploy Electron or personal local data. Keep one 512MB shared machine with autostop disabled and `--ha=false`.
-- Collect official channel/video statistics every minute, refresh uploads playlists every five minutes, and exclude active live/upcoming videos. Cloud collection does not replace desktop notification detection.
+- Collect channel statistics every minute and track up to 100 eligible videos per channel. Refresh up to three 50-item uploads pages every five minutes. Poll the newest 10 plus 15 highest smoothed-growth videos every minute; remaining recent/rising videos every five minutes and quiet older videos hourly. Exclude active live/upcoming videos. Cloud collection does not replace desktop notification detection.
 - Keep YouTube and Upstash credentials only in Fly secrets. Desktop sync uses a separate read-only service token, hidden from renderer state; never embed user credentials in the public installer or repository.
-- Upstash writes only the `live-pulse:v1:*` namespace. Cloud statistics expire after 30 days on both server and desktop. Preserve unrelated local/imported histories separately.
+- Upstash writes only the `live-pulse:v1:*` namespace. Server statistics expire after 30 days. At the explicit user request, downloaded desktop archives no longer expire or compact stored samples; this technical setting does not waive YouTube API retention terms. Preserve unrelated local/imported histories separately.
 - Sync incrementally with validated cursors and bounded pages; resume after restart, deduplicate replayed times, and never fabricate missing samples or replace inaccessible counts with zero.
 - Health checks prove process availability only. Verify authentication rejection and at least two real persisted samples one minute apart before claiming live collection works.
-- Cloud subscriber history retains all actual minute samples for 30 days so daily closes remain exact; only video chart caches compact to 2,000 points. Connection files import only validated Fly HTTPS URL and read token through the main process, including `--cloud-config` onboarding.
+- Downloaded subscriber/video archives preserve actual samples and rotated-out video histories without automatic age or count deletion. Only the renderer video chart projection compacts to 2,000 points. Archive version 2 replays the server window once on upgrade to recover rows older clients truncated to eight videos. Connection files import only validated Fly HTTPS URL and read token through the main process, including `--cloud-config` onboarding.
 - See `cloud/README.md` for deployment, quotas, local cache compaction, configured-channel scope and recovery.
 
 ## Planned CHZZK provider

@@ -456,7 +456,7 @@ function updateSettings(partial) {
   const cloudChanged = ['cloudUrl', 'cloudToken'].some((key) => Object.hasOwn(changed, key) && changed[key] !== store.data.settings[key]);
   store.update((data) => Object.assign(data.settings, changed));
   if (cloudChanged) {
-    store.update((data) => { data.cloud = {}; });
+    store.update((data) => { data.cloud = { ...data.cloud, cursor: 0, endpoint: undefined }; });
     cloudSync?.start();
   }
   if (Object.hasOwn(changed, 'startAtLogin')) applyLoginSetting(changed.startAtLogin);

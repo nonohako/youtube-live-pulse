@@ -1,7 +1,7 @@
 'use strict';
 
 const { compactSamples, normalizeVideoViewHistories } = require('./video-history');
-const RETENTION = 30 * 86400_000;
+
 
 function parseConnectionFile(text) {
   if (typeof text !== 'string' || text.length > 4096) throw new Error('클라우드 연결 파일 크기가 올바르지 않습니다.');
@@ -22,7 +22,7 @@ function normalizeCloudUrl(value) {
   return url.origin;
 }
 
-function samplesMerged(first, second, cutoff = 0, limit = 2000) {
+function samplesMerged(first, second, cutoff = 0, limit = Infinity) {
   const byTime = new Map();
   for (const sample of [...(first || []), ...(second || [])]) {
     const time = Date.parse(sample?.at);
@@ -39,11 +39,11 @@ function pruneCloud(cloud = {}, now = Date.now()) {
   for (const [id, channel] of Object.entries(cloud.channels || {}).slice(0, 5)) {
     if (!/^UC[\w-]{22}$/.test(id)) continue;
     channels[id] = {
-      // Preserve every minute and each actual daily close for subscriber analytics.
-      subscriberHistory: samplesMerged(channel.subscriberHistory, [], now - RETENTION, 43_200),
+      // Keep downloaded history locally; server retention does not delete the archive.
+      subscriberHistory: samplesMerged(channel.subscriberHistory, [], 0, Infinity),
       videoViewHistories: normalizeVideoViewHistories((channel.videoViewHistories || []).map((video) => ({
-        ...video, samples: samplesMerged(video.samples, [], now - RETENTION)
-      })), now)
+        ...video, samples: samplesMerged(video.samples, [], 0)
+      })), now, { retainAll: true, sampleLimit: Infinity })
     };
   }
   return { ...cloud, channels };
@@ -60,7 +60,7 @@ function mergePage(cloud, page, allowedIds, now = Date.now()) {
       const target = next.channels[entry.id] ||= { subscriberHistory: [], videoViewHistories: [] };
       const at = new Date(sample.at).toISOString();
       if (Number.isSafeInteger(entry.subscriberCount) && entry.subscriberCount >= 0) target.subscriberHistory.push({ at, count: entry.subscriberCount });
-      for (const [id, count] of Object.entries(entry.views || {}).slice(0, 8)) {
+      for (const [id, count] of Object.entries(entry.views || {}).slice(0, 100)) {
         if (!/^[\w-]{11}$/.test(id) || !Number.isSafeInteger(count) || count < 0) continue;
         let video = target.videoViewHistories.find((item) => item.videoId === id);
         if (!video) {
@@ -94,7 +94,7 @@ function withCloudHistory(channel, cloud) {
     videos.set(video.videoId, { ...other, ...video, samples: samplesMerged(other?.samples, video.samples) });
   }
   return { ...channel, subscriberHistory: samplesMerged(fresh.subscriberHistory, channel.subscriberHistory, 0, Number.MAX_SAFE_INTEGER),
-    videoViewHistories: normalizeVideoViewHistories([...videos.values()]) };
+    videoViewHistories: normalizeVideoViewHistories([...videos.values()], Date.now(), { retainAll: true, sampleLimit: 2000 }) };
 }
 
 class CloudSync {
@@ -115,7 +115,7 @@ class CloudSync {
       const endpoint = normalizeCloudUrl(cloudUrl);
       // Catch up in bounded pages; additional backlog is resumed in the next minute.
       for (let i = 0; i < 10; i += 1) {
-        const cursor = this.store.data.cloud?.endpoint === endpoint ? Number(this.store.data.cloud.cursor) || 0 : 0;
+        const cursor = this.store.data.cloud?.endpoint === endpoint && this.store.data.cloud.archiveVersion === 2 ? Number(this.store.data.cloud.cursor) || 0 : 0;
         const response = await this.fetch(`${endpoint}/v1/sync?after=${cursor}`, {
           headers: { Authorization: `Bearer ${cloudToken}` }, redirect: 'error', signal: AbortSignal.timeout(15_000)
         });
@@ -124,9 +124,10 @@ class CloudSync {
         if (text.length > 2_000_000) throw new Error('클라우드 응답이 너무 큽니다.');
         const page = JSON.parse(text);
         if (this.store.data.settings.cloudUrl !== cloudUrl || this.store.data.settings.cloudToken !== cloudToken) return;
-        const base = this.store.data.cloud?.endpoint === endpoint ? this.store.data.cloud : {};
+        const base = { ...this.store.data.cloud, cursor };
         const merged = mergePage(base, page, this.store.data.channels.map((channel) => channel.id));
         merged.endpoint = endpoint;
+        merged.archiveVersion = 2;
         this.store.update((data) => { data.cloud = merged; });
         if (!page.hasMore || !page.samples.length) break;
       }
