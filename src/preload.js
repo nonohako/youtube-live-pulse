@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('livePulse', {
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
   importSubscriberHistory: (channelId) => ipcRenderer.invoke('subscriber-history:import', channelId),
   updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
+  importCloudConnection: () => ipcRenderer.invoke('cloud:import-connection'),
   openUrl: (url) => ipcRenderer.invoke('url:open', url),
   hideWindow: () => ipcRenderer.invoke('window:hide'),
   quit: () => ipcRenderer.invoke('app:quit'),

@@ -18,6 +18,7 @@ const { JsonStore, clampInterval } = require('./lib/store');
 const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
+const { CloudSync, normalizeCloudUrl, withCloudHistory, parseConnectionFile } = require('./lib/cloud-sync');
 const { loadSubscriberRecords, mergeSubscriberHistory } = require('./lib/subscriber-import');
 const {
   buildWindowsTaskbarDetails,
@@ -59,13 +60,15 @@ let tray = null;
 let store = null;
 let monitor = null;
 let updater = null;
+let cloudSync = null;
 let isQuitting = false;
 
-app.on('second-instance', () => showWindow());
+app.on('second-instance', (_event, argv) => { applyCloudConfigArgument(argv); showWindow(); });
 
 app.whenReady().then(() => {
   store = new JsonStore(path.join(app.getPath('userData'), 'live-pulse.json'));
   store.load();
+  applyCloudConfigArgument(process.argv);
   if (isSmokeChart || isSmokeVideoViews) seedSmokeChartData();
 
   createWindow();
@@ -85,6 +88,8 @@ app.whenReady().then(() => {
     onOpen: openInChrome
   });
   monitor.start();
+  cloudSync = new CloudSync({ store, onState: () => broadcastState(monitor.publicState()) });
+  cloudSync.start();
 
   updater = new AppUpdater({
     getParentWindow: () => mainWindow,
@@ -106,6 +111,7 @@ app.whenReady().then(() => {
 app.on('activate', () => showWindow());
 
 app.on('before-quit', () => {
+  cloudSync?.stop();
   isQuitting = true;
   monitor?.stop();
   updater?.stop();
@@ -178,6 +184,9 @@ function scheduleSmokeCapture() {
       try {
         const outputDirectory = path.join(process.cwd(), 'artifacts');
         fs.mkdirSync(outputDirectory, { recursive: true });
+        if (isSmokeSettings) {
+          await mainWindow.webContents.executeJavaScript("document.getElementById('setting-cloud-url')?.scrollIntoView({ block: 'center', behavior: 'instant' }); new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+        }
         const image = await mainWindow.webContents.capturePage();
         const outputPath = path.join(
           outputDirectory,
@@ -282,6 +291,12 @@ function rebuildTrayMenu() {
 }
 
 function registerIpc() {
+  ipcMain.handle('cloud:import-connection', async () => {
+    const selected = await dialog.showOpenDialog(mainWindow, { title: '클라우드 연결 파일 선택', properties: ['openFile'], filters: [{ name: '연결 파일', extensions: ['json'] }] });
+    if (selected.canceled || !selected.filePaths[0]) return { canceled: true };
+    importCloudConnection(selected.filePaths[0]);
+    return { canceled: false };
+  });
   ipcMain.handle('state:get', () => withAppInfo(monitor?.publicState() || initialPublicState()));
 
   ipcMain.handle('channel:add', async (_event, input) => {
@@ -302,6 +317,7 @@ function registerIpc() {
         subscriberHistory: [],
         videoViewHistories: []
       });
+      if (data.cloud) data.cloud.cursor = 0;
     });
     broadcastState(monitor.publicState());
     void monitor.runNow({ forceOfficial: true });
@@ -312,6 +328,7 @@ function registerIpc() {
     if (typeof channelId !== 'string') throw new Error('올바르지 않은 채널 ID입니다.');
     store.update((data) => {
       data.channels = data.channels.filter((channel) => channel.id !== channelId);
+      if (data.cloud?.channels) delete data.cloud.channels[channelId];
       data.events = data.events.filter((event) => event.channelId !== channelId);
     });
     broadcastState(monitor.publicState());
@@ -384,6 +401,22 @@ function registerIpc() {
   });
 }
 
+function importCloudConnection(filePath) {
+  if (fs.statSync(filePath).size > 4096) throw new Error('클라우드 연결 파일이 너무 큽니다.');
+  return updateSettings(parseConnectionFile(fs.readFileSync(filePath, 'utf8')));
+}
+
+function applyCloudConfigArgument(argv) {
+  const index = argv.indexOf('--cloud-config');
+  if (index < 0 || !store) return;
+  try {
+    if (!argv[index + 1] || !path.isAbsolute(argv[index + 1])) throw new Error('연결 파일의 절대 경로가 필요합니다.');
+    importCloudConnection(argv[index + 1]);
+  } catch {
+    dialog.showErrorBox('클라우드 연결 실패', '연결 파일을 읽지 못했습니다. 설정에서 올바른 연결 파일을 다시 선택하세요.');
+  }
+}
+
 function updateSettings(partial) {
   if (!partial || typeof partial !== 'object') throw new Error('설정 값이 올바르지 않습니다.');
   const allowedBooleanKeys = [
@@ -412,8 +445,20 @@ function updateSettings(partial) {
     if (apiKey.length > 256) throw new Error('API 키가 너무 깁니다.');
     changed.apiKey = apiKey;
   }
+  if (Object.hasOwn(partial, 'cloudUrl')) changed.cloudUrl = normalizeCloudUrl(partial.cloudUrl);
+  if (Object.hasOwn(partial, 'cloudToken')) {
+    const token = String(partial.cloudToken || '').trim();
+    if (token && (token.length < 32 || token.length > 256 || /\s/.test(token))) throw new Error('클라우드 연결 키를 확인하세요.');
+    changed.cloudToken = token;
+  }
+  if (changed.cloudUrl === '') changed.cloudToken = '';
 
+  const cloudChanged = ['cloudUrl', 'cloudToken'].some((key) => Object.hasOwn(changed, key) && changed[key] !== store.data.settings[key]);
   store.update((data) => Object.assign(data.settings, changed));
+  if (cloudChanged) {
+    store.update((data) => { data.cloud = {}; });
+    cloudSync?.start();
+  }
   if (Object.hasOwn(changed, 'startAtLogin')) applyLoginSetting(changed.startAtLogin);
   if (Object.hasOwn(changed, 'pollIntervalSeconds')) monitor?.restart();
   rebuildTrayMenu();
@@ -438,9 +483,11 @@ function initialPublicState() {
     settings: {
       ...store.data.settings,
       apiKey: undefined,
+      cloudToken: undefined,
+      hasCloudToken: Boolean(store.data.settings.cloudToken),
       hasApiKey: Boolean(store.data.settings.apiKey)
     },
-    channels: store.data.channels,
+    channels: store.data.channels.map((channel) => withCloudHistory(channel, store.data.cloud)),
     events: store.data.events,
     monitor: { running: false, nextCheckAt: null }
   };

@@ -91,6 +91,8 @@ function cacheElements() {
     'setting-startup', 'setting-live', 'setting-upcoming', 'setting-videos',
     'setting-posts', 'setting-subscriber-chart-mode', 'setting-interval',
     'setting-api-key', 'api-key-status',
+    'setting-cloud-url', 'setting-cloud-token', 'cloud-sync-status',
+    'import-cloud-connection',
     'startup-help', 'app-version', 'update-button', 'update-status',
     'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
     'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content',
@@ -140,6 +142,16 @@ function bindEvents() {
   elements.videoViewDialog.addEventListener('wheel', handleVideoViewWheel, { passive: false });
   elements.settingsForm.addEventListener('submit', handleSaveSettings);
   elements.clearApiKey.addEventListener('click', handleClearApiKey);
+  elements.importCloudConnection.addEventListener('click', () => safely(async () => {
+    const result = await window.livePulse.importCloudConnection();
+    if (result.canceled) return;
+    appState = await window.livePulse.getState();
+    elements.settingCloudUrl.value = appState.settings.cloudUrl || '';
+    elements.settingCloudToken.value = '';
+    elements.settingCloudToken.placeholder = '저장된 연결 키 유지';
+    elements.cloudSyncStatus.textContent = '연결 파일 적용 완료 · 동기화 중';
+    render();
+  }));
   elements.hideButton.addEventListener('click', () => window.livePulse.hideWindow());
   elements.quitButton.addEventListener('click', () => {
     if (window.confirm('라이브 펄스를 완전히 종료할까요? 백그라운드 확인도 중단됩니다.')) {
@@ -1484,6 +1496,12 @@ function openSettings() {
     : 'samples';
   elements.settingInterval.value = settings.pollIntervalSeconds;
   elements.settingApiKey.value = '';
+  elements.settingCloudUrl.value = settings.cloudUrl || '';
+  elements.settingCloudToken.value = '';
+  elements.settingCloudToken.placeholder = settings.hasCloudToken ? '저장된 연결 키 유지' : '새로 연결할 때 입력';
+  elements.cloudSyncStatus.textContent = appState.cloud?.error || (settings.cloudUrl
+    ? (appState.cloud?.lastSyncAt ? `최근 동기화: ${new Date(appState.cloud.lastSyncAt).toLocaleString('ko-KR')}` : '연결 후 동기화를 기다립니다.')
+    : '클라우드 연결 안 됨');
   elements.settingApiKey.placeholder = settings.hasApiKey
     ? '저장된 키 유지 (변경할 때만 입력)'
     : '입력하지 않아도 작동합니다';
@@ -1505,9 +1523,11 @@ async function handleSaveSettings(event) {
     notifyNewVideos: elements.settingVideos.checked,
     notifyNewPosts: elements.settingPosts.checked,
     subscriberChartMode: elements.settingSubscriberChartMode.value,
-    pollIntervalSeconds: Number(elements.settingInterval.value)
+    pollIntervalSeconds: Number(elements.settingInterval.value),
+    cloudUrl: elements.settingCloudUrl.value.trim()
   };
   if (elements.settingApiKey.value.trim()) update.apiKey = elements.settingApiKey.value.trim();
+  if (elements.settingCloudToken.value.trim()) update.cloudToken = elements.settingCloudToken.value.trim();
 
   await safely(async () => {
     appState = await window.livePulse.updateSettings(update);

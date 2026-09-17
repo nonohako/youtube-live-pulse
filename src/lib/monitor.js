@@ -3,6 +3,7 @@
 const { fetchChannelSnapshot } = require('./youtube');
 const { eventDedupKey } = require('./events');
 const { mergeVideoViewStatistics } = require('./video-history');
+const { withCloudHistory } = require('./cloud-sync');
 
 const OFFICIAL_STATS_INTERVAL_MS = 10 * 60 * 1000;
 const VIDEO_STATS_INTERVAL_MS = 5 * 60 * 1000;
@@ -64,10 +65,12 @@ class ChannelMonitor {
       settings: {
         ...settings,
         apiKey: undefined,
+        cloudToken: undefined,
+        hasCloudToken: Boolean(settings.cloudToken),
         hasApiKey: Boolean(settings.apiKey)
       },
       channels: this.store.data.channels.map((channel) => ({
-        ...channel,
+        ...withCloudHistory(channel, this.store.data.cloud),
         ...(this.runtime.get(channel.id) || {
           status: 'waiting',
           snapshot: null,
@@ -75,6 +78,7 @@ class ChannelMonitor {
         })
       })),
       events: this.store.data.events,
+      cloud: { lastSyncAt: this.store.data.cloud?.lastSyncAt, lastCollectionAt: this.store.data.cloud?.lastCollectionAt, error: this.store.data.cloud?.error },
       monitor: {
         running: this.running,
         nextCheckAt: this.nextCheckAt,

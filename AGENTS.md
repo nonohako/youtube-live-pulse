@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-15 after the verified public v1.7.1 Shorts detection release.
+Last maintained: 2026-09-17 for v1.8.0 cloud statistics collection and synchronization.
 
 ## Project mission
 
@@ -130,6 +130,17 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Development runs, unpacked builds and smoke tests must use `process.execPath` as their AppUserModelID so they cannot overwrite production toast activation with `node_modules\\electron\\dist\\electron.exe`.
 - Production uses the stable ToastActivatorCLSID `{EAFF6767-89DB-4AC0-98A0-9F4FBE3AC3D7}` and repairs both notification properties on the existing Start Menu shortcut before creating notifications.
 - A missing or unreadable Start Menu shortcut must fall back to the isolated development identity instead of claiming the production notification identity.
+
+## Cloud statistics invariants
+
+- `cloud/` is a separate Node-only Fly.io service; never deploy Electron or personal local data. Keep one 512MB shared machine with autostop disabled and `--ha=false`.
+- Collect official channel/video statistics every minute, refresh uploads playlists every five minutes, and exclude active live/upcoming videos. Cloud collection does not replace desktop notification detection.
+- Keep YouTube and Upstash credentials only in Fly secrets. Desktop sync uses a separate read-only service token, hidden from renderer state; never embed user credentials in the public installer or repository.
+- Upstash writes only the `live-pulse:v1:*` namespace. Cloud statistics expire after 30 days on both server and desktop. Preserve unrelated local/imported histories separately.
+- Sync incrementally with validated cursors and bounded pages; resume after restart, deduplicate replayed times, and never fabricate missing samples or replace inaccessible counts with zero.
+- Health checks prove process availability only. Verify authentication rejection and at least two real persisted samples one minute apart before claiming live collection works.
+- Cloud subscriber history retains all actual minute samples for 30 days so daily closes remain exact; only video chart caches compact to 2,000 points. Connection files import only validated Fly HTTPS URL and read token through the main process, including `--cloud-config` onboarding.
+- See `cloud/README.md` for deployment, quotas, local cache compaction, configured-channel scope and recovery.
 
 ## Planned CHZZK provider
 

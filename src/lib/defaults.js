@@ -10,7 +10,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   notifyNewVideos: true,
   notifyNewPosts: true,
   subscriberChartMode: 'samples',
-  apiKey: ''
+  apiKey: '',
+  cloudUrl: '',
+  cloudToken: ''
 });
 
 function createDefaultChannel() {

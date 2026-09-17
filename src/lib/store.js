@@ -5,6 +5,7 @@ const path = require('node:path');
 const { DEFAULT_SETTINGS, createDefaultData } = require('./defaults');
 const { dedupeEvents } = require('./events');
 const { normalizeVideoViewHistories } = require('./video-history');
+const { pruneCloud } = require('./cloud-sync');
 
 class JsonStore {
   constructor(filePath) {
@@ -60,6 +61,7 @@ class JsonStore {
 
     return {
       version: 3,
+      cloud: pruneCloud(parsed?.cloud),
       settings: {
         ...DEFAULT_SETTINGS,
         ...(parsed?.settings || {}),

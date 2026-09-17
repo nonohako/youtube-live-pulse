@@ -1,6 +1,12 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-15
+Last updated: 2026-09-17
+
+## v1.8.0 cloud statistics work
+
+Added a separate Node-only Fly collector with Upstash REST storage, one-minute official channel/video statistics, five-minute uploads discovery, bounded authenticated sync and 30-day cloud retention. Desktop keeps local data separate and combines histories only in its public chart state; existing notification collection remains unchanged. Settings expose a Fly URL and a dedicated read token, never the Redis writer or server API key. Cloud cache compacts video charts to 2,000 points and preserves 30 days of subscriber minute samples for daily-close analytics; the server retains minute samples for 30 days. Server channel scope is configured explicitly, currently the two monitored channels. See `cloud/README.md`.
+
+Cloud deployed to `live-pulse-stats-nonohako` in `nrt`, one 512MB shared CPU machine (`d8d5620b4d0928`). User explicitly approved key registration. Server API/Redis credentials are in Fly secrets; the local temporary credential file and bootstrap process were removed after verification. Two actual persisted samples at 13:00 and 13:01 UTC on September 17 were exactly 60 seconds apart, each covering both channels and 8 videos each. Health returned 200 and unauthenticated sync 401. Desktop sync into an isolated JsonStore, reload/resume and renderer credential masking passed. All 82 tests, syntax checks and packaged connection-file import passed. Settings screenshot review caught an unstyled URL field; it now shares the standard input styling. Release publication and installed-app integration are pending.
 
 ## v1.7.1 Shorts detection repair
 

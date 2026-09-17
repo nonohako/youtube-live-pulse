@@ -181,6 +181,16 @@
         <small>API 키는 공개 통계를 더 효율적으로 조회할 뿐 계정 권한을 주지 않습니다. 다른 채널의 구독자 수는 API를 써도 YouTube 정책에 따라 반올림됩니다.</small>
       </div>
 
+      <div class="field-group">
+        <label for="setting-cloud-url">24시간 통계 수집 서버 <span>선택</span></label>
+        <input id="setting-cloud-url" type="url" placeholder="https://앱이름.fly.dev" autocomplete="off">
+        <label for="setting-cloud-token">클라우드 연결 키</label>
+        <input id="setting-cloud-token" type="password" autocomplete="off" placeholder="새로 연결할 때 입력">
+        <small id="cloud-sync-status">클라우드 연결 안 됨</small>
+        <button id="import-cloud-connection" type="button" class="text-button">연결 파일 가져오기</button>
+        <small>PC를 꺼도 서버가 1분마다 수집합니다. 서버에 등록한 채널의 최근 30일 기록을 동기화합니다. 구독자 수는 YouTube의 공개 단위로 표시됩니다. 주소를 비우고 저장하면 연결을 해제합니다.</small>
+      </div>
+
       <div class="dialog-actions">
         <button id="quit-button" type="button" class="danger-text-button">앱 완전히 종료</button>
         <div>
