@@ -6,7 +6,7 @@ Last updated: 2026-09-17
 
 Added a separate Node-only Fly collector with Upstash REST storage, one-minute official channel/video statistics, five-minute uploads discovery, bounded authenticated sync and 30-day cloud retention. Desktop keeps local data separate and combines histories only in its public chart state; existing notification collection remains unchanged. Settings expose a Fly URL and a dedicated read token, never the Redis writer or server API key. Cloud cache compacts video charts to 2,000 points and preserves 30 days of subscriber minute samples for daily-close analytics; the server retains minute samples for 30 days. Server channel scope is configured explicitly, currently the two monitored channels. See `cloud/README.md`.
 
-Cloud deployed to `live-pulse-stats-nonohako` in `nrt`, one 512MB shared CPU machine (`d8d5620b4d0928`). User explicitly approved key registration. Server API/Redis credentials are in Fly secrets; the local temporary credential file and bootstrap process were removed after verification. Two actual persisted samples at 13:00 and 13:01 UTC on September 17 were exactly 60 seconds apart, each covering both channels and 8 videos each. Health returned 200 and unauthenticated sync 401. Desktop sync into an isolated JsonStore, reload/resume and renderer credential masking passed. All 82 tests, syntax checks and packaged connection-file import passed. Settings screenshot review caught an unstyled URL field; it now shares the standard input styling. Release publication and installed-app integration are pending.
+Cloud deployed to `live-pulse-stats-nonohako` in `nrt`, one 512MB shared CPU machine (`d8d5620b4d0928`). User explicitly approved key registration. Server API/Redis credentials are in Fly secrets; the local temporary credential file and bootstrap process were removed after verification. Two actual persisted samples at 13:00 and 13:01 UTC on September 17 were exactly 60 seconds apart, each covering both channels and 8 videos each. Health returned 200 and unauthenticated sync 401. Desktop sync into an isolated JsonStore, reload/resume and renderer credential masking passed. All 82 tests, syntax checks and packaged connection-file import passed. Settings screenshot review caught an unstyled URL field; it now shares the standard input styling. Source commit `1ad8843` and tag `v1.8.0` were published. GitHub Actions run `35225305477` succeeded; the non-draft, non-prerelease Release has the installer, block map and latest.yml. The downloaded public installer matched published SHA-512 and GitHub SHA-256. The public installer remains unsigned. The installed app was upgraded to 1.8.0.0 and connected via --cloud-config. At 13:23:48 UTC, its real user store confirmed successful sync with no error, 23 subscriber minute samples and 8 cloud video histories per channel. Existing local subscriber sample counts stayed 466 and 283, and local video history counts stayed 60 and 22. A real future-upload-to-toast test remains separate from cloud statistics verification.
 
 ## v1.7.1 Shorts detection repair
 
@@ -18,9 +18,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.7.1`
+- Application version: `1.8.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.7.1`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.8.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS

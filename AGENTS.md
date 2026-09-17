@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-17 for v1.8.0 cloud statistics collection and synchronization.
+Last maintained: 2026-09-17 after v1.8.0 public release and installed-app cloud synchronization verification.
 
 ## Project mission
 
