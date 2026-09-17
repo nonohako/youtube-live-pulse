@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-17 for v1.8.1 adaptive 100-video collection and persistent local archives.
+Last maintained: 2026-09-17 after v1.8.1 release and installed 100-video archive verification.
 
 ## Project mission
 

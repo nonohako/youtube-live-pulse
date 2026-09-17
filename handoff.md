@@ -4,7 +4,7 @@ Last updated: 2026-09-17
 
 ## v1.8.1 adaptive collection and local archives
 
-User requested 100 videos per channel and no automatic local cleanup. Collector discovers up to 150 candidates to select 100 eligible videos, schedules 25 per channel at one minute with remaining videos at 5/60 minutes, and smooths observed views/minute to promote rising videos. Sparse samples keep Redis command counts independent of video count (about 232,128/month at 31 days with metadata caching for one desktop). Server expiry stays 30 days; desktop archive samples and rotated videos no longer expire or compact. Chart projection alone compacts points. This user-requested retention behavior does not waive API policy obligations. v1.8.1 replays the server window once to recover expanded rows truncated by older desktop clients. All 85 tests pass, including paginated 100-video scheduling, rate promotion, Redis metadata cache command budget, and retaining 500-day-old/2,100-sample/105-video archives. Packaged settings smoke and update metadata/hash verification passed. Live server returned 100 stored video metadata entries for each channel. The scheduler aligns due times to minute boundaries so response latency does not skip alternating fast polls. Public release and installed upgrade are pending.
+User requested 100 videos per channel and no automatic local cleanup. Collector discovers up to 150 candidates to select 100 eligible videos, schedules 25 per channel at one minute with remaining videos at 5/60 minutes, and smooths observed views/minute to promote rising videos. Sparse samples keep Redis command counts independent of video count (about 232,128/month at 31 days with metadata caching for one desktop). Server expiry stays 30 days; desktop archive samples and rotated videos no longer expire or compact. Chart projection alone compacts points. This user-requested retention behavior does not waive API policy obligations. v1.8.1 replays the server window once to recover expanded rows truncated by older desktop clients. All 85 tests pass, including paginated 100-video scheduling, rate promotion, Redis metadata cache command budget, and retaining 500-day-old/2,100-sample/105-video archives. Packaged settings smoke and update metadata/hash verification passed. Live server returned 100 stored video metadata entries for each channel. The scheduler aligns due times to minute boundaries so response latency does not skip alternating fast polls. Source 65e868d and tag v1.8.1 were published; Actions 35228879510 succeeded. The public non-draft/non-prerelease release has three assets, and a fresh installer download matched published SHA-512 and GitHub SHA-256. Installed version 1.8.1.0 synced archiveVersion 2 at 13:47:40 UTC with no error, 100 cloud video histories and 48 subscriber samples per channel. Local subscriber counts stayed 466/283 and local video history counts stayed 60/22. Consecutive live minute rows at 13:43 and 13:44 UTC contained 25 video samples per channel; unauthenticated sync returned 401. A conservative 80-video-per-minute JSON model with maximum safe integer counts projects 115 MB for 30 days before Redis overhead; command tests project 232,128 commands per 31 days for one always-on desktop, plus cold starts/new metadata/catch-up. Free-tier headroom is an estimate, not a measured full-month guarantee.
 
 ## v1.8.0 cloud statistics work
 
@@ -22,9 +22,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.8.0`
+- Application version: `1.8.1`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.8.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.8.1`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
