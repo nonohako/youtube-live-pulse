@@ -1,16 +1,17 @@
 'use strict';
 
 let appState = null;
+let chartPreferencesMemory = null;
 let countdownTimer = null;
 let subscriberChartChannelId = null;
-let subscriberChartRange = '30d';
+let subscriberChartRange = readChartPreferences().subscriberRange;
 let subscriberChartSelection = null;
 let subscriberChartViewport = null;
 let detailChartModel = null;
 let detailChartDrag = null;
 let videoViewChartChannelId = null;
 let videoViewChartVideoId = null;
-let videoViewChartRange = '30d';
+let videoViewChartRange = readChartPreferences().videoRange;
 let videoViewChartViewport = null;
 let videoViewChartModel = null;
 
@@ -184,6 +185,7 @@ function bindEvents() {
     const rangeButton = event.target.closest('[data-chart-range]');
     if (rangeButton) {
       subscriberChartRange = rangeButton.dataset.chartRange;
+      saveChartPreference('subscriberRange', subscriberChartRange);
       subscriberChartSelection = null;
       subscriberChartViewport = null;
       detailChartDrag = null;
@@ -203,6 +205,7 @@ function bindEvents() {
     const videoViewRangeButton = event.target.closest('[data-video-view-range]');
     if (videoViewRangeButton) {
       videoViewChartRange = videoViewRangeButton.dataset.videoViewRange;
+      saveChartPreference('videoRange', videoViewChartRange);
       videoViewChartViewport = null;
       renderVideoViewDetail();
       return;
@@ -234,6 +237,7 @@ function bindEvents() {
 
     const navButton = event.target.closest('[data-scroll-target]');
     if (navButton) {
+      showViewsPage(false);
       document.getElementById(navButton.dataset.scrollTarget)?.scrollIntoView({ behavior: 'smooth' });
       document.querySelectorAll('.nav-item').forEach((item) => item.classList.remove('active'));
       navButton.classList.add('active');
@@ -253,6 +257,8 @@ function render() {
   renderMonitorStatus();
   renderChannels();
   renderEvents();
+  renderViewsPanel();
+  if (document.getElementById('compare-dialog').open) renderVideoComparison();
   if (elements.subscriberDialog.open) renderSubscriberDetail();
   if (elements.videoViewDialog.open) renderVideoViewDetail();
 }
@@ -321,7 +327,7 @@ function renderChannelCard(channel) {
     : metadata.subscriberText || '확인 중';
   const chart = renderSubscriberChart(
     channel.subscriberHistory || [],
-    appState?.settings?.subscriberChartMode
+    readChartPreferences().subscriberMode
   );
   const warning = snapshot?.warnings?.length
     ? `<div class="warning-line">${escapeHtml(snapshot.warnings.join(' · '))} · 자동으로 재시도합니다.</div>`
@@ -513,7 +519,7 @@ function emptyChart() {
     </svg>`;
 }
 
-function openSubscriberChart(channelId, initialRange = '30d', selectSmokeRange = false) {
+function openSubscriberChart(channelId, initialRange = readChartPreferences().subscriberRange, selectSmokeRange = false) {
   const channel = appState?.channels.find((item) => item.id === channelId);
   if (!channel) return;
   subscriberChartChannelId = channelId;
@@ -549,7 +555,7 @@ function openVideoViewChart(channelId, videoId) {
   videoViewChartVideoId = histories.some((history) => history.videoId === videoId)
     ? videoId
     : histories[0].videoId;
-  videoViewChartRange = '30d';
+  videoViewChartRange = readChartPreferences().videoRange;
   videoViewChartViewport = null;
   renderVideoViewDetail();
   if (!elements.videoViewDialog.open) elements.videoViewDialog.showModal();
@@ -600,7 +606,8 @@ function renderSubscriberDetail() {
 
   const math = window.LivePulseChartMath;
   const now = Date.now();
-  const displayMode = appState?.settings?.subscriberChartMode === 'daily' ? 'daily' : 'samples';
+  const displayMode = readChartPreferences().subscriberMode;
+  document.getElementById('subscriber-chart-mode').value = displayMode;
   const displayHistory = displayMode === 'daily'
     ? math.collapseSamplesByLocalDate(channel.subscriberHistory || [])
     : channel.subscriberHistory || [];
@@ -738,7 +745,10 @@ function renderVideoViewDetail() {
 
   const math = window.LivePulseChartMath;
   const now = Date.now();
-  const baseSamples = math.filterSamples(history.samples || [], videoViewChartRange, now);
+  const displayMode = readChartPreferences().videoMode;
+  document.getElementById('video-chart-mode').value = displayMode;
+  const visualHistory = displayMode === 'daily' ? math.collapseSamplesByLocalDate(history.samples || []) : history.samples || [];
+  const baseSamples = math.filterSamples(visualHistory, videoViewChartRange, now);
   const resetZoomButton = elements.videoViewDialog.querySelector('[data-reset-video-view-zoom]');
   if (!baseSamples.length) {
     videoViewChartViewport = null;
@@ -797,7 +807,7 @@ function renderVideoViewDetail() {
     timeAxis,
     [],
     null,
-    'samples',
+    displayMode,
     {
       svgId: 'video-view-detail-svg',
       crosshairId: 'video-view-crosshair',
@@ -1155,7 +1165,7 @@ function buildDetailChart(
           </defs>
           ${yTicks}
           ${xTicks}
-          <polygon class="detail-chart-area" style="fill:url(#${escapeAttribute(gradientId)})" points="${areaPoints}"/>
+          <polygon class="detail-chart-area" fill="url(#${escapeAttribute(gradientId)})" points="${areaPoints}"/>
           <polyline class="detail-trend-line" points="${trendPoints}"/>
           <polyline class="detail-actual-line" points="${linePoints}"/>
           ${pointDots}
@@ -1491,9 +1501,7 @@ function openSettings() {
   elements.settingUpcoming.checked = settings.autoOpenUpcoming;
   elements.settingVideos.checked = settings.notifyNewVideos;
   elements.settingPosts.checked = settings.notifyNewPosts;
-  elements.settingSubscriberChartMode.value = settings.subscriberChartMode === 'daily'
-    ? 'daily'
-    : 'samples';
+  elements.settingSubscriberChartMode.value = readChartPreferences().subscriberMode;
   elements.settingInterval.value = settings.pollIntervalSeconds;
   elements.settingApiKey.value = '';
   elements.settingCloudUrl.value = settings.cloudUrl || '';
@@ -1531,6 +1539,7 @@ async function handleSaveSettings(event) {
 
   await safely(async () => {
     appState = await window.livePulse.updateSettings(update);
+    saveChartPreference('subscriberMode', update.subscriberChartMode);
     render();
     elements.settingsDialog.close();
   });
@@ -1674,4 +1683,16 @@ function escapeAttribute(value) {
 
 function toCamel(value) {
   return value.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+}
+
+function readChartPreferences() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem('live-pulse:chart-preferences') || '{}'); } catch { saved = chartPreferencesMemory || {}; }
+  if (!saved?.subscriberMode && typeof appState !== 'undefined') saved = {...saved, subscriberMode: appState?.settings?.subscriberChartMode};
+  return window.LivePulseAnalytics.preferences(saved);
+}
+function saveChartPreference(key, value) {
+  const prefs = window.LivePulseAnalytics.preferences({...readChartPreferences(), [key]: value});
+  chartPreferencesMemory = prefs;
+  try { localStorage.setItem('live-pulse:chart-preferences', JSON.stringify(prefs)); } catch { /* Keep the current session preference. */ }
 }

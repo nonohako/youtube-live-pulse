@@ -1,6 +1,12 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-17
+Last updated: 2026-09-18
+
+## v1.9.0 analytics interface
+
+Added a dedicated video library tab with channel filter, title search, thumbnails and direct video chart opening. Up to four videos can be compared on one calendar/count axis with total or period-change presentation. Inline sample/daily selectors on subscriber, video and comparison charts update immediately; chart type preferences and periods persist in localStorage. Daily presentation preserves raw histories and existing completed-day growth rules. Modal parent/background overflow is locked; only detail content scrolls. Replaced a CSP-blocked SVG inline fill style with a presentation attribute.
+
+Real Electron UI automation passed library/search/direct open/comparison/mode switching/reopen/reload persistence and one-scroll checks (outer excess 0, inner content scrollable), including 900x660 layout. All 88 tests and renderer syntax checks pass. The packaged ASAR passed the same real Electron interaction suite; the product --smoke-test exited 0. Local installer SHA-512 and repository updater metadata passed. The lockfile electron/fuses version was corrected to match its existing 1.8.0 tarball. Public release and installed upgrade are pending.
 
 ## v1.8.1 adaptive collection and local archives
 

@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-17 after v1.8.1 release and installed 100-video archive verification.
+Last maintained: 2026-09-18 for v1.9.0 video library, comparison charts and persistent chart controls.
 
 ## Project mission
 
@@ -116,6 +116,14 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Never fabricate or backfill pre-installation view history. YouTube exposes the current public view count, not historical point-in-time counts.
 - The view chart supports 7-day, 30-day, 90-day, 1-year and all-history ranges. Mouse-wheel zoom is cursor-centered, cannot exceed the selected preset and stops at a one-day minimum or the full available span when shorter.
 - Keep all view-history parsing and persistence in the main process/store. The renderer receives only normalized state through the existing isolated preload boundary.
+
+## Analytics interface invariants
+
+- Keep modal scrolling on the inner detail surface only; lock background page scrolling while any dialog is open. Verify 900x660 and normal window sizes.
+- The separate video analytics navigation shows channel-filtered/searchable thumbnail cards. Card activation opens that video directly. Compare 2-4 selected channel/video pairs on a common calendar axis, with total views or change from each series first observed sample in the selected period. Never fabricate missing points or imply aligned publication ages.
+- Subscriber, single-video and comparison charts expose samples/daily selectors inline; daily uses each local date final observation without rewriting stored histories. Existing completed-day subscriber growth rules remain unchanged.
+- Persist validated chart period/mode preferences per chart type in renderer localStorage, including across window/app restarts; it contains presentation preferences only, never credentials. Zoom/selection reset on period or mode changes.
+- `scripts/analytics-smoke.cjs` runs real isolated Electron renderer interactions against fixture data; add `--packaged` to validate the built ASAR. Keep contextIsolation, sandbox and no Node access.
 
 ## Windows shell identity invariants
 

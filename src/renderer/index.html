@@ -23,6 +23,7 @@
           <span class="nav-icon">◉</span>
           대시보드
         </button>
+        <button id="views-nav" class="nav-item" type="button"><span class="nav-icon">▥</span>영상 조회수</button>
         <button class="nav-item" data-scroll-target="activity">
           <span class="nav-icon">↗</span>
           최근 알림
@@ -75,7 +76,7 @@
         </form>
       </section>
 
-      <section class="section-block">
+      <section id="channels-section" class="section-block">
         <div class="section-heading">
           <div>
             <div class="eyebrow">WATCHING NOW</div>
@@ -95,6 +96,13 @@
           <span class="muted">최대 100개 로컬 보관</span>
         </div>
         <div id="event-list" class="event-list"></div>
+      </section>
+
+      <section id="views-page" class="section-block" hidden>
+        <div class="section-heading"><div><div class="eyebrow">VIDEO ANALYTICS</div><h2>영상 조회수</h2></div><span id="views-count" class="count-chip"></span></div>
+        <div class="views-filters"><label>채널<select id="views-channel" class="settings-select"><option value="">전체 채널</option></select></label><label>영상 검색<input id="views-search" type="text" placeholder="제목으로 검색"></label><button id="views-compare" class="primary-button" disabled>선택한 영상 비교 (0/4)</button><button id="views-clear" class="ghost-button">선택 해제</button></div>
+        <p class="muted">썸네일을 누르면 상세 차트가 열립니다. 비교할 영상은 최대 4개까지 선택하세요. 수집한 시점 이후의 기록만 표시합니다.</p>
+        <div id="views-grid" class="views-grid"></div>
       </section>
 
       <footer>
@@ -225,6 +233,7 @@
         <button class="chart-zoom-reset" type="button" data-reset-chart-zoom hidden>확대 초기화</button>
       </div>
 
+      <label class="chart-mode">표시 기준 <select id="subscriber-chart-mode" class="settings-select"><option value="samples">수집 시각 기준</option><option value="daily">날짜 기준 · 하루 마지막 값</option></select></label>
       <div id="subscriber-detail-content"></div>
       <p class="chart-disclaimer">“날짜 / 신규 구독자 / 전체 구독자” 형식의 .xlsx 파일을 가져올 수 있습니다. 전체 구독자 수를 해당 날짜 00:00 기록으로 추가하며, 이미 기록이 있는 날짜는 바꾸지 않습니다. 차트는 선택 기간 안에서 보유한 첫 기록 날짜부터 시작하며, 날짜 눈금은 해당 날짜의 00시를 가리킵니다. 상세 차트 위에서 마우스 휠을 위로 굴리면 커서 위치를 중심으로 확대되고 아래로 굴리면 축소됩니다. 구독자 수는 채널 확인 때 조회하지만 같은 숫자는 반복 저장하지 않고 6시간마다 한 번만 기록합니다. 오늘 수치는 원본 차트에는 표시하지만 집계가 끝나지 않았으므로 성장 분석과 구간 계산에서는 제외합니다. API 키의 공식 통계는 10분마다 갱신되며, YouTube 공개 수치는 반올림될 수 있어 작은 증감과 성장 지표도 근사치입니다.</p>
     </div>
@@ -257,12 +266,21 @@
         <button class="chart-zoom-reset" type="button" data-reset-video-view-zoom hidden>확대 초기화</button>
       </div>
 
+      <label class="chart-mode">표시 기준 <select id="video-chart-mode" class="settings-select"><option value="samples">수집 시각 기준</option><option value="daily">날짜 기준 · 하루 마지막 값</option></select></label>
       <div id="video-view-detail-content"></div>
-      <p class="chart-disclaimer">조회수는 영상이 최근 영상 목록에 있는 동안 5분마다 수집합니다. API 키가 있으면 공식 영상 통계를 한 번에 조회하고, 없으면 공개 영상 페이지에서 읽습니다. 마우스 휠로 커서 위치를 중심으로 확대·축소할 수 있으며, 새 기능 설치 전의 과거 조회수는 YouTube에서 소급 제공되지 않습니다.</p>
+      <p class="chart-disclaimer">PC 수집은 최근 영상 기준 5분 간격이며, 클라우드에 연결하면 서버가 영상별 1분·5분·1시간 간격으로 모은 기록도 표시합니다. 날짜 기준은 하루 마지막 관측값이며 오늘은 미완료 값입니다. 마우스 휠로 커서 위치를 중심으로 확대·축소할 수 있으며, 새 기능 설치 전의 과거 조회수는 YouTube에서 소급 제공되지 않습니다.</p>
     </div>
   </dialog>
 
+  <dialog id="compare-dialog"><div class="compare-detail">
+    <div class="dialog-header"><div><div class="eyebrow">COMPARE VIDEOS</div><h2>영상 조회수 비교</h2></div><button id="compare-close" class="icon-button" aria-label="비교 차트 닫기">×</button></div>
+    <div id="compare-ranges" class="chart-toolbar" aria-label="비교 기간"></div>
+    <div class="compare-controls"><label class="chart-mode">표시 기준 <select id="compare-mode" class="settings-select"><option value="samples">수집 시각 기준</option><option value="daily">날짜 기준 · 하루 마지막 값</option></select></label><label class="chart-mode">비교 값 <select id="compare-metric" class="settings-select"><option value="total">누적 조회수</option><option value="change">선택 기간 조회수 증가</option></select></label></div>
+    <div id="compare-content"></div><p class="chart-disclaimer">같은 달력 날짜와 같은 조회수 축으로 비교합니다. 증가량은 각 영상의 선택 기간 내 첫 관측값 기준입니다. 기록 시작 시점이 다를 수 있으며 미수집 기간을 채우거나 업로드 전 조회수를 추정하지 않습니다. 날짜 기준은 당일 마지막 관측값이며 오늘은 미완료 값입니다.</p>
+  </div></dialog>
   <script src="./chart-math.js"></script>
+  <script src="./analytics-math.js"></script>
   <script src="./renderer.js"></script>
+  <script src="./analytics-ui.js"></script>
 </body>
 </html>
