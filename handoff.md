@@ -6,7 +6,7 @@ Last updated: 2026-09-18
 
 Added a dedicated video library tab with channel filter, title search, thumbnails and direct video chart opening. Up to four videos can be compared on one calendar/count axis with total or period-change presentation. Inline sample/daily selectors on subscriber, video and comparison charts update immediately; chart type preferences and periods persist in localStorage. Daily presentation preserves raw histories and existing completed-day growth rules. Modal parent/background overflow is locked; only detail content scrolls. Replaced a CSP-blocked SVG inline fill style with a presentation attribute.
 
-Real Electron UI automation passed library/search/direct open/comparison/mode switching/reopen/reload persistence and one-scroll checks (outer excess 0, inner content scrollable), including 900x660 layout. All 88 tests and renderer syntax checks pass. The packaged ASAR passed the same real Electron interaction suite; the product --smoke-test exited 0. Local installer SHA-512 and repository updater metadata passed. The lockfile electron/fuses version was corrected to match its existing 1.8.0 tarball. Public release and installed upgrade are pending.
+Real Electron UI automation passed library/search/direct open/comparison/mode switching/reopen/reload persistence and one-scroll checks (outer excess 0, inner content scrollable), including 900x660 layout. All 88 tests and renderer syntax checks pass. The packaged ASAR passed the same real Electron interaction suite; the product --smoke-test exited 0. Local installer SHA-512 and repository updater metadata passed. The lockfile electron/fuses version was corrected to match its existing 1.8.0 tarball. Source 49d9715 and tag v1.9.0 were published. Actions 35343545105 succeeded; the non-draft/non-prerelease release includes all three assets and a fresh installer download matched published SHA-512 and GitHub SHA-256. An isolated packaged renderer also displayed 205 actual stored video cards and two real history series without console errors. Installed version 1.9.0.0 was verified after the silent installer exited 0; local subscriber/video records were preserved and cloud error remained null. This is fixture/isolated-renderer visual verification plus installed process/data checks; no native installed-window click-through was performed.
 
 ## v1.8.1 adaptive collection and local archives
 
@@ -28,9 +28,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.8.1`
+- Application version: `1.9.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.8.1`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.9.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS

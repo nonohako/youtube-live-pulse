@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-18 for v1.9.0 video library, comparison charts and persistent chart controls.
+Last maintained: 2026-09-18 after v1.9.0 release, packaged analytics UI verification and installed upgrade.
 
 ## Project mission
 
