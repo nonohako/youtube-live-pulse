@@ -4,7 +4,7 @@ Last updated: 2026-09-19
 
 ## v1.10.1 UI/UX refinement
 
-Split trend, daily records and subscriber growth into sections to avoid a long stacked screen. Added arrow/Home/End chart record navigation and keyboard section navigation. Hover values sit in a reserved strip above the chart instead of following/covering the line. Adjusted small-window plot height and typography, and kept one inner scroll surface. Source Electron checks passed section switching, keyboard value navigation and previous chart interactions. 93 tests passed. Packaged Electron interaction checks passed, including the full plot fitting inside the 900x660 dialog. Product smoke exited 0; installer SHA-512 and updater metadata passed. Public release verification pending.
+Split trend, daily records and subscriber growth into sections to avoid a long stacked screen. Added arrow/Home/End chart record navigation and keyboard section navigation. Hover values sit in a reserved strip above the chart instead of following/covering the line. Adjusted small-window plot height and typography, and kept one inner scroll surface. Source Electron checks passed section switching, keyboard value navigation and previous chart interactions. 93 tests passed. Packaged Electron interaction checks passed, including the full plot fitting inside the 900x660 dialog. Product smoke exited 0; installer SHA-512 and updater metadata passed. Source fb33fd0 and tag v1.10.1 published. Actions 35448900747 succeeded; public non-draft/non-prerelease release has three assets. Fresh installer download matched published SHA-512. Silent install exited 0 and installed version 1.10.1.0 was verified. Local and cloud history counts were preserved. Native installed-window interactions remain separate from isolated packaged Electron checks.
 
 ## v1.10.0 analysis workspace
 
@@ -44,9 +44,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.10.0`
+- Application version: `1.10.1`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.10.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.10.1`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS

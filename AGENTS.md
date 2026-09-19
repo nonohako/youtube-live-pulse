@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-19 after v1.10.1 analytics navigation and chart ergonomics improvements.
+Last maintained: 2026-09-19 after v1.10.1 UI/UX release and installed upgrade verification.
 
 ## Project mission
 
