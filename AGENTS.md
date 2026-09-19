@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-19 after chart hover performance fixes and regression verification.
+Last maintained: 2026-09-19 after v1.9.1 hover performance release, packaged UI checks and installed upgrade.
 
 ## Project mission
 

@@ -6,7 +6,7 @@ Last updated: 2026-09-19
 
 Coalesces mouse moves per animation frame, binary-searches actual observations and caches Intl formatters. Comparison now has an immediate custom crosshair/tooltip. Status-only updates preserve open chart DOM, skip background list rebuilding, reuse cloud projections and omit unchanged history arrays from IPC. Raw local archives remain unchanged. Close handlers ignore stale close events when a dialog was already reopened.
 
-Measured on the installed archive: repeated publicState projection fell from 533-567 ms to below 0.1 ms after cache warmup (cold projection about 287 ms); renderer status refresh with an open chart fell from 48-67 ms to 0.1-0.3 ms. These are isolated measurements, not a guarantee of every frame on the installed app. 92 unit tests and source Electron UI hover assertions passed, including next-frame tooltip, 100 moves coalesced, pointer leave cancellation, status delta preservation and reopen. Packaged ASAR passed the same Electron hover/UI suite and the product smoke exited 0. Local installer SHA-512 and updater repository metadata passed. Public release verification pending.
+Measured on the installed archive: repeated publicState projection fell from 533-567 ms to below 0.1 ms after cache warmup (cold projection about 287 ms); renderer status refresh with an open chart fell from 48-67 ms to 0.1-0.3 ms. These are isolated measurements, not a guarantee of every frame on the installed app. 92 unit tests and source Electron UI hover assertions passed, including next-frame tooltip, 100 moves coalesced, pointer leave cancellation, status delta preservation and reopen. Packaged ASAR passed the same Electron hover/UI suite and the product smoke exited 0. Local installer SHA-512 and updater repository metadata passed. Source a388080 and tag v1.9.1 published. Actions 35434309773 succeeded; non-draft/non-prerelease release has three assets and a fresh installer download matched published SHA-512. Silent installer exited 0 and installed product version is 1.9.1.0. Local histories and cloud archive counts were preserved. Packaged zoom and video smoke also exited 0. Native installed-window mouse interaction remains unmeasured; hover checks used the actual isolated Electron renderer.
 
 ## v1.9.0 analytics interface
 
@@ -34,9 +34,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.9.0`
+- Application version: `1.9.1`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.9.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.9.1`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
