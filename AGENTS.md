@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-19 after v1.10.0 analysis workspace redesign and regression checks.
+Last maintained: 2026-09-19 after v1.10.0 analysis workspace release and installed upgrade verification.
 
 ## Project mission
 
