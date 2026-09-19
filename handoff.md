@@ -1,6 +1,12 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
+
+## v1.9.1 chart hover performance
+
+Coalesces mouse moves per animation frame, binary-searches actual observations and caches Intl formatters. Comparison now has an immediate custom crosshair/tooltip. Status-only updates preserve open chart DOM, skip background list rebuilding, reuse cloud projections and omit unchanged history arrays from IPC. Raw local archives remain unchanged. Close handlers ignore stale close events when a dialog was already reopened.
+
+Measured on the installed archive: repeated publicState projection fell from 533-567 ms to below 0.1 ms after cache warmup (cold projection about 287 ms); renderer status refresh with an open chart fell from 48-67 ms to 0.1-0.3 ms. These are isolated measurements, not a guarantee of every frame on the installed app. 92 unit tests and source Electron UI hover assertions passed, including next-frame tooltip, 100 moves coalesced, pointer leave cancellation, status delta preservation and reopen. Packaged ASAR passed the same Electron hover/UI suite and the product smoke exited 0. Local installer SHA-512 and updater repository metadata passed. Public release verification pending.
 
 ## v1.9.0 analytics interface
 

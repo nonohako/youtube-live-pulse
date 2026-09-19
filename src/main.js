@@ -61,6 +61,7 @@ let store = null;
 let monitor = null;
 let updater = null;
 let cloudSync = null;
+const sentHistoryReferences = new Map();
 let isQuitting = false;
 
 app.on('second-instance', (_event, argv) => { applyCloudConfigArgument(argv); showWindow(); });
@@ -148,6 +149,7 @@ function createWindow() {
   });
   if (taskbarDetails) mainWindow.setAppDetails(taskbarDetails);
 
+  mainWindow.webContents.on('did-start-loading', () => sentHistoryReferences.clear());
   mainWindow.loadFile(
     path.join(__dirname, 'renderer', 'index.html'),
     isSmokeChart || isSmokeVideoViews || isSmokeSettings ? {
@@ -516,7 +518,14 @@ function withAppInfo(state) {
 function broadcastState(state) {
   const payload = withAppInfo(state);
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('state:changed', payload);
+    const channels = payload.channels.map(channel => {
+      const previous = sentHistoryReferences.get(channel.id);
+      const unchanged = previous?.subscribers === channel.subscriberHistory && previous?.subscriberLength === channel.subscriberHistory?.length && previous?.videos === channel.videoViewHistories;
+      sentHistoryReferences.set(channel.id, {subscribers: channel.subscriberHistory, subscriberLength: channel.subscriberHistory?.length, videos: channel.videoViewHistories});
+      return unchanged ? {...channel, subscriberHistory: undefined, videoViewHistories: undefined, historiesUnchanged: true} : channel;
+    });
+    for (const id of sentHistoryReferences.keys()) if (!channels.some(c => c.id === id)) sentHistoryReferences.delete(id);
+    mainWindow.webContents.send('state:changed', {...payload, channels});
   }
   const liveCount = state.channels.filter((channel) => channel.snapshot?.live).length;
   tray?.setToolTip(liveCount

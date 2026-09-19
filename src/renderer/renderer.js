@@ -18,13 +18,52 @@ let videoViewChartModel = null;
 const CHART_MINIMUM_SPAN_MS = 24 * 60 * 60 * 1000;
 
 const elements = {};
+const hoverFrames = window.LivePulseChartHover.scheduler(requestAnimationFrame, cancelAnimationFrame);
+const formatterCache = new Map();
+function cachedFormatter(kind, options) {
+  const key = kind + JSON.stringify(options);
+  if (!formatterCache.has(key)) formatterCache.set(key, new Intl[kind]('ko-KR', options));
+  return formatterCache.get(key);
+}
+let chartRefreshTimer = null;
+let lastChartPointerAt = 0;
+let subscriberRenderKey = '', videoRenderKey = '';
+function historyRenderKey(history = []) {
+  return [history.length, history[0]?.at, history[0]?.count, history.at(-1)?.at, history.at(-1)?.count].join(':');
+}
+function subscriberDataKey() {
+  return subscriberChartChannelId + ':' + historyRenderKey(appState?.channels.find(c => c.id === subscriberChartChannelId)?.subscriberHistory);
+}
+function videoDataKey() {
+  return videoViewChartChannelId + ':' + videoViewChartVideoId + ':' + historyRenderKey(appState?.channels.find(c => c.id === videoViewChartChannelId)?.videoViewHistories?.find(v => v.videoId === videoViewChartVideoId)?.samples);
+}
+function queueHover(key, event, callback) {
+  lastChartPointerAt = performance.now();
+  hoverFrames.move(key, event, latest => { if (latest.target?.isConnected) callback(latest); });
+}
+function refreshFromState() {
+  clearTimeout(chartRefreshTimer);
+  if (document.querySelector('dialog[open]') && performance.now() - lastChartPointerAt < 200) {
+    chartRefreshTimer = setTimeout(refreshFromState, 220);
+    return;
+  }
+  render();
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   cacheElements();
   bindEvents();
   window.livePulse.onState((state) => {
-    appState = state;
-    render();
+    if (state.channels.some(c => c.historiesUnchanged && !appState?.channels.some(old => old.id === c.id))) {
+      void window.livePulse.getState().then(full => { appState = full; refreshFromState(); }).catch(error => showError(cleanError(error)));
+      return;
+    }
+    appState = {...state, channels: state.channels.map(channel => {
+      if (!channel.historiesUnchanged) return channel;
+      const previous = appState.channels.find(old => old.id === channel.id);
+      return {...channel, subscriberHistory: previous.subscriberHistory, videoViewHistories: previous.videoViewHistories};
+    })};
+    refreshFromState();
   });
 
   try {
@@ -113,6 +152,9 @@ function bindEvents() {
   elements.subscriberClose.addEventListener('click', () => elements.subscriberDialog.close());
   elements.subscriberImportButton.addEventListener('click', handleSubscriberImport);
   elements.subscriberDialog.addEventListener('close', () => {
+    if (elements.subscriberDialog.open) return;
+    hideDetailChartTooltip();
+    requestAnimationFrame(render);
     subscriberChartChannelId = null;
     subscriberChartSelection = null;
     subscriberChartViewport = null;
@@ -121,13 +163,19 @@ function bindEvents() {
     elements.subscriberImportStatus.textContent = '';
   });
   elements.subscriberDialog.addEventListener('pointerdown', handleDetailChartPointerDown);
-  elements.subscriberDialog.addEventListener('pointermove', handleDetailChartPointerMove);
+  elements.subscriberDialog.addEventListener('pointermove', event => {
+    if (detailChartDrag) handleDetailChartPointerMove(event);
+    else queueHover('subscriber', event, handleDetailChartPointerMove);
+  });
   elements.subscriberDialog.addEventListener('pointerup', handleDetailChartPointerUp);
   elements.subscriberDialog.addEventListener('pointercancel', handleDetailChartPointerCancel);
   elements.subscriberDialog.addEventListener('pointerleave', hideDetailChartTooltip);
   elements.subscriberDialog.addEventListener('wheel', handleDetailChartWheel, { passive: false });
   elements.videoViewClose.addEventListener('click', () => elements.videoViewDialog.close());
   elements.videoViewDialog.addEventListener('close', () => {
+    if (elements.videoViewDialog.open) return;
+    hideVideoViewTooltip();
+    requestAnimationFrame(render);
     videoViewChartChannelId = null;
     videoViewChartVideoId = null;
     videoViewChartViewport = null;
@@ -138,7 +186,7 @@ function bindEvents() {
     videoViewChartViewport = null;
     renderVideoViewDetail();
   });
-  elements.videoViewDialog.addEventListener('pointermove', handleVideoViewPointerMove);
+  elements.videoViewDialog.addEventListener('pointermove', event => queueHover('video', event, handleVideoViewPointerMove));
   elements.videoViewDialog.addEventListener('pointerleave', hideVideoViewTooltip);
   elements.videoViewDialog.addEventListener('wheel', handleVideoViewWheel, { passive: false });
   elements.settingsForm.addEventListener('submit', handleSaveSettings);
@@ -255,12 +303,12 @@ function render() {
     : '앱 업데이트 확인';
   elements.updateButton.disabled = ['checking', 'downloading'].includes(update?.status);
   renderMonitorStatus();
-  renderChannels();
-  renderEvents();
-  renderViewsPanel();
-  if (document.getElementById('compare-dialog').open) renderVideoComparison();
-  if (elements.subscriberDialog.open) renderSubscriberDetail();
-  if (elements.videoViewDialog.open) renderVideoViewDetail();
+  if (!document.querySelector('dialog[open]')) {
+    renderChannels(); renderEvents(); renderViewsPanel();
+  }
+  if (document.getElementById('compare-dialog').open) refreshComparisonIfChanged();
+  if (elements.subscriberDialog.open && subscriberDataKey() !== subscriberRenderKey) renderSubscriberDetail();
+  if (elements.videoViewDialog.open && videoDataKey() !== videoRenderKey) renderVideoViewDetail();
 }
 
 function renderMonitorStatus() {
@@ -592,6 +640,8 @@ async function handleSubscriberImport() {
 }
 
 function renderSubscriberDetail() {
+  subscriberRenderKey = subscriberDataKey();
+  hoverFrames.clear('subscriber');
   const channel = appState?.channels.find((item) => item.id === subscriberChartChannelId);
   if (!channel) {
     elements.subscriberDialog.close();
@@ -725,6 +775,8 @@ function renderSubscriberDetail() {
 }
 
 function renderVideoViewDetail() {
+  videoRenderKey = videoDataKey();
+  hoverFrames.clear('video');
   const channel = appState?.channels.find((item) => item.id === videoViewChartChannelId);
   const histories = (channel?.videoViewHistories || []).filter((history) => history.samples?.length);
   if (!channel || !histories.length) {
@@ -1219,9 +1271,7 @@ function handleDetailChartPointerMove(event) {
 
   const bounds = svg.getBoundingClientRect();
   const viewX = ((event.clientX - bounds.left) / bounds.width) * detailChartModel.width;
-  const point = detailChartModel.points.reduce((nearest, candidate) => (
-    Math.abs(candidate.x - viewX) < Math.abs(nearest.x - viewX) ? candidate : nearest
-  ));
+  const point = window.LivePulseChartHover.nearest(detailChartModel.points, viewX);
   const crosshair = elements.subscriberDialog.querySelector('#detail-crosshair');
   const dot = elements.subscriberDialog.querySelector('#detail-hover-dot');
   const tooltip = elements.subscriberDialog.querySelector('#detail-chart-tooltip');
@@ -1314,9 +1364,7 @@ function handleVideoViewPointerMove(event) {
   const bounds = svg.getBoundingClientRect();
   if (!bounds.width) return;
   const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
-  const point = model.points.reduce((nearest, candidate) => (
-    Math.abs(candidate.x - viewX) < Math.abs(nearest.x - viewX) ? candidate : nearest
-  ));
+  const point = window.LivePulseChartHover.nearest(model.points, viewX);
   const crosshair = elements.videoViewDialog.querySelector('#video-view-crosshair');
   const dot = elements.videoViewDialog.querySelector('#video-view-hover-dot');
   const tooltip = elements.videoViewDialog.querySelector('#video-view-tooltip');
@@ -1372,6 +1420,7 @@ function handleVideoViewWheel(event) {
 }
 
 function hideVideoViewTooltip() {
+  hoverFrames.clear('video');
   elements.videoViewDialog.querySelector('#video-view-crosshair')?.classList.add('hidden');
   elements.videoViewDialog.querySelector('#video-view-hover-dot')?.classList.add('hidden');
   elements.videoViewDialog.querySelector('#video-view-tooltip')?.classList.add('hidden');
@@ -1419,6 +1468,7 @@ function updateSelectionOverlay(firstTime, secondTime) {
 }
 
 function hideDetailChartTooltip() {
+  hoverFrames.clear('subscriber');
   elements.subscriberDialog.querySelector('#detail-crosshair')?.classList.add('hidden');
   elements.subscriberDialog.querySelector('#detail-hover-dot')?.classList.add('hidden');
   elements.subscriberDialog.querySelector('#detail-chart-tooltip')?.classList.add('hidden');
@@ -1587,7 +1637,7 @@ function cleanError(error) {
 function formatCompact(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '—';
-  return new Intl.NumberFormat('ko-KR', {
+  return cachedFormatter('NumberFormat', {
     notation: 'compact',
     maximumFractionDigits: 2
   }).format(numeric);
@@ -1596,7 +1646,7 @@ function formatCompact(value) {
 function formatNumber(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '—';
-  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 0 }).format(Math.round(numeric));
+  return cachedFormatter('NumberFormat', { maximumFractionDigits: 0 }).format(Math.round(numeric));
 }
 
 function formatTrend(value) {
@@ -1604,7 +1654,7 @@ function formatTrend(value) {
   if (!Number.isFinite(numeric)) return '0';
   const absolute = Math.abs(numeric);
   const maximumFractionDigits = absolute < 1 ? 2 : absolute < 10 ? 1 : 0;
-  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits }).format(numeric);
+  return cachedFormatter('NumberFormat', { maximumFractionDigits }).format(numeric);
 }
 
 function formatPercent(value) {
@@ -1612,18 +1662,18 @@ function formatPercent(value) {
   if (!Number.isFinite(numeric)) return '—';
   const absolute = Math.abs(numeric);
   const maximumFractionDigits = absolute < 0.01 ? 3 : absolute < 1 ? 2 : 1;
-  return new Intl.NumberFormat('ko-KR', { maximumFractionDigits }).format(numeric);
+  return cachedFormatter('NumberFormat', { maximumFractionDigits }).format(numeric);
 }
 
 function formatChartDate(value) {
-  return new Intl.DateTimeFormat('ko-KR', {
+  return cachedFormatter('DateTimeFormat', {
     month: 'short',
     day: 'numeric'
   }).format(value);
 }
 
 function formatSelectionDate(value) {
-  return new Intl.DateTimeFormat('ko-KR', {
+  return cachedFormatter('DateTimeFormat', {
     year: 'numeric',
     month: 'short',
     day: 'numeric'
@@ -1631,7 +1681,7 @@ function formatSelectionDate(value) {
 }
 
 function formatChartDateTime(value) {
-  return new Intl.DateTimeFormat('ko-KR', {
+  return cachedFormatter('DateTimeFormat', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -1645,7 +1695,7 @@ function formatRelativeTime(value) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return String(value);
   const seconds = Math.round((timestamp - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat('ko-KR', { numeric: 'auto' });
+  const formatter = cachedFormatter('RelativeTimeFormat', { numeric: 'auto' });
   if (Math.abs(seconds) < 60) return formatter.format(seconds, 'second');
   const minutes = Math.round(seconds / 60);
   if (Math.abs(minutes) < 60) return formatter.format(minutes, 'minute');
@@ -1653,14 +1703,14 @@ function formatRelativeTime(value) {
   if (Math.abs(hours) < 24) return formatter.format(hours, 'hour');
   const days = Math.round(hours / 24);
   if (Math.abs(days) < 30) return formatter.format(days, 'day');
-  return new Intl.DateTimeFormat('ko-KR', { month: 'short', day: 'numeric' }).format(timestamp);
+  return cachedFormatter('DateTimeFormat', { month: 'short', day: 'numeric' }).format(timestamp);
 }
 
 function formatSchedule(value) {
   if (!value) return '시간 미정';
   const timestamp = new Date(value);
   if (!Number.isFinite(timestamp.getTime())) return '시간 미정';
-  return new Intl.DateTimeFormat('ko-KR', {
+  return cachedFormatter('DateTimeFormat', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

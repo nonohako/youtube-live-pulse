@@ -210,3 +210,16 @@ test('Redis caches metadata and stays within the one-desktop free command budget
   const restarted = new RedisStore('https://example.upstash.io', 'secret', async (_url, options) => ({ok: true, json: async () => JSON.parse(options.body).map(c => ({result: c[0] === 'GET' ? JSON.stringify(store.metadataCache) : []}))}));
   assert.equal((await restarted.read(0)).metadata[CID].videos[VID].title, 'Video');
 });
+
+test('public history projections reuse unchanged arrays and invalidate for new archive data', () => {
+  const cloud=mergePage({},makePage(),[CID],NOW);
+  const channel={id:CID,subscriberHistory:[],videoViewHistories:[]};
+  const before=JSON.stringify(cloud);
+  const a=withCloudHistory(channel,cloud),b=withCloudHistory(channel,cloud);
+  assert.equal(a.videoViewHistories,b.videoViewHistories);assert.equal(a.subscriberHistory,b.subscriberHistory);
+  assert.equal(JSON.stringify(cloud),before);
+  channel.subscriberHistory=[{at:new Date(NOW-120000).toISOString(),count:9}];
+  const c=withCloudHistory(channel,cloud);assert.notEqual(c.subscriberHistory,b.subscriberHistory);assert.equal(c.subscriberHistory.length,2);
+  const changed={...cloud,channels:{...cloud.channels,[CID]:{...cloud.channels[CID],subscriberHistory:[{at:new Date(NOW).toISOString(),count:200000}]}}};
+  assert.equal(withCloudHistory(channel,changed).subscriberHistory.at(-1).count,200000);
+});

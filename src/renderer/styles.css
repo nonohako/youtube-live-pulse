@@ -958,7 +958,8 @@ dialog {
 
 dialog::backdrop {
   background: rgba(4, 5, 8, 0.72);
-  backdrop-filter: blur(6px);
+  /* Avoid repainting a blurred, thumbnail-heavy background on each chart hover. */
+  backdrop-filter: none;
 }
 
 #settings-form {
@@ -1820,3 +1821,7 @@ dialog { overflow: hidden; }
 .comparison-item strong { overflow-wrap: anywhere; }
 .comparison-item span, .comparison-item small { color: var(--muted); }
 .comparison-color-0 { border-color: #6fa8ff; }.comparison-color-1 { border-color: #ff784d; }.comparison-color-2 { border-color: #38d995; }.comparison-color-3 { border-color: #c698ff; }
+
+.compare-hover-wrap { position: relative; }
+.compare-hover-line { stroke: #c4c9d4; stroke-dasharray: 4 4; pointer-events: none; }
+.compare-hover-tip { max-width: 300px; }

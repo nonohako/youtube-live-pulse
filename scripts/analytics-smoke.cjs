@@ -43,11 +43,25 @@ app.whenReady().then(async()=>{
   assert.ok(await js("videoViewChartModel.points.length < 200"));
   await js("document.getElementById('video-view-close').click();document.querySelector('.view-card-open').click()");
   assert.equal(await js("videoViewChartRange"),'90d');
+  await js("(()=>{const svg=document.getElementById('video-view-detail-svg'),b=svg.getBoundingClientRect();svg.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:b.left+b.width/2,clientY:b.top+100}));return new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))})()");
+  assert.equal(await js("document.getElementById('video-view-tooltip').classList.contains('hidden')"),false);
+  await js("window.__hoverSvg=document.getElementById('video-view-detail-svg')");
+  const delta={...monitor.publicState(),channels:monitor.publicState().channels.map(c=>({...c,subscriberHistory:undefined,videoViewHistories:undefined,historiesUnchanged:true}))};
+  win.webContents.send('state:changed',delta);
+  await new Promise(r=>setTimeout(r,350));
+  assert.equal(await js("window.__hoverSvg===document.getElementById('video-view-detail-svg')"),true);
+  assert.ok(await js("appState.channels[0].videoViewHistories.length>0"));
   await shot('analytics-video.png');
   await js("document.getElementById('video-view-close').click();document.querySelectorAll('[data-compare-video]')[0].click();document.querySelectorAll('[data-compare-video]')[1].click();document.getElementById('views-compare').click()");
   assert.equal(await js("document.querySelectorAll('.compare-svg path').length"),2);
   await js("document.querySelector('[data-compare-range=\"90d\"]').click();document.getElementById('compare-metric').value='change';document.getElementById('compare-metric').dispatchEvent(new Event('change'))");
+  await js("(()=>{const svg=document.querySelector('.compare-svg'),b=svg.getBoundingClientRect();window.__hoverMoves=0;const original=moveComparisonHover;moveComparisonHover=e=>{window.__hoverMoves++;original(e)};for(let i=0;i<100;i++)svg.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:b.left+b.width/2+i/10,clientY:b.top+100}));return new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))})()");
+  assert.equal(await js("window.__hoverMoves"),1);
+  assert.equal(await js("document.getElementById('compare-hover-tip').classList.contains('hidden')"),false);
+  assert.equal(await js("document.querySelectorAll('.compare-svg circle title').length"),0);
   await shot('analytics-comparison.png');
+  await js("document.getElementById('compare-dialog').dispatchEvent(new PointerEvent('pointerleave'));new Promise(r=>requestAnimationFrame(r))");
+  assert.equal(await js("document.getElementById('compare-hover-tip').classList.contains('hidden')"),true);
   await js("document.getElementById('compare-close').click();openSubscriberChart(appState.channels[0].id);document.querySelector('[data-chart-range=\"7d\"]').click();document.getElementById('subscriber-chart-mode').value='daily';document.getElementById('subscriber-chart-mode').dispatchEvent(new Event('change'))");
   assert.equal(await js("detailChartModel.displayMode"),'daily');
   const scroll = await js("({outerOverflow:getComputedStyle(document.getElementById('subscriber-dialog')).overflowY,bodyOverflow:getComputedStyle(document.body).overflowY,outerExcess:document.getElementById('subscriber-dialog').scrollHeight-document.getElementById('subscriber-dialog').clientHeight,innerExcess:document.querySelector('.subscriber-detail').scrollHeight-document.querySelector('.subscriber-detail').clientHeight})");
@@ -59,7 +73,7 @@ app.whenReady().then(async()=>{
   await js("openSubscriberChart(appState.channels[0].id)");assert.equal(await js("subscriberChartRange"),'7d');assert.equal(await js("detailChartModel.displayMode"),'daily');
   await js("document.getElementById('subscriber-close').click();openVideoViewChart(appState.channels[0].id,'mFM2hP5LEhM')");assert.equal(await js("videoViewChartRange"),'90d');assert.equal(await js("videoViewChartModel.displayMode"),'daily');
   assert.equal(errors.length,0,errors.join('\n'));
-  fs.writeFileSync(path.join(output,'analytics-smoke-result.json'),JSON.stringify({packaged,passed:true,scroll,checks:['library','search','thumbnail-open','comparison','mode-switch','range-reopen','reload-persistence','single-scroll','small-window']},null,2));
+  fs.writeFileSync(path.join(output,'analytics-smoke-result.json'),JSON.stringify({packaged,passed:true,scroll,checks:['library','search','thumbnail-open','comparison','mode-switch','range-reopen','reload-persistence','single-scroll','small-window','next-frame-hover','100-events-one-frame','leave-cancels-hover','status-delta-keeps-chart']},null,2));
   app.exit(0);
  }catch(error){fs.writeFileSync(path.join(output,'analytics-smoke-error.txt'),error.stack);console.error(error);app.exit(1)}
 });

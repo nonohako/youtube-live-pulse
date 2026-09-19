@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-18 after v1.9.0 release, packaged analytics UI verification and installed upgrade.
+Last maintained: 2026-09-19 after chart hover performance fixes and regression verification.
 
 ## Project mission
 
@@ -124,6 +124,8 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Subscriber, single-video and comparison charts expose samples/daily selectors inline; daily uses each local date final observation without rewriting stored histories. Existing completed-day subscriber growth rules remain unchanged.
 - Persist validated chart period/mode preferences per chart type in renderer localStorage, including across window/app restarts; it contains presentation preferences only, never credentials. Zoom/selection reset on period or mode changes.
 - `scripts/analytics-smoke.cjs` runs real isolated Electron renderer interactions against fixture data; add `--packaged` to validate the built ASAR. Keep contextIsolation, sandbox and no Node access.
+
+- Coalesce chart hover events to one animation frame and binary-search actual samples; tooltips must not wait for native SVG title delays. Preserve chart DOM on status-only updates and avoid rebuilding background lists while a dialog is open. Cache cloud chart projections without mutating or truncating the stored archive; omit unchanged histories from IPC only when the renderer can reuse its previous full state.
 
 ## Windows shell identity invariants
 

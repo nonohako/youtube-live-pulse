@@ -1,5 +1,46 @@
 'use strict';
 let viewsPageActive = false;
+let comparisonModel = null;
+let comparisonRenderKey = '';
+function comparisonDataKey() {
+  return allViewVideos().filter(v => comparisonSelection.has(v.key)).map(v => v.key + historyRenderKey(v.samples)).join('|');
+}
+function refreshComparisonIfChanged() {
+  if (comparisonRenderKey !== comparisonDataKey()) renderVideoComparison();
+}
+function hideComparisonHover() {
+  hoverFrames.clear('comparison');
+  document.getElementById('compare-hover-line')?.classList.add('hidden');
+  document.getElementById('compare-hover-tip')?.classList.add('hidden');
+  document.querySelectorAll('.compare-hover-dot').forEach(dot => dot.classList.add('hidden'));
+}
+function moveComparisonHover(event) {
+  const svg = event.target.closest?.('.compare-svg');
+  const model = comparisonModel;
+  if (!svg || !model) return;
+  const bounds = svg.getBoundingClientRect();
+  if (!bounds.width) return;
+  const px = Math.max(model.left, Math.min(model.width - model.right, (event.clientX - bounds.left) / bounds.width * model.width));
+  const time = model.start + (px - model.left) / (model.width - model.left - model.right) * model.span;
+  const line = document.getElementById('compare-hover-line');
+  const tip = document.getElementById('compare-hover-tip');
+  if (!line || !tip) return;
+  line.setAttribute('x1', px); line.setAttribute('x2', px); line.classList.remove('hidden');
+  tip.innerHTML = model.series.map((series, i) => {
+    const sample = window.LivePulseChartHover.nearest(series.samples, time, 'timestamp');
+    const dot = document.getElementById('compare-hover-dot-' + i);
+    if (!sample || time < series.samples[0].timestamp || time > series.samples.at(-1).timestamp) {
+      dot?.classList.add('hidden');
+      return `<span>${escapeHtml(series.title)} · 이 시각 기록 없음</span>`;
+    }
+    dot.setAttribute('cx', model.x(sample.timestamp)); dot.setAttribute('cy', model.y(sample.value)); dot.classList.remove('hidden');
+    return `<span>${escapeHtml(series.title)}</span><strong>${formatNumber(sample.value)}회</strong><span>${escapeHtml(formatChartDateTime(sample.timestamp))} 관측</span>`;
+  }).join('');
+  tip.classList.remove('hidden');
+  tip.style.left = Math.max(150, Math.min(bounds.width - 150, px / model.width * bounds.width)) + 'px';
+  tip.style.top = '12px';
+}
+
 const comparisonSelection = new Set();
 const comparisonColors = ['#6fa8ff', '#ff784d', '#38d995', '#c698ff'];
 
@@ -47,6 +88,9 @@ function renderViewsPanel() {
 }
 
 function renderVideoComparison() {
+  comparisonRenderKey = comparisonDataKey();
+  comparisonModel = null;
+  hoverFrames.clear('comparison');
   const prefs = readChartPreferences();
   document.getElementById('compare-mode').value = prefs.compareMode;
   document.getElementById('compare-metric').value = prefs.compareMetric;
@@ -71,14 +115,18 @@ function renderVideoComparison() {
     const color = comparisonColors[index];
     const d = series.samples.map((s,i) => `${i ? 'L' : 'M'}${x(s.timestamp).toFixed(2)} ${y(s.value).toFixed(2)}`).join(' ');
     // Only observed samples form the path; never extrapolate before/after them.
-    const points = series.samples.filter((_s,i) => i === 0 || i === series.samples.length-1 || i % Math.max(1,Math.ceil(series.samples.length/160)) === 0);
-    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"/>` + points.map(s => `<circle cx="${x(s.timestamp)}" cy="${y(s.value)}" r="3" fill="${color}"><title>${escapeHtml(series.title)} · ${escapeHtml(formatChartDateTime(s.timestamp))} · ${formatNumber(s.value)}회</title></circle>`).join('');
+    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"/>`;
+
   }).join('');
-  content.innerHTML = `<svg class="compare-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="선택 영상 조회수 비교 차트"><title>선택 영상 조회수 비교</title>${ticks}${dates}${paths}</svg>
+  comparisonModel = {...model, width, height, left, right, top, bottom, span, x, y};
+  content.innerHTML = `<div class="compare-hover-wrap"><svg class="compare-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="선택 영상 조회수 비교 차트"><title>선택 영상 조회수 비교</title>${ticks}${dates}${paths}<line id="compare-hover-line" class="compare-hover-line hidden" y1="${top}" y2="${height-bottom}"/>${model.series.map((s,i) => `<circle id="compare-hover-dot-${i}" class="compare-hover-dot hidden" r="4" fill="${comparisonColors[i]}"/>`).join('')}</svg><div id="compare-hover-tip" class="detail-chart-tooltip compare-hover-tip hidden"></div></div>
     <div class="comparison-legend">${model.series.map((s,i) => `<div class="comparison-item comparison-color-${i}"><strong>${escapeHtml(s.title)}</strong><span>${escapeHtml(s.channelTitle)}</span><span>최근 ${s.last ? formatNumber(s.last.count) : '기록 없음'} · 기간 증가 ${s.change === null ? '자료 부족' : `${s.change >= 0 ? '+' : ''}${formatNumber(s.change)}`}</span><small>${s.first ? `${escapeHtml(formatChartDateTime(s.first.timestamp))} ~ ${escapeHtml(formatChartDateTime(s.last.timestamp))}` : '선택 기간에 수집 기록이 없습니다.'}</small></div>`).join('')}</div>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('compare-dialog').addEventListener('pointermove', event => queueHover('comparison', event, moveComparisonHover));
+  document.getElementById('compare-dialog').addEventListener('pointerleave', hideComparisonHover);
+  document.getElementById('compare-dialog').addEventListener('close', () => { hideComparisonHover(); requestAnimationFrame(render); });
   document.getElementById('views-nav').addEventListener('click', () => showViewsPage(true));
   document.getElementById('views-search').addEventListener('input', renderViewsPanel);
   document.getElementById('views-channel').addEventListener('change', renderViewsPanel);

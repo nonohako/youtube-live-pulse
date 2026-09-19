@@ -2,6 +2,10 @@
 
 const { compactSamples, normalizeVideoViewHistories } = require('./video-history');
 
+// Cloud pages replace channel archive objects; projections never mutate the archive.
+const cloudProjectionCache = new WeakMap();
+const mergedProjectionCache = new WeakMap();
+
 
 function parseConnectionFile(text) {
   if (typeof text !== 'string' || text.length > 4096) throw new Error('클라우드 연결 파일 크기가 올바르지 않습니다.');
@@ -87,14 +91,31 @@ function mergePage(cloud, page, allowedIds, now = Date.now()) {
 function withCloudHistory(channel, cloud) {
   const extra = cloud?.channels?.[channel.id];
   if (!extra) return channel;
-  const fresh = pruneCloud({ channels: { [channel.id]: extra } }).channels[channel.id];
-  const videos = new Map(fresh.videoViewHistories.map((video) => [video.videoId, video]));
+  const previous = mergedProjectionCache.get(channel);
+  const subscriberLength = channel.subscriberHistory?.length || 0;
+  if (previous?.extra === extra && previous.localSubscribers === channel.subscriberHistory
+    && previous.subscriberLength === subscriberLength && previous.localVideos === channel.videoViewHistories) {
+    return { ...channel, ...previous.histories };
+  }
+  let fresh = cloudProjectionCache.get(extra);
+  if (!fresh) {
+    fresh = {
+      subscriberHistory: samplesMerged(extra.subscriberHistory, []),
+      videoViewHistories: normalizeVideoViewHistories(extra.videoViewHistories, Date.now(), { retainAll: true, sampleLimit: 2000 })
+    };
+    cloudProjectionCache.set(extra, fresh);
+  }
+  const videos = new Map(fresh.videoViewHistories.map(video => [video.videoId, video]));
   for (const video of channel.videoViewHistories || []) {
     const other = videos.get(video.videoId);
-    videos.set(video.videoId, { ...other, ...video, samples: samplesMerged(other?.samples, video.samples) });
+    videos.set(video.videoId, { ...other, ...video, samples: samplesMerged(other?.samples, video.samples, 0, 2000) });
   }
-  return { ...channel, subscriberHistory: samplesMerged(fresh.subscriberHistory, channel.subscriberHistory, 0, Number.MAX_SAFE_INTEGER),
-    videoViewHistories: normalizeVideoViewHistories([...videos.values()], Date.now(), { retainAll: true, sampleLimit: 2000 }) };
+  const histories = {
+    subscriberHistory: samplesMerged(fresh.subscriberHistory, channel.subscriberHistory),
+    videoViewHistories: [...videos.values()].sort((a,b) => Date.parse(b.publishedAt || b.lastCheckedAt || 0) - Date.parse(a.publishedAt || a.lastCheckedAt || 0))
+  };
+  mergedProjectionCache.set(channel, {extra, localSubscribers: channel.subscriberHistory, subscriberLength, localVideos: channel.videoViewHistories, histories});
+  return { ...channel, ...histories };
 }
 
 class CloudSync {
