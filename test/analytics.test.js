@@ -24,3 +24,14 @@ test('daily comparison retains last observation per local day and does not mutat
  assert.equal(new Date(result.series[0].samples[0].timestamp).getHours(),0);assert.equal(JSON.stringify(samples),original);
  assert.equal(comparison([{samples:[]}],'all','daily','change',now).series[0].change,null);
 });
+
+test('interval analytics preserve gaps, negative changes and insufficient baselines',()=>{
+ const {intervalSummary}=require('../src/renderer/analytics-math');
+ const samples=[{at:'2026-09-01T12:00:00Z',count:120},{at:'2026-09-03T12:00:00Z',count:100}];
+ assert.equal(intervalSummary(samples).perDay,-10);
+ assert.equal(intervalSummary(samples).change,-20);
+ assert.equal(intervalSummary(samples.slice(0,1)).change,null);
+ assert.equal(intervalSummary([{at:samples[0].at,count:0},{at:samples[1].at,count:20}]).percent,null);
+ assert.equal(preferences({videoMetric:'change',subscriberMetric:'bad'}).videoMetric,'change');
+ assert.equal(preferences({subscriberMetric:'bad'}).subscriberMetric,'total');
+});

@@ -1,5 +1,10 @@
 'use strict';
 let viewsPageActive = false;
+const viewSummaryCache = new WeakMap();
+function viewIntervalSummary(samples) {
+  if (!viewSummaryCache.has(samples)) viewSummaryCache.set(samples, window.LivePulseAnalytics.intervalSummary(samples));
+  return viewSummaryCache.get(samples);
+}
 let comparisonModel = null;
 let comparisonRenderKey = '';
 function comparisonDataKey() {
@@ -72,12 +77,14 @@ function renderViewsPanel() {
   for (const key of comparisonSelection) if (!all.some(v => v.key === key)) comparisonSelection.delete(key);
   const query = document.getElementById('views-search').value.trim().toLocaleLowerCase();
   const videos = all.filter(v => (!select.value || v.channelId === select.value) && (!query || v.title.toLocaleLowerCase().includes(query)));
+  const sort = document.getElementById('views-sort').value;
+  videos.sort((a,b) => sort === 'views' ? b.samples.at(-1).count - a.samples.at(-1).count : sort === 'growth' ? (viewIntervalSummary(b.samples).perDay ?? -Infinity) - (viewIntervalSummary(a.samples).perDay ?? -Infinity) : Date.parse(b.samples.at(-1).at) - Date.parse(a.samples.at(-1).at));
   document.getElementById('views-count').textContent = `${videos.length}개 영상`;
   const grid = document.getElementById('views-grid');
   const html = videos.map(v => `<article class="view-card">
     <button class="view-card-open" data-video-view-channel="${escapeAttribute(v.channelId)}" data-video-view-chart="${escapeAttribute(v.videoId)}" aria-label="${escapeAttribute(v.title)} 조회수 차트">
       <img src="https://i.ytimg.com/vi/${escapeAttribute(v.videoId)}/mqdefault.jpg" loading="lazy" alt="">
-      <span class="view-card-body"><span class="muted">${escapeHtml(v.channelTitle)}</span><strong>${escapeHtml(v.title || v.videoId)}</strong><span class="view-card-count">${formatNumber(v.samples.at(-1).count)}<small> 조회</small></span><span class="muted">마지막 수집 ${escapeHtml(formatChartDateTime(Date.parse(v.samples.at(-1).at)))}</span></span>
+      <span class="view-card-body"><span class="muted">${escapeHtml(v.channelTitle)}</span><strong>${escapeHtml(v.title || v.videoId)}</strong><span class="view-card-count">${formatNumber(v.samples.at(-1).count)}<small> 조회</small></span><span class="view-card-velocity">${analysisNumber(viewIntervalSummary(v.samples).perDay, '회/일')} <small>기록 기간 평균</small></span><span class="muted">마지막 수집 ${escapeHtml(formatChartDateTime(Date.parse(v.samples.at(-1).at)))}</span></span>
     </button>
     <label class="compare-choice"><input type="checkbox" data-compare-video="${escapeAttribute(v.key)}" ${comparisonSelection.has(v.key) ? 'checked' : ''} ${comparisonSelection.size >= 4 && !comparisonSelection.has(v.key) ? 'disabled' : ''}> 비교 선택</label>
   </article>`).join('') || '<div class="detail-chart-empty">표시할 영상 기록이 없습니다.</div>';
@@ -115,12 +122,12 @@ function renderVideoComparison() {
     const color = comparisonColors[index];
     const d = series.samples.map((s,i) => `${i ? 'L' : 'M'}${x(s.timestamp).toFixed(2)} ${y(s.value).toFixed(2)}`).join(' ');
     // Only observed samples form the path; never extrapolate before/after them.
-    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"/>`;
+    return `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5"/>${series.samples.length === 1 ? `<circle cx="${x(series.samples[0].timestamp)}" cy="${y(series.samples[0].value)}" r="4" fill="${color}"/>` : ''}`;
 
   }).join('');
   comparisonModel = {...model, width, height, left, right, top, bottom, span, x, y};
   content.innerHTML = `<div class="compare-hover-wrap"><svg class="compare-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="선택 영상 조회수 비교 차트"><title>선택 영상 조회수 비교</title>${ticks}${dates}${paths}<line id="compare-hover-line" class="compare-hover-line hidden" y1="${top}" y2="${height-bottom}"/>${model.series.map((s,i) => `<circle id="compare-hover-dot-${i}" class="compare-hover-dot hidden" r="4" fill="${comparisonColors[i]}"/>`).join('')}</svg><div id="compare-hover-tip" class="detail-chart-tooltip compare-hover-tip hidden"></div></div>
-    <div class="comparison-legend">${model.series.map((s,i) => `<div class="comparison-item comparison-color-${i}"><strong>${escapeHtml(s.title)}</strong><span>${escapeHtml(s.channelTitle)}</span><span>최근 ${s.last ? formatNumber(s.last.count) : '기록 없음'} · 기간 증가 ${s.change === null ? '자료 부족' : `${s.change >= 0 ? '+' : ''}${formatNumber(s.change)}`}</span><small>${s.first ? `${escapeHtml(formatChartDateTime(s.first.timestamp))} ~ ${escapeHtml(formatChartDateTime(s.last.timestamp))}` : '선택 기간에 수집 기록이 없습니다.'}</small></div>`).join('')}</div>`;
+    <div class="comparison-legend">${model.series.map((s,i) => `<div class="comparison-item comparison-color-${i}"><strong>${escapeHtml(s.title)}</strong><span>${escapeHtml(s.channelTitle)}</span><span>일평균 ${analysisNumber(viewIntervalSummary(s.samples).perDay, '회/일')}</span><span>최근 ${s.last ? formatNumber(s.last.count) : '기록 없음'} · 기간 증가 ${s.change === null ? '자료 부족' : `${s.change >= 0 ? '+' : ''}${formatNumber(s.change)}`}</span><small>${s.first ? `${escapeHtml(formatChartDateTime(s.first.timestamp))} ~ ${escapeHtml(formatChartDateTime(s.last.timestamp))}` : '선택 기간에 수집 기록이 없습니다.'}</small></div>`).join('')}</div>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

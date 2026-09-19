@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-19
 
+## v1.10.0 analysis workspace
+
+Redesigned subscriber/video analytics for analysis-first use: unified four-KPI summaries (last observation, change, average speed, percentage), wide chart canvas, inline total/change switches with persisted preferences, completed-day history tables and clearer coverage/baseline labels. Subscriber growth excludes today and preserves existing gap/baseline rules. Video summary uses raw timestamps even in daily display; daily change charts use the same original observed baseline. Missing baselines show insufficient data. Video picker and collection help are collapsible; header remains accessible during one-surface scrolling. Video library adds recorded-period velocity and sorting by latest observation, count or average velocity; comparison shows average speed and single observations as visible dots. Summaries are cached to preserve hover responsiveness.
+
+93 unit tests and the source Electron interaction suite passed, including chart metric switching, baseline handling, unchanged KPI totals, day tables and preference persistence. Reviewed normal and 900x660 screenshots. Final packaged ASAR passed the interaction suite; product, chart zoom and video smoke exited 0. Installer SHA-512 and updater repository metadata passed. A read-only isolated renderer displayed 208 real stored videos and subscriber records without console errors. Public release verification pending. No collection or storage policy changed.
+
 ## v1.9.1 chart hover performance
 
 Coalesces mouse moves per animation frame, binary-searches actual observations and caches Intl formatters. Comparison now has an immediate custom crosshair/tooltip. Status-only updates preserve open chart DOM, skip background list rebuilding, reuse cloud projections and omit unchanged history arrays from IPC. Raw local archives remain unchanged. Close handlers ignore stale close events when a dialog was already reopened.

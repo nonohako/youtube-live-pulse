@@ -649,7 +649,7 @@ function renderSubscriberDetail() {
   }
 
   const title = channel.snapshot?.metadata?.title || channel.title || 'YouTube 채널';
-  elements.subscriberDialogTitle.textContent = `${title} · 구독자 상세 추이`;
+  elements.subscriberDialogTitle.textContent = title;
   elements.subscriberDialog.querySelectorAll('[data-chart-range]').forEach((button) => {
     button.classList.toggle('active', button.dataset.chartRange === subscriberChartRange);
   });
@@ -657,6 +657,8 @@ function renderSubscriberDetail() {
   const math = window.LivePulseChartMath;
   const now = Date.now();
   const displayMode = readChartPreferences().subscriberMode;
+  const metric = readChartPreferences().subscriberMetric;
+  elements.subscriberDialog.querySelectorAll('[data-analysis-metric]').forEach(b => { b.classList.toggle('active', b.dataset.analysisMetric === metric); b.setAttribute('aria-pressed', b.dataset.analysisMetric === metric); });
   document.getElementById('subscriber-chart-mode').value = displayMode;
   const displayHistory = displayMode === 'daily'
     ? math.collapseSamplesByLocalDate(channel.subscriberHistory || [])
@@ -747,7 +749,8 @@ function renderSubscriberDetail() {
     timeAxis,
     growth.daily,
     subscriberChartSelection,
-    displayMode
+    displayMode,
+    { metric }
   );
   const growthChart = buildGrowthChart(growth.daily, growthTimeAxis);
   detailChartModel = {
@@ -756,22 +759,15 @@ function renderSubscriberDetail() {
     fullTimeAxis: baseTimeAxis
   };
   elements.subscriberDetailContent.innerHTML = `
-    <div class="detail-metrics">
-      ${renderDetailMetric(subscriberChartViewport ? '구간 마지막' : '현재', formatNumber(summary.current))}
-      ${renderDetailMetric(`${rangeLabel} 증감`, changeText, changeClass)}
-      ${renderDetailMetric('기간 고점', formatNumber(summary.high))}
-      ${renderDetailMetric('기간 저점', formatNumber(summary.low))}
-      ${renderDetailMetric('추세', slopeText, summary.slopePerDay > 0 ? 'up' : summary.slopePerDay < 0 ? 'down' : '')}
-    </div>
-    <div class="detail-chart-legend">
-      <span><i class="legend-actual"></i>실제 구독자 수</span>
-      <span><i class="legend-trend"></i>선형 추세선</span>
-      <span class="detail-selection-hint">마우스 휠 확대·축소 · 날짜 클릭 · 구간 드래그</span>
-      <span>${subscriberChartViewport ? `${formatChartDate(timeAxis.startTime)}–${formatChartDate(timeAxis.endTime)} · ` : ''}${displayMode === 'daily' ? '날짜 기준' : '수집 시각 기준'} · ${samples.length}개 기록</span>
-    </div>
-    ${chart.svg}
-    ${renderSelectionSummary(selectionSummary)}
-    ${renderGrowthAnalysis(growth, growthChart)}`;
+    ${analysisOverview(subscriberChartViewport ? math.filterSamplesInTimeWindow(math.filterSamples(channel.subscriberHistory, subscriberChartRange, now), timeAxis.startTime, timeAxis.endTime) : math.filterSamples(channel.subscriberHistory, subscriberChartRange, now), '명', growth.daily)}
+    <section class="analysis-plot-panel">
+      ${analysisCaption(samples, metric, '명', displayMode)}
+      ${chart.svg}
+      ${renderSelectionSummary(selectionSummary)}
+    </section>
+    ${renderGrowthAnalysis(growth, growthChart)}
+    ${analysisDailyTable(growth.daily, '명')}
+    `;
 }
 
 function renderVideoViewDetail() {
@@ -790,6 +786,8 @@ function renderVideoViewDetail() {
     `<option value="${escapeAttribute(item.videoId)}"${item.videoId === history.videoId ? ' selected' : ''}>${escapeHtml(item.title || item.videoId)}</option>`
   )).join('');
   elements.videoViewDialogTitle.textContent = history.title || '영상 조회수 추이';
+  const thumbnail = document.getElementById('analysis-video-thumbnail');
+  if (thumbnail) thumbnail.src = `https://i.ytimg.com/vi/${encodeURIComponent(history.videoId)}/mqdefault.jpg`;
   elements.videoViewOpen.dataset.openUrl = history.url || `https://www.youtube.com/watch?v=${history.videoId}`;
   elements.videoViewDialog.querySelectorAll('[data-video-view-range]').forEach((button) => {
     button.classList.toggle('active', button.dataset.videoViewRange === videoViewChartRange);
@@ -798,6 +796,8 @@ function renderVideoViewDetail() {
   const math = window.LivePulseChartMath;
   const now = Date.now();
   const displayMode = readChartPreferences().videoMode;
+  const metric = readChartPreferences().videoMetric;
+  elements.videoViewDialog.querySelectorAll('[data-analysis-metric]').forEach(b => { b.classList.toggle('active', b.dataset.analysisMetric === metric); b.setAttribute('aria-pressed', b.dataset.analysisMetric === metric); });
   document.getElementById('video-chart-mode').value = displayMode;
   const visualHistory = displayMode === 'daily' ? math.collapseSamplesByLocalDate(history.samples || []) : history.samples || [];
   const baseSamples = math.filterSamples(visualHistory, videoViewChartRange, now);
@@ -853,6 +853,7 @@ function renderVideoViewDetail() {
     '1y': '1년',
     all: '전체'
   }[videoViewChartRange] || '선택 기간');
+  const observedSamples = videoViewChartViewport ? math.filterSamplesInTimeWindow(math.filterSamples(history.samples, videoViewChartRange, now), timeAxis.startTime, timeAxis.endTime) : math.filterSamples(history.samples, videoViewChartRange, now);
   const chart = buildDetailChart(
     samples,
     math.linearRegression(samples),
@@ -861,6 +862,7 @@ function renderVideoViewDetail() {
     null,
     displayMode,
     {
+      metric, baseline: observedSamples[0]?.count,
       svgId: 'video-view-detail-svg',
       crosshairId: 'video-view-crosshair',
       dotId: 'video-view-hover-dot',
@@ -870,7 +872,7 @@ function renderVideoViewDetail() {
       titleId: 'video-view-chart-title',
       descId: 'video-view-chart-desc',
       title: '영상 조회수 상세 추이',
-      description: '선택한 기간의 실제 영상 조회수와 선형 추세선을 나타낸 차트입니다.',
+      description: '선택한 기간의 실제 조회수 또는 첫 관측값 대비 증감을 나타냅니다.',
       selectionEnabled: false
     }
   );
@@ -881,20 +883,13 @@ function renderVideoViewDetail() {
   };
   resetZoomButton.hidden = !videoViewChartViewport;
   elements.videoViewDetailContent.innerHTML = `
-    <div class="detail-metrics video-view-metrics">
-      ${renderDetailMetric(videoViewChartViewport ? '구간 마지막' : '최근 조회수', formatNumber(summary.current))}
-      ${renderDetailMetric(`${rangeLabel} 증감`, `${summary.change >= 0 ? '+' : ''}${formatNumber(summary.change)}`, changeClass)}
-      ${renderDetailMetric('기간 증가율', periodGrowth === null ? '—' : `${periodGrowth >= 0 ? '+' : ''}${formatPercent(periodGrowth)}%`, changeClass)}
-      ${renderDetailMetric('기간 고점', formatNumber(summary.high))}
-      ${renderDetailMetric('추세', `${summary.slopePerDay >= 0 ? '+' : ''}${formatTrend(summary.slopePerDay)}/일`, summary.slopePerDay > 0 ? 'up' : summary.slopePerDay < 0 ? 'down' : '')}
-    </div>
-    <div class="detail-chart-legend">
-      <span><i class="legend-actual"></i>실제 조회수</span>
-      <span><i class="legend-trend"></i>선형 추세선</span>
-      <span class="detail-selection-hint">마우스 휠 확대·축소</span>
-      <span>${videoViewChartViewport ? `${formatChartDate(timeAxis.startTime)}–${formatChartDate(timeAxis.endTime)} · ` : ''}${samples.length}개 기록</span>
-    </div>
-    ${chart.svg}`;
+    ${analysisOverview(observedSamples, '회')}
+    <section class="analysis-plot-panel">
+      ${analysisCaption(samples, metric, '회', displayMode)}
+      ${chart.svg}
+    </section>
+    ${analysisDailyTable(videoViewChartViewport ? math.analyzeGrowthForTimeWindow(history.samples, timeAxis.startTime, timeAxis.endTime, now).daily : math.analyzeGrowthForRange(history.samples, videoViewChartRange, now).daily, '회')}
+    `;
 }
 
 function renderDetailMetric(label, value, className = '') {
@@ -997,9 +992,9 @@ function renderGrowthAnalysis(growth, chart) {
       <div class="growth-metrics">
         ${renderGrowthMetric('일일 증가량', dailyChange.value, dailyChange.className, '마지막 완료일의 하루 평균')}
         ${renderGrowthMetric('성장률 추이', growthRate.value, growthRate.className, '마지막 완료일의 일일 증가율')}
-        ${renderGrowthMetric('증가세 둔화', acceleration.value, acceleration.className, '최근 증가량 − 직전 증가량')}
-        ${renderGrowthMetric('모멘텀 변화', momentum.value, momentum.className, momentumDetail)}
-        ${renderGrowthMetric('기울기 변화', slope.value, slope.className, slopeDetail)}
+        ${renderGrowthMetric('직전 대비 속도', acceleration.value, acceleration.className, '최근 증가량 − 직전 증가량')}
+        ${renderGrowthMetric('최근 3구간 변화', momentum.value, momentum.className, momentumDetail)}
+        ${renderGrowthMetric('전후반 추세 차이', slope.value, slope.className, slopeDetail)}
       </div>
       <div class="growth-chart-legend">
         <strong>일별 증가량 · 성장률 추이</strong>
@@ -1145,15 +1140,17 @@ function buildDetailChart(
   const plot = { left: 68, right: 18, top: 18, bottom: 44 };
   const plotWidth = width - plot.left - plot.right;
   const plotHeight = height - plot.top - plot.bottom;
-  const values = samples.map((sample) => sample.count);
-  const trendValues = trend.values || [];
-  const combined = [...values, ...trendValues];
+  const metric = options.metric || 'total';
+  const baseline = metric === 'change' ? (options.baseline ?? samples[0].count) : 0;
+  const values = samples.map(sample => sample.count - baseline);
+  const trendValues = [];
+  const combined = values;
   const rawMin = Math.min(...combined);
   const rawMax = Math.max(...combined);
   const rawRange = rawMax - rawMin;
   const padding = Math.max(1, rawRange * 0.12, rawMax * 0.002);
-  const minValue = Math.max(0, rawMin - padding);
-  const maxValue = rawMax + padding;
+  const minValue = metric === 'change' ? Math.min(0, rawMin - padding) : Math.max(0, rawMin - padding);
+  const maxValue = metric === 'change' ? Math.max(0, rawMax + padding) : rawMax + padding;
   const valueRange = Math.max(1, maxValue - minValue);
   const startTime = timeAxis.startTime;
   const endTime = timeAxis.endTime;
@@ -1162,7 +1159,7 @@ function buildDetailChart(
   const toY = (value) => plot.top + ((maxValue - value) / valueRange) * plotHeight;
   const points = samples.map((sample) => ({
     x: toX(sample.timestamp),
-    y: toY(sample.count),
+    y: toY(sample.count - baseline),
     sample
   }));
   const dayPoints = dailySamples.filter((sample) => {
@@ -1174,7 +1171,7 @@ function buildDetailChart(
     sample
   }));
   const linePoints = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
-  const areaPoints = `${plot.left},${plot.top + plotHeight} ${linePoints} ${plot.left + plotWidth},${plot.top + plotHeight}`;
+  const areaPoints = `${points[0].x},${plot.top + plotHeight} ${linePoints} ${points.at(-1).x},${plot.top + plotHeight}`;
   const trendPoints = samples.map((sample, index) => (
     `${toX(sample.timestamp).toFixed(2)},${toY(trendValues[index] ?? sample.count).toFixed(2)}`
   )).join(' ');
@@ -1202,13 +1199,13 @@ function buildDetailChart(
       : `<rect id="${escapeAttribute(selectionId)}" class="detail-selection hidden"/>`;
 
   return {
-    model: { width, height, points, dayPoints, plot, timeAxis, displayMode },
+    model: { width, height, points, dayPoints, plot, timeAxis, displayMode, metric, baseline },
     svg: `
       <div class="detail-chart-wrap">
         <svg id="${escapeAttribute(svgId)}" class="detail-chart" viewBox="0 0 ${width} ${height}"
           preserveAspectRatio="none" role="img" aria-labelledby="${escapeAttribute(titleId)} ${escapeAttribute(descId)}">
           <title id="${escapeAttribute(titleId)}">${escapeHtml(options.title || '구독자 수 상세 추이')}</title>
-          <desc id="${escapeAttribute(descId)}">${escapeHtml(options.description || '선택한 기간의 실제 구독자 수와 선형 추세선을 나타낸 차트입니다.')}</desc>
+          <desc id="${escapeAttribute(descId)}">${escapeHtml(options.description || '선택한 기간의 실제 관측값 또는 첫 관측값 대비 증감을 나타냅니다.')}</desc>
           <defs>
             <linearGradient id="${escapeAttribute(gradientId)}" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#38d995" stop-opacity="0.23"/>
@@ -1218,7 +1215,7 @@ function buildDetailChart(
           ${yTicks}
           ${xTicks}
           <polygon class="detail-chart-area" fill="url(#${escapeAttribute(gradientId)})" points="${areaPoints}"/>
-          <polyline class="detail-trend-line" points="${trendPoints}"/>
+          ${metric === 'change' ? `<line class="analysis-zero-line" x1="${plot.left}" x2="${plot.left + plotWidth}" y1="${toY(0)}" y2="${toY(0)}"/>` : ''}
           <polyline class="detail-actual-line" points="${linePoints}"/>
           ${pointDots}
           ${selectionMarkup}
@@ -1285,7 +1282,8 @@ function handleDetailChartPointerMove(event) {
   dot.classList.remove('hidden');
   tooltip.classList.remove('hidden');
   tooltip.innerHTML = `
-    <strong>${escapeHtml(formatNumber(point.sample.count))}명</strong>
+    <strong>${detailChartModel.metric === 'change' ? analysisNumber(point.sample.count - detailChartModel.baseline, '명') : `${escapeHtml(formatNumber(point.sample.count))}명`}</strong>
+    ${detailChartModel.metric === 'change' ? `<span>전체 ${formatNumber(point.sample.count)}명</span>` : ''}
     <span>${escapeHtml(detailChartModel.displayMode === 'daily'
       ? formatSelectionDate(point.sample.timestamp)
       : formatChartDateTime(point.sample.timestamp))}</span>`;
@@ -1378,7 +1376,8 @@ function handleVideoViewPointerMove(event) {
   dot.classList.remove('hidden');
   tooltip.classList.remove('hidden');
   tooltip.innerHTML = `
-    <strong>${escapeHtml(formatNumber(point.sample.count))}회</strong>
+    <strong>${model.metric === 'change' ? analysisNumber(point.sample.count - model.baseline, '회') : `${escapeHtml(formatNumber(point.sample.count))}회`}</strong>
+    ${model.metric === 'change' ? `<span>누적 ${formatNumber(point.sample.count)}회</span>` : ''}
     <span>${escapeHtml(formatChartDateTime(point.sample.timestamp))}</span>`;
   const pixelX = (point.x / model.width) * bounds.width;
   const pixelY = (point.y / model.height) * bounds.height;

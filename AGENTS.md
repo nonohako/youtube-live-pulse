@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-19 after v1.9.1 hover performance release, packaged UI checks and installed upgrade.
+Last maintained: 2026-09-19 after v1.10.0 analysis workspace redesign and regression checks.
 
 ## Project mission
 
@@ -126,6 +126,8 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - `scripts/analytics-smoke.cjs` runs real isolated Electron renderer interactions against fixture data; add `--packaged` to validate the built ASAR. Keep contextIsolation, sandbox and no Node access.
 
 - Coalesce chart hover events to one animation frame and binary-search actual samples; tooltips must not wait for native SVG title delays. Preserve chart DOM on status-only updates and avoid rebuilding background lists while a dialog is open. Cache cloud chart projections without mutating or truncating the stored archive; omit unchanged histories from IPC only when the renderer can reuse its previous full state.
+
+- Analysis workspaces share four summary metrics, period/mode controls and total/change chart switches. Video summary rates use actual raw observation intervals regardless of daily display; subscriber growth uses completed local dates only. Missing baselines render as insufficient data, never zero. Daily tables show actual closes and elapsed gaps; library velocity is the full recorded interval average, not a recent forecast. Cache per-video summary calculations outside hover handlers.
 
 ## Windows shell identity invariants
 
