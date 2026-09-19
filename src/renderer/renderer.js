@@ -1136,7 +1136,7 @@ function buildDetailChart(
   const titleId = options.titleId || 'detail-chart-title';
   const descId = options.descId || 'detail-chart-desc';
   const width = 840;
-  const height = 320;
+  const height = window.innerHeight <= 740 ? 170 : 240;
   const plot = { left: 68, right: 18, top: 18, bottom: 44 };
   const plotWidth = width - plot.left - plot.right;
   const plotHeight = height - plot.top - plot.bottom;
@@ -1202,7 +1202,7 @@ function buildDetailChart(
     model: { width, height, points, dayPoints, plot, timeAxis, displayMode, metric, baseline },
     svg: `
       <div class="detail-chart-wrap">
-        <svg id="${escapeAttribute(svgId)}" class="detail-chart" viewBox="0 0 ${width} ${height}"
+        <svg id="${escapeAttribute(svgId)}" class="detail-chart" tabindex="0" aria-keyshortcuts="ArrowLeft ArrowRight Home End" viewBox="0 0 ${width} ${height}"
           preserveAspectRatio="none" role="img" aria-labelledby="${escapeAttribute(titleId)} ${escapeAttribute(descId)}">
           <title id="${escapeAttribute(titleId)}">${escapeHtml(options.title || '구독자 수 상세 추이')}</title>
           <desc id="${escapeAttribute(descId)}">${escapeHtml(options.description || '선택한 기간의 실제 관측값 또는 첫 관측값 대비 증감을 나타냅니다.')}</desc>

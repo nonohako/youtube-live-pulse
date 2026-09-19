@@ -47,6 +47,37 @@ document.addEventListener('DOMContentLoaded', () => {
       picker.innerHTML = '<summary>다른 영상 선택</summary>';
       const label = dialog.querySelector('.video-view-select-label'); label.before(picker); picker.append(label);
     }
+    const tabs = document.createElement('div');
+    tabs.className = 'analysis-tabs'; tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '분석 화면');
+    const sections = [['overview','추이'],['records','일별 기록'], ...(kind === 'subscriber' ? [['growth','성장 분석']] : [])];
+    tabs.innerHTML = sections.map(([value,label], i) => `<button type="button" role="tab" aria-selected="${i === 0}" data-analysis-tab="${value}">${label}</button>`).join('');
+    header.after(tabs); dialog.dataset.analysisTab = 'overview';
+    tabs.addEventListener('click', e => {
+      const button = e.target.closest('[data-analysis-tab]'); if (!button) return;
+      dialog.dataset.analysisTab = button.dataset.analysisTab;
+      tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', b === button));
+      dialog.firstElementChild.scrollTop = 0;
+    });
+    tabs.addEventListener('keydown', e => {
+      if (!['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+      e.preventDefault(); const buttons = [...tabs.querySelectorAll('button')];
+      const at = buttons.indexOf(document.activeElement);
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (at + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+      buttons[next].focus(); buttons[next].click();
+    });
+    dialog.addEventListener('keydown', e => {
+      const svg = e.target.closest('.detail-chart');
+      if (!svg || !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+      e.preventDefault();
+      const model = kind === 'subscriber' ? detailChartModel : videoViewChartModel;
+      if (!model?.points.length) return;
+      let at = Number(svg.dataset.keyboardIndex || 0);
+      at = e.key === 'Home' ? 0 : e.key === 'End' ? model.points.length - 1 : Math.max(0, Math.min(model.points.length - 1, at + (e.key === 'ArrowRight' ? 1 : -1)));
+      svg.dataset.keyboardIndex = at;
+      const rect = svg.getBoundingClientRect(), point = model.points[at];
+      const event = {target: svg, pointerId: -1, clientX: rect.left + point.x / model.width * rect.width};
+      (kind === 'subscriber' ? handleDetailChartPointerMove : handleVideoViewPointerMove)(event);
+    });
     const toolbar = dialog.querySelector('.chart-toolbar');
     const controls = document.createElement('div');
     controls.className = 'analysis-controls';

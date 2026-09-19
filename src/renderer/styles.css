@@ -1915,3 +1915,46 @@ dialog { overflow: hidden; }
   .analysis-kpi:nth-child(2) { border-right: 1px solid #303b4d; }
   .analysis-kpi > small { font-size: 9px; }
 }
+
+/* Navigation and reading ergonomics for analytical dialogs. */
+.analysis-tabs { display: flex; gap: 24px; border-bottom: 1px solid #293548; }
+.analysis-tabs button { border: 0; border-bottom: 2px solid transparent; padding: 13px 3px 11px; background: none; color: #91a3bd; font-size: 13px; cursor: pointer; }
+.analysis-tabs button[aria-selected="true"] { border-color: #95bcff; color: #e7f0ff; font-weight: 700; }
+.analytics-workspace[data-analysis-tab="overview"] .analysis-record-panel,
+.analytics-workspace[data-analysis-tab="overview"] .growth-analysis,
+.analytics-workspace[data-analysis-tab="records"] .analysis-plot-panel,
+.analytics-workspace[data-analysis-tab="records"] .growth-analysis,
+.analytics-workspace[data-analysis-tab="growth"] .analysis-plot-panel,
+.analytics-workspace[data-analysis-tab="growth"] .analysis-record-panel { display: none; }
+.analytics-workspace:not([data-analysis-tab="overview"]) .analysis-metric-switch { visibility: hidden; }
+.analytics-workspace .analysis-kpi > small { font-size: 11px; line-height: 1.45; }
+.analytics-workspace .analysis-kpi > span { font-size: 12px; }
+.analytics-workspace .analysis-chart-help { font-size: 12px; }
+.analytics-workspace .analysis-chart-heading span { font-size: 12px; }
+.analytics-workspace .detail-chart-wrap { padding-top: 42px; height: clamp(175px, calc(100dvh - 475px), 390px); box-sizing: border-box; }
+.analytics-workspace .detail-chart-tooltip { top: 2px !important; left: auto !important; right: 4px; transform: none; padding: 6px 10px; min-width: 0; box-shadow: none; border-radius: 6px; }
+.analytics-workspace .detail-chart-tooltip:not(.hidden) { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.analytics-workspace .detail-chart-tooltip span { margin: 0; }
+.analytics-workspace .detail-chart:focus-visible { outline: 2px solid #91baff; outline-offset: 3px; border-radius: 5px; }
+.analytics-workspace .analysis-kpis { margin-bottom: 12px; }
+.analytics-workspace .analysis-kpi { padding: 11px 14px; }
+.analytics-workspace .analysis-kpi strong { margin: 6px 0; }
+.analytics-workspace .analysis-controls { padding: 10px 0; }
+.analytics-workspace .analysis-plot-panel { padding: 12px 16px; margin-bottom: 12px; }
+.analytics-workspace .analysis-help { padding-top: 10px; font-size: 12px; }
+.analytics-workspace .analysis-table th { font-size: 12px; }
+.analytics-workspace .analysis-table td { font-size: 13px; padding-top: 14px; padding-bottom: 14px; }
+@media (max-height: 740px) {
+  .analytics-workspace .analysis-kpi > small { font-size: 10px; }
+  .analytics-workspace .detail-chart-wrap { height: 175px; }
+  .analytics-workspace .analysis-chart-heading > div > span { font-size: 11px; }
+  .analytics-workspace .analysis-chart-help { font-size: 11px; margin-bottom: 4px; }
+  .analytics-workspace .dialog-header { padding: 10px 0; }
+}
+.analytics-workspace .detail-chart-wrap { min-height: 0; }
+@media (max-height: 740px) {
+  .analytics-workspace .analysis-chart-heading > div > span { display: none; }
+  .analytics-workspace .analysis-chart-help { margin-top: 4px; font-size: 10px; }
+  .analytics-workspace .analysis-kpi { padding: 8px 10px; }
+  .analysis-tabs button { padding-top: 10px; padding-bottom: 9px; }
+}

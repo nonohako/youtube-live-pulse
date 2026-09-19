@@ -74,12 +74,19 @@ app.whenReady().then(async()=>{
   await js("document.getElementById('compare-close').click();openSubscriberChart(appState.channels[0].id);document.querySelector('[data-chart-range=\"7d\"]').click();document.getElementById('subscriber-chart-mode').value='daily';document.getElementById('subscriber-chart-mode').dispatchEvent(new Event('change'))");
   assert.equal(await js("detailChartModel.displayMode"),'daily');
   const scroll = await js("({outerOverflow:getComputedStyle(document.getElementById('subscriber-dialog')).overflowY,bodyOverflow:getComputedStyle(document.body).overflowY,outerExcess:document.getElementById('subscriber-dialog').scrollHeight-document.getElementById('subscriber-dialog').clientHeight,innerExcess:document.querySelector('.subscriber-detail').scrollHeight-document.querySelector('.subscriber-detail').clientHeight})");
-  assert.equal(scroll.outerOverflow,'hidden');assert.equal(scroll.bodyOverflow,'hidden');assert.ok(scroll.outerExcess<=2);assert.ok(scroll.innerExcess>0);
+  assert.equal(scroll.outerOverflow,'hidden');assert.equal(scroll.bodyOverflow,'hidden');assert.ok(scroll.outerExcess<=2);assert.ok(scroll.innerExcess>=0);
   await js("document.querySelector('#subscriber-dialog [data-analysis-metric=change]').click()");
   assert.equal(await js("detailChartModel.metric"), 'change');
   assert.equal(await js("document.querySelectorAll('#subscriber-detail-content .analysis-kpi').length"),4);
+  await js("document.querySelector('#subscriber-dialog [data-analysis-tab=records]').click()");
+  assert.equal(await js("getComputedStyle(document.querySelector('#subscriber-dialog .analysis-plot-panel')).display"),'none');
+  assert.notEqual(await js("getComputedStyle(document.querySelector('#subscriber-dialog .analysis-record-panel')).display"),'none');
+  await js("document.querySelector('#subscriber-dialog [data-analysis-tab=overview]').click();const svg=document.getElementById('subscriber-detail-svg');svg.focus();svg.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true}))");
+  assert.equal(await js("document.getElementById('detail-chart-tooltip').classList.contains('hidden')"),false);
+  assert.equal(await js("Number(document.getElementById('subscriber-detail-svg').dataset.keyboardIndex)"),await js("detailChartModel.points.length-1"));
   await shot('analytics-subscriber.png');
   win.setSize(900,660);await shot('analytics-small.png');
+  assert.ok(await js("document.getElementById('subscriber-detail-svg').getBoundingClientRect().bottom <= document.getElementById('subscriber-dialog').getBoundingClientRect().bottom"));
   await new Promise(resolve => { win.webContents.once('did-finish-load', resolve); win.reload(); });
   for(let i=0;i<50;i++){try{if(await js("!!appState"))break}catch{} await new Promise(r=>setTimeout(r,100));}
   await js("openSubscriberChart(appState.channels[0].id)");assert.equal(await js("subscriberChartRange"),'7d');assert.equal(await js("detailChartModel.displayMode"),'daily');
