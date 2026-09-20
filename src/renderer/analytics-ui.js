@@ -133,7 +133,7 @@ function renderVideoComparison() {
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('compare-dialog').addEventListener('pointermove', event => queueHover('comparison', event, moveComparisonHover));
   document.getElementById('compare-dialog').addEventListener('pointerleave', hideComparisonHover);
-  document.getElementById('compare-dialog').addEventListener('close', () => { hideComparisonHover(); requestAnimationFrame(render); });
+  document.getElementById('compare-dialog').addEventListener('close', () => { hideComparisonHover(); requestAnimationFrame(render); void releaseAnalytics(); });
   document.getElementById('views-nav').addEventListener('click', () => showViewsPage(true));
   document.getElementById('views-search').addEventListener('input', renderViewsPanel);
   document.getElementById('views-channel').addEventListener('change', renderViewsPanel);
@@ -145,8 +145,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderViewsPanel();
   });
   document.getElementById('views-clear').addEventListener('click', () => { comparisonSelection.clear(); renderViewsPanel(); });
-  document.getElementById('views-compare').addEventListener('click', () => {
+  document.getElementById('views-compare').addEventListener('click', async () => {
     if (comparisonSelection.size < 2) return;
+    if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: null, videos: [...comparisonSelection].map(key => { const [channelId, videoId] = key.split(':'); return {channelId, videoId}; })})) return;
     renderVideoComparison(); document.getElementById('compare-dialog').showModal();
   });
   document.getElementById('compare-close').addEventListener('click', () => document.getElementById('compare-dialog').close());

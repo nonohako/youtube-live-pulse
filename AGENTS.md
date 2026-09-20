@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-19 after v1.10.1 UI/UX release and installed upgrade verification.
+Last maintained: 2026-09-20 after scoped analytics loading and hidden-window work reduction.
 
 ## Project mission
 
@@ -130,6 +130,8 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Analysis workspaces share four summary metrics, period/mode controls and total/change chart switches. Video summary rates use actual raw observation intervals regardless of daily display; subscriber growth uses completed local dates only. Missing baselines render as insufficient data, never zero. Daily tables show actual closes and elapsed gaps; library velocity is the full recorded interval average, not a recent forecast. Cache per-video summary calculations outside hover handlers.
 
 - Analytics separates trend, daily records and subscriber growth into keyboard-operable sections. Keep the hover readout above the plot, preserve arrow/Home/End record navigation, and verify the full plot fits the compact 900x660 overview.
+
+- Normal UI state carries bounded subscriber sparklines and only video endpoints. The validated analytics subscription exposes full chart projections only for the selected subscriber channel and at most four videos. Closing analytics releases detail data. Hidden/minimized windows receive no background state broadcasts and pause renderer countdowns; show/restore sends a fresh complete state. Core polling and cloud collection must continue while hidden.
 
 ## Windows shell identity invariants
 

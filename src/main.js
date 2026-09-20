@@ -18,6 +18,7 @@ const { JsonStore, clampInterval } = require('./lib/store');
 const { ChannelMonitor } = require('./lib/monitor');
 const { AppUpdater } = require('./lib/updater');
 const { resolveChannelInput } = require('./lib/youtube');
+const { projectChannel, validateScope } = require('./lib/analytics-projection');
 const { CloudSync, normalizeCloudUrl, withCloudHistory, parseConnectionFile } = require('./lib/cloud-sync');
 const { loadSubscriberRecords, mergeSubscriberHistory } = require('./lib/subscriber-import');
 const {
@@ -62,6 +63,7 @@ let monitor = null;
 let updater = null;
 let cloudSync = null;
 const sentHistoryReferences = new Map();
+let analyticsScope = {subscriberId: null, videos: []};
 let isQuitting = false;
 
 app.on('second-instance', (_event, argv) => { applyCloudConfigArgument(argv); showWindow(); });
@@ -84,6 +86,7 @@ app.whenReady().then(() => {
 
   monitor = new ChannelMonitor({
     store,
+    projectChannel: (channel, cloud) => projectChannel(channel, cloud, isSmokeTest || (mainWindow?.isVisible() && !mainWindow.isMinimized()) ? analyticsScope : {subscriberId: null, videos: []}),
     onState: broadcastState,
     onNotify: showNotification,
     onOpen: openInChrome
@@ -149,6 +152,12 @@ function createWindow() {
   });
   if (taskbarDetails) mainWindow.setAppDetails(taskbarDetails);
 
+  for (const event of ['hide', 'minimize']) mainWindow.on(event, () => { mainWindow.webContents.send('window:active', false); });
+  for (const event of ['show', 'restore']) mainWindow.on(event, () => {
+    sentHistoryReferences.clear();
+    mainWindow.webContents.send('window:active', true);
+    if (monitor) broadcastState(monitor.publicState());
+  });
   mainWindow.webContents.on('did-start-loading', () => sentHistoryReferences.clear());
   mainWindow.loadFile(
     path.join(__dirname, 'renderer', 'index.html'),
@@ -298,6 +307,11 @@ function registerIpc() {
     if (selected.canceled || !selected.filePaths[0]) return { canceled: true };
     importCloudConnection(selected.filePaths[0]);
     return { canceled: false };
+  });
+  ipcMain.handle('analytics:watch', (_event, scope) => {
+    analyticsScope = validateScope(scope, store.data.channels);
+    sentHistoryReferences.clear();
+    return withAppInfo(monitor.publicState());
   });
   ipcMain.handle('state:get', () => withAppInfo(monitor?.publicState() || initialPublicState()));
 
@@ -489,7 +503,7 @@ function initialPublicState() {
       hasCloudToken: Boolean(store.data.settings.cloudToken),
       hasApiKey: Boolean(store.data.settings.apiKey)
     },
-    channels: store.data.channels.map((channel) => withCloudHistory(channel, store.data.cloud)),
+    channels: store.data.channels.map((channel) => projectChannel(channel, store.data.cloud, analyticsScope)),
     events: store.data.events,
     monitor: { running: false, nextCheckAt: null }
   };
@@ -498,7 +512,9 @@ function initialPublicState() {
 function withAppInfo(state) {
   return {
     ...state,
+    analyticsLazy: true,
     app: {
+      windowActive: isSmokeTest || Boolean(mainWindow?.isVisible() && !mainWindow.isMinimized()),
       isPackaged: app.isPackaged,
       loginSettingApplied: app.isPackaged
         ? app.getLoginItemSettings().openAtLogin
@@ -517,7 +533,7 @@ function withAppInfo(state) {
 
 function broadcastState(state) {
   const payload = withAppInfo(state);
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized()) {
     const channels = payload.channels.map(channel => {
       const previous = sentHistoryReferences.get(channel.id);
       const unchanged = previous?.subscribers === channel.subscriberHistory && previous?.subscriberLength === channel.subscriberHistory?.length && previous?.videos === channel.videoViewHistories;

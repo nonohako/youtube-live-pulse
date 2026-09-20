@@ -1,6 +1,25 @@
 'use strict';
 
 let appState = null;
+let windowActive = true;
+let analyticsRequest = 0;
+let analyticsRequestPending = false;
+async function requestAnalytics(scope) {
+  if (!appState?.analyticsLazy) return true;
+  const request = ++analyticsRequest;
+  analyticsRequestPending = true;
+  try {
+    const state = await window.livePulse.watchAnalytics(scope);
+    if (request !== analyticsRequest) return false;
+    appState = state;
+    return true;
+  } catch (error) { if (request === analyticsRequest) showError(cleanError(error)); return false; }
+  finally { if (request === analyticsRequest) analyticsRequestPending = false; }
+}
+async function releaseAnalytics() {
+  if (!appState?.analyticsLazy || analyticsRequestPending || document.querySelector('dialog[open]')) return;
+  if (await requestAnalytics({subscriberId: null, videos: []})) render();
+}
 let chartPreferencesMemory = null;
 let countdownTimer = null;
 let subscriberChartChannelId = null;
@@ -53,6 +72,12 @@ function refreshFromState() {
 document.addEventListener('DOMContentLoaded', async () => {
   cacheElements();
   bindEvents();
+  window.livePulse.onWindowActive?.(active => {
+    windowActive = active;
+    clearInterval(countdownTimer); countdownTimer = null;
+    if (active) { countdownTimer = setInterval(renderMonitorStatus, 1000); render(); }
+    else clearTimeout(chartRefreshTimer);
+  });
   window.livePulse.onState((state) => {
     if (state.channels.some(c => c.historiesUnchanged && !appState?.channels.some(old => old.id === c.id))) {
       void window.livePulse.getState().then(full => { appState = full; refreshFromState(); }).catch(error => showError(cleanError(error)));
@@ -68,10 +93,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   try {
     appState = await window.livePulse.getState();
+    windowActive = appState.app?.windowActive !== false;
     render();
     const smokeParams = new URLSearchParams(window.location.search);
     if (smokeParams.has('smokeChart') && appState.channels[0]) {
-      openSubscriberChart(
+      await openSubscriberChart(
         appState.channels[0].id,
         smokeParams.get('chartRange') || '30d',
         smokeParams.get('chartSelection') === '1'
@@ -94,7 +120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (smokeParams.has('smokeVideoViews') && appState.channels[0]) {
       const history = appState.channels[0].videoViewHistories?.[0];
       if (history) {
-        openVideoViewChart(appState.channels[0].id, history.videoId);
+        await openVideoViewChart(appState.channels[0].id, history.videoId);
         window.requestAnimationFrame(() => {
           const svg = elements.videoViewDialog.querySelector('#video-view-detail-svg');
           const bounds = svg?.getBoundingClientRect();
@@ -114,7 +140,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     showError(cleanError(error));
   }
 
-  countdownTimer = window.setInterval(renderMonitorStatus, 1000);
+  clearInterval(countdownTimer);
+  if (windowActive) countdownTimer = window.setInterval(renderMonitorStatus, 1000);
 });
 
 window.addEventListener('beforeunload', () => {
@@ -161,6 +188,7 @@ function bindEvents() {
     detailChartModel = null;
     detailChartDrag = null;
     elements.subscriberImportStatus.textContent = '';
+    void releaseAnalytics();
   });
   elements.subscriberDialog.addEventListener('pointerdown', handleDetailChartPointerDown);
   elements.subscriberDialog.addEventListener('pointermove', event => {
@@ -180,9 +208,12 @@ function bindEvents() {
     videoViewChartVideoId = null;
     videoViewChartViewport = null;
     videoViewChartModel = null;
+    void releaseAnalytics();
   });
-  elements.videoViewSelect.addEventListener('change', () => {
-    videoViewChartVideoId = elements.videoViewSelect.value;
+  elements.videoViewSelect.addEventListener('change', async () => {
+    const videoId = elements.videoViewSelect.value;
+    if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: null, videos: [{channelId: videoViewChartChannelId, videoId}]})) return;
+    videoViewChartVideoId = videoId;
     videoViewChartViewport = null;
     renderVideoViewDetail();
   });
@@ -294,7 +325,7 @@ function bindEvents() {
 }
 
 function render() {
-  if (!appState) return;
+  if (!appState || !windowActive) return;
   elements.appVersion.textContent = appState.app?.version ? `v${appState.app.version}` : '';
   const update = appState.app?.update;
   elements.updateStatus.textContent = update?.message || '업데이트 확인 대기 중';
@@ -567,7 +598,8 @@ function emptyChart() {
     </svg>`;
 }
 
-function openSubscriberChart(channelId, initialRange = readChartPreferences().subscriberRange, selectSmokeRange = false) {
+async function openSubscriberChart(channelId, initialRange = readChartPreferences().subscriberRange, selectSmokeRange = false) {
+  if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: channelId, videos: []})) return;
   const channel = appState?.channels.find((item) => item.id === channelId);
   if (!channel) return;
   subscriberChartChannelId = channelId;
@@ -595,7 +627,8 @@ function openSubscriberChart(channelId, initialRange = readChartPreferences().su
   if (!elements.subscriberDialog.open) elements.subscriberDialog.showModal();
 }
 
-function openVideoViewChart(channelId, videoId) {
+async function openVideoViewChart(channelId, videoId) {
+  if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: null, videos: [{channelId, videoId}]})) return;
   const channel = appState?.channels.find((item) => item.id === channelId);
   const histories = (channel?.videoViewHistories || []).filter((history) => history.samples?.length);
   if (!channel || !histories.length) return;

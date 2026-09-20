@@ -1,6 +1,12 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
+
+## v1.11.0 scoped analytics and background work
+
+Normal renderer state now carries 120-point subscriber sparklines and two endpoints per video. A validated IPC subscription loads only one selected subscriber history and up to four selected video projections (existing 2,000-point video bound); range/mode/zoom calculations still use full selected projections so completed-day baselines stay intact. Closing chart dialogs releases those detailed arrays. Hidden/minimized windows stop state broadcasts and renderer countdowns; show/restore sends fresh state. Background detection and cloud sync continue. Raw archives are not truncated or changed.
+
+On the same installed archive (210 videos), initial state was 10,542,439 bytes / 584.6 ms before; overview is 128,925 bytes / 1.5 ms and one-video state 174,842 bytes / 5.5 ms after. These measure state projection/serialization, not total application CPU or memory savings. 96 unit tests pass, and lazy-mode Electron interaction checks cover selected loading, multi-video comparison, close/release, hidden countdown pause and restoration. Packaged lazy-mode UI suite and product/chart-zoom/video smoke passed. Installer SHA-512 and updater metadata passed. Public release verification pending.
 
 ## v1.10.1 UI/UX refinement
 

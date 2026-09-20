@@ -3,6 +3,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('livePulse', {
+  watchAnalytics: scope => ipcRenderer.invoke('analytics:watch', scope),
+  onWindowActive: callback => { const listener = (_event, active) => callback(active); ipcRenderer.on('window:active', listener); return () => ipcRenderer.removeListener('window:active', listener); },
   getState: () => ipcRenderer.invoke('state:get'),
   addChannel: (input) => ipcRenderer.invoke('channel:add', input),
   removeChannel: (channelId) => ipcRenderer.invoke('channel:remove', channelId),

@@ -11,8 +11,9 @@ const HISTORY_HEARTBEAT_MS = 6 * 60 * 60 * 1000;
 const HISTORY_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 
 class ChannelMonitor {
-  constructor({ store, onState, onNotify, onOpen }) {
+  constructor({ store, onState, onNotify, onOpen, projectChannel = withCloudHistory }) {
     this.store = store;
+    this.projectChannel = projectChannel;
     this.onState = onState;
     this.onNotify = onNotify;
     this.onOpen = onOpen;
@@ -70,7 +71,7 @@ class ChannelMonitor {
         hasApiKey: Boolean(settings.apiKey)
       },
       channels: this.store.data.channels.map((channel) => ({
-        ...withCloudHistory(channel, this.store.data.cloud),
+        ...this.projectChannel(channel, this.store.data.cloud),
         ...(this.runtime.get(channel.id) || {
           status: 'waiting',
           snapshot: null,

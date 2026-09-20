@@ -5,6 +5,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const packaged = process.argv.includes('--packaged');
+const lazy = process.argv.includes('--lazy');
 const source = packaged ? path.join(root, 'dist/win-unpacked/resources/app.asar/src') : path.join(root, 'src');
 const output = path.join(root, 'artifacts');
 app.setPath('userData', path.join(root, '.smoke-user-data', 'analytics-ui'));
@@ -17,10 +18,13 @@ const samples = Array.from({length: 240}, (_,i) => ({at: new Date(now-(239-i)*12
 data.channels[0].title = 'RESCENE'; data.channels[0].subscriberHistory = samples;
 const videos = ['mFM2hP5LEhM','WTdyA5N4K0k','abcdefghijk','12345678901'];
 data.channels[0].videoViewHistories = videos.map((id,i) => ({videoId:id,title:['첫 번째 영상 · 컴백 무대','두 번째 영상 · 비하인드','쇼츠 모음','일상 브이로그'][i],url:'https://www.youtube.com/watch?v='+id,samples:samples.map(s=>({...s,count:Math.round(s.count*(i+1)/2)}))}));
-const monitor = new ChannelMonitor({store:{data}});
-ipcMain.handle('state:get', () => ({...monitor.publicState(),app:{version:'1.9.0'}}));
+let scope = {subscriberId:null,videos:[]};
+const {projectChannel,validateScope}=require(path.join(source,'lib/analytics-projection'));
+const monitor = new ChannelMonitor({store:{data}, ...(lazy ? {projectChannel:(c,cloud)=>projectChannel(c,cloud,scope)} : {})});
+ipcMain.handle('analytics:watch',(_event,value)=>{scope=validateScope(value,data.channels);return {...monitor.publicState(),analyticsLazy:true,app:{version:'test'}};});
+ipcMain.handle('state:get', () => ({...monitor.publicState(),analyticsLazy:lazy,app:{version:'test'}}));
 let win;
-async function js(code) { return win.webContents.executeJavaScript(code); }
+async function js(code) { const value=await win.webContents.executeJavaScript(code); if(lazy) for(let i=0;i<100;i++){if(!await win.webContents.executeJavaScript("typeof analyticsRequestPending !== 'undefined' && analyticsRequestPending")) break; await new Promise(r=>setTimeout(r,10));} return value; }
 async function shot(name) { win.webContents.invalidate(); await win.webContents.capturePage(); await new Promise(r=>setTimeout(r,300)); fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage()).toPNG()); }
 app.whenReady().then(async()=>{
  try {
@@ -49,7 +53,7 @@ app.whenReady().then(async()=>{
   await js("(()=>{const svg=document.getElementById('video-view-detail-svg'),b=svg.getBoundingClientRect();svg.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:b.left+b.width/2,clientY:b.top+100}));return new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))})()");
   assert.equal(await js("document.getElementById('video-view-tooltip').classList.contains('hidden')"),false);
   await js("window.__hoverSvg=document.getElementById('video-view-detail-svg')");
-  const delta={...monitor.publicState(),channels:monitor.publicState().channels.map(c=>({...c,subscriberHistory:undefined,videoViewHistories:undefined,historiesUnchanged:true}))};
+  const delta={...monitor.publicState(),analyticsLazy:lazy,channels:monitor.publicState().channels.map(c=>({...c,subscriberHistory:undefined,videoViewHistories:undefined,historiesUnchanged:true}))};
   win.webContents.send('state:changed',delta);
   await new Promise(r=>setTimeout(r,350));
   assert.equal(await js("window.__hoverSvg===document.getElementById('video-view-detail-svg')"),true);
@@ -63,6 +67,7 @@ app.whenReady().then(async()=>{
   await shot('analytics-video.png');
   await js("document.getElementById('video-view-close').click();document.querySelectorAll('[data-compare-video]')[0].click();document.querySelectorAll('[data-compare-video]')[1].click();document.getElementById('views-compare').click()");
   assert.equal(await js("document.querySelectorAll('.compare-svg path').length"),2);
+  if(lazy) assert.ok(await js("comparisonModel.series.every(s=>s.samples.length>2)"));
   await js("document.querySelector('[data-compare-range=\"90d\"]').click();document.getElementById('compare-metric').value='change';document.getElementById('compare-metric').dispatchEvent(new Event('change'))");
   await js("(()=>{const svg=document.querySelector('.compare-svg'),b=svg.getBoundingClientRect();window.__hoverMoves=0;const original=moveComparisonHover;moveComparisonHover=e=>{window.__hoverMoves++;original(e)};for(let i=0;i<100;i++)svg.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:b.left+b.width/2+i/10,clientY:b.top+100}));return new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))})()");
   assert.equal(await js("window.__hoverMoves"),1);
@@ -92,8 +97,18 @@ app.whenReady().then(async()=>{
   await js("openSubscriberChart(appState.channels[0].id)");assert.equal(await js("subscriberChartRange"),'7d');assert.equal(await js("detailChartModel.displayMode"),'daily');
   await js("document.getElementById('subscriber-close').click();openVideoViewChart(appState.channels[0].id,'mFM2hP5LEhM')");assert.equal(await js("videoViewChartRange"),'90d');assert.equal(await js("videoViewChartModel.displayMode"),'daily');
   assert.equal(await js("videoViewChartModel.metric"),'change');
+  if(lazy) {
+    await js("document.getElementById('video-view-close').click()");
+    await js("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+    await new Promise(r=>setTimeout(r,100));
+    assert.ok(await js("appState.channels.every(c=>c.videoViewHistories.every(v=>v.samples.length<=2))"));
+    win.webContents.send('window:active',false); await new Promise(r=>setTimeout(r,30));
+    assert.equal(await js("countdownTimer"),null);
+    win.webContents.send('window:active',true); await new Promise(r=>setTimeout(r,30));
+    assert.ok(await js("countdownTimer !== null"));
+  }
   assert.equal(errors.length,0,errors.join('\n'));
-  fs.writeFileSync(path.join(output,'analytics-smoke-result.json'),JSON.stringify({packaged,passed:true,scroll,checks:['library','search','thumbnail-open','comparison','mode-switch','range-reopen','reload-persistence','single-scroll','small-window','next-frame-hover','100-events-one-frame','leave-cancels-hover','status-delta-keeps-chart']},null,2));
+  fs.writeFileSync(path.join(output,'analytics-smoke-result.json'),JSON.stringify({packaged,passed:true,lazy,scroll,checks:['library','search','thumbnail-open','comparison','mode-switch','range-reopen','reload-persistence','single-scroll','small-window','next-frame-hover','100-events-one-frame','leave-cancels-hover','status-delta-keeps-chart']},null,2));
   app.exit(0);
  }catch(error){fs.writeFileSync(path.join(output,'analytics-smoke-error.txt'),error.stack + '\n' + await js("document.getElementById('error-banner').textContent").catch(()=>''));console.error(error);app.exit(1)}
 });
