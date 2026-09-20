@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after hourly chart axes and continuous zoom rendering regression checks.
+Last maintained: 2026-09-20 after v1.11.1 hourly axes/zoom release and installed upgrade verification.
 
 ## Project mission
 

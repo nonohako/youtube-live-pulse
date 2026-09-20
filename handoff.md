@@ -6,7 +6,7 @@ Last updated: 2026-09-20
 
 Sample-time charts (subscriber/video/comparison) now show hourly tick marks for windows up to seven days, with label thinning to prevent overlap; local midnight uses a longer, stronger line and a bold date on a second row. Daily and long-range axes retain calendar labels. Single-chart zoom draws the neighboring real points beyond both boundaries inside an SVG clip, keeping the line continuous without adding fabricated observations to hover, summaries or storage. The selected-preset Y domain and change baseline remain stable through zoom. Wheel scale uses a smaller delta-proportional step. Removed unused trend-path calculation.
 
-98 tests passed. Source lazy Electron suite passed hourly/midnight tick checks, stable Y labels/change baseline and clipped outside-neighbor lines; reviewed the 900x660 hourly zoom screenshot. Packaged lazy-mode UI suite and product/chart-zoom/video smoke passed. Installer SHA-512 and updater metadata passed. Public release verification pending.
+98 tests passed. Source lazy Electron suite passed hourly/midnight tick checks, stable Y labels/change baseline and clipped outside-neighbor lines; reviewed the 900x660 hourly zoom screenshot. Packaged lazy-mode UI suite and product/chart-zoom/video smoke passed. Installer SHA-512 and updater metadata passed. Source e8da935 and tag v1.11.1 published. Actions 35502661111 succeeded; public non-draft/non-prerelease release has three assets. Fresh installer download matched published SHA-512. Silent install exited 0; installed version 1.11.1.0 verified and history counts preserved. Native installed-window interaction remains separate from isolated packaged Electron visual checks.
 
 ## v1.11.0 scoped analytics and background work
 
@@ -56,9 +56,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.11.0`
+- Application version: `1.11.1`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.11.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.11.1`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
