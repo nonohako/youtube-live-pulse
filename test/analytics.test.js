@@ -46,6 +46,31 @@ test('hour axis preserves every hourly tick and emphasizes local midnight',()=>{
  assert.ok(ticks.filter(t=>t.major).every(t=>new Date(t.time).getHours()===0));
  assert.ok(detailTicks(buildTimeWindowAxis(start,end),'daily').every(t=>t.major));
 });
+
+test('comparison daily presentation preserves raw summary, baseline and actual observation time',()=>{
+ const at=(day,hour)=>new Date(2026,8,day,hour).toISOString();
+ const samples=[{at:at(15,12),count:100},{at:at(15,23),count:200},{at:at(16,12),count:300},{at:at(18,12),count:999}];
+ const before=JSON.stringify(samples);
+ const raw=comparison([{samples}],'7d','samples','change',now).series[0];
+ const daily=comparison([{samples}],'7d','daily','change',now).series[0];
+ for(const key of ['first','last','change','perDay','percent','baseline']) assert.deepEqual(daily[key],raw[key]);
+ assert.equal(daily.change,200); assert.equal(daily.perDay,200);
+ assert.deepEqual(daily.samples.map(s=>s.value),[100,200]);
+ assert.equal(daily.samples[0].observedAt,Date.parse(at(15,23)));
+ assert.equal(new Date(daily.samples[0].timestamp).getHours(),0);
+ assert.equal(JSON.stringify(samples),before);
+});
+
+test('comparison keeps same-day rate and missing or negative baselines across display modes',()=>{
+ const at=(day,hour)=>new Date(2026,8,day,hour).toISOString();
+ for(const samples of [[],[{at:at(16,9),count:100}],[{at:at(16,9),count:100},{at:at(16,21),count:70}],[{at:at(1,9),count:900},{at:at(12,9),count:0},{at:at(16,9),count:20}]]) {
+  const raw=comparison([{samples}],'7d','samples','change',now).series[0];
+  const daily=comparison([{samples}],'7d','daily','change',now).series[0];
+  for(const key of ['change','perDay','percent','baseline']) assert.equal(daily[key],raw[key]);
+ }
+ const result=comparison([{samples:[{at:at(16,9),count:100},{at:at(16,21),count:70}]}],'7d','daily','change',now).series[0];
+ assert.equal(result.samples.length,1); assert.equal(result.change,-30); assert.equal(result.perDay,-60);
+});
 test('plot continuity retains adjacent real points without altering visible-window statistics',()=>{
  const {plotSamples,filterSamplesInTimeWindow}=require('../src/renderer/chart-math');
  const points=[0,10,20,30].map(h=>({at:new Date(2026,8,15,h).toISOString(),count:h+100}));

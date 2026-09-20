@@ -25,7 +25,10 @@ function moveComparisonHover(event) {
   if (!svg || !model) return;
   const bounds = svg.getBoundingClientRect();
   if (!bounds.width) return;
-  const px = Math.max(model.left, Math.min(model.width - model.right, (event.clientX - bounds.left) / bounds.width * model.width));
+  const matrix = svg.getScreenCTM();
+  if (!matrix) return;
+  const cursor = new DOMPoint(event.clientX, event.clientY ?? bounds.top).matrixTransform(matrix.inverse());
+  const px = Math.max(model.left, Math.min(model.width - model.right, cursor.x));
   const time = model.start + (px - model.left) / (model.width - model.left - model.right) * model.span;
   const line = document.getElementById('compare-hover-line');
   const tip = document.getElementById('compare-hover-tip');
@@ -36,14 +39,12 @@ function moveComparisonHover(event) {
     const dot = document.getElementById('compare-hover-dot-' + i);
     if (!sample || time < series.samples[0].timestamp || time > series.samples.at(-1).timestamp) {
       dot?.classList.add('hidden');
-      return `<span>${escapeHtml(series.title)} · 이 시각 기록 없음</span>`;
+      return `<div class="compare-readout-row comparison-color-${i}"><span>${escapeHtml(series.title)}</span><strong>기록 없음</strong><small>이 시각 기록 없음</small></div>`;
     }
     dot.setAttribute('cx', model.x(sample.timestamp)); dot.setAttribute('cy', model.y(sample.value)); dot.classList.remove('hidden');
-    return `<span>${escapeHtml(series.title)}</span><strong>${formatNumber(sample.value)}회</strong><span>${escapeHtml(formatChartDateTime(sample.timestamp))} 관측</span>`;
+    return `<div class="compare-readout-row comparison-color-${i}"><span title="${escapeAttribute(series.title)}">${escapeHtml(series.title)}</span><strong>${formatNumber(sample.value)}회</strong><small>${escapeHtml(formatChartDateTime(sample.observedAt))} 관측</small></div>`;
   }).join('');
   tip.classList.remove('hidden');
-  tip.style.left = Math.max(150, Math.min(bounds.width - 150, px / model.width * bounds.width)) + 'px';
-  tip.style.top = '12px';
 }
 
 const comparisonSelection = new Set();
@@ -92,6 +93,11 @@ function renderViewsPanel() {
   const compare = document.getElementById('views-compare');
   compare.textContent = `선택한 영상 비교 (${comparisonSelection.size}/4)`;
   compare.disabled = comparisonSelection.size < 2;
+  const tray = document.getElementById('views-selection');
+  const chosen = all.filter(v => comparisonSelection.has(v.key));
+  tray.hidden = !chosen.length;
+  const selectionHtml = chosen.map(v => `<div class="selected-video"><span>${escapeHtml(v.channelTitle)} · ${escapeHtml(v.title || v.videoId)}</span><button type="button" data-remove-comparison="${escapeAttribute(v.key)}" aria-label="${escapeAttribute(v.title || v.videoId)} 비교 선택 해제">×</button></div>`).join('');
+  if (tray.innerHTML !== selectionHtml) tray.innerHTML = selectionHtml;
 }
 
 function renderVideoComparison() {
@@ -129,8 +135,8 @@ function renderVideoComparison() {
 
   }).join('');
   comparisonModel = {...model, width, height, left, right, top, bottom, span, x, y};
-  content.innerHTML = `<div class="compare-hover-wrap"><svg class="compare-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="선택 영상 조회수 비교 차트"><title>선택 영상 조회수 비교</title>${ticks}${dates}${paths}<line id="compare-hover-line" class="compare-hover-line hidden" y1="${top}" y2="${height-bottom}"/>${model.series.map((s,i) => `<circle id="compare-hover-dot-${i}" class="compare-hover-dot hidden" r="4" fill="${comparisonColors[i]}"/>`).join('')}</svg><div id="compare-hover-tip" class="detail-chart-tooltip compare-hover-tip hidden"></div></div>
-    <div class="comparison-legend">${model.series.map((s,i) => `<div class="comparison-item comparison-color-${i}"><strong>${escapeHtml(s.title)}</strong><span>${escapeHtml(s.channelTitle)}</span><span>일평균 ${analysisNumber(viewIntervalSummary(s.samples).perDay, '회/일')}</span><span>최근 ${s.last ? formatNumber(s.last.count) : '기록 없음'} · 기간 증가 ${s.change === null ? '자료 부족' : `${s.change >= 0 ? '+' : ''}${formatNumber(s.change)}`}</span><small>${s.first ? `${escapeHtml(formatChartDateTime(s.first.timestamp))} ~ ${escapeHtml(formatChartDateTime(s.last.timestamp))}` : '선택 기간에 수집 기록이 없습니다.'}</small></div>`).join('')}</div>`;
+  content.innerHTML = `<div class="compare-hover-wrap"><div class="compare-readout-space"><div id="compare-hover-tip" class="compare-readout hidden">${model.series.map((s,i) => `<div class="compare-readout-row comparison-color-${i}"><span>${escapeHtml(s.title)}</span><strong>—</strong><small>차트 위에서 수치 확인</small></div>`).join('')}</div></div><svg class="compare-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="선택 영상 조회수 비교 차트"><title>선택 영상 조회수 비교</title>${ticks}${dates}${paths}<line id="compare-hover-line" class="compare-hover-line hidden" y1="${top}" y2="${height-bottom}"/>${model.series.map((s,i) => `<circle id="compare-hover-dot-${i}" class="compare-hover-dot hidden" r="4" fill="${comparisonColors[i]}"/>`).join('')}</svg></div>
+    <div class="comparison-legend">${model.series.map((s,i) => `<div class="comparison-item comparison-color-${i}"><strong>${escapeHtml(s.title)}</strong><span>${escapeHtml(s.channelTitle)}</span><span>일평균 ${analysisNumber(s.perDay, '회/일')}</span><span>최근 ${s.last ? formatNumber(s.last.count) : '기록 없음'} · 기간 증가 ${s.change === null ? '자료 부족' : `${s.change >= 0 ? '+' : ''}${formatNumber(s.change)}`}</span><small>${s.first ? `${escapeHtml(formatChartDateTime(s.first.timestamp))} ~ ${escapeHtml(formatChartDateTime(s.last.timestamp))}` : '선택 기간에 수집 기록이 없습니다.'}</small></div>`).join('')}</div>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -148,6 +154,13 @@ document.addEventListener('DOMContentLoaded', () => {
     renderViewsPanel();
   });
   document.getElementById('views-clear').addEventListener('click', () => { comparisonSelection.clear(); renderViewsPanel(); });
+  document.getElementById('views-selection').addEventListener('click', event => {
+    const button = event.target.closest('[data-remove-comparison]');
+    if (!button) return;
+    comparisonSelection.delete(button.dataset.removeComparison);
+    renderViewsPanel();
+    (document.querySelector('[data-remove-comparison]') || document.getElementById('views-search')).focus();
+  });
   document.getElementById('views-compare').addEventListener('click', async () => {
     if (comparisonSelection.size < 2) return;
     if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: null, videos: [...comparisonSelection].map(key => { const [channelId, videoId] = key.split(':'); return {channelId, videoId}; })})) return;

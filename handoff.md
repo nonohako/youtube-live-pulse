@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-20
 
+## v1.12.0 analytics improvements
+
+Implemented the five accepted audit items: comparison statistics and change baseline now use raw in-range observations in both display modes; daily hover labels retain actual observation times. Comparison has reserved, color-marked readout rows above the plot and pointer mapping respects SVG transforms. Subscriber/video daily tables page through every completed record in the selected range, reset with analysis context and release data on close. Compact charts keep the date caption and increase the single-chart wrapper from 175px to 210px. Selected comparison videos remain visible in removable chips across search/channel filters.
+
+Validation: all 100 unit tests and changed JavaScript syntax checks passed. Expanded isolated source and packaged-ASAR Electron lazy-mode suites passed mode-invariant summaries/baselines, all video record pages, subscriber paging/reset, filtered selection removal, four long comparison titles, compact plot fit and exact SVG hover coordinates. Reviewed 900x660 comparison/records/chart captures. Live RESCENE fetch returned current public video data with no warnings. Initial restricted GPU/network execution failed; normal approved execution succeeded. x64 NSIS build, packaged product/chart-zoom/video smoke, local installer SHA-512 and updater repository metadata all passed. Installer remains unsigned. Public release verification is pending; installed-app native interaction remains unverified and the installed copy has not been replaced. No collection policy, user histories or IPC security settings changed.
+
 ## Analytics UX audit (2026-09-20)
 
 User requested improvement discovery only. No runtime changes, version bump or installer release. Source at audit start: cbf6447 (v1.11.1). Findings below are candidates, not implemented fixes.

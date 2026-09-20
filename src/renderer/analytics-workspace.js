@@ -20,7 +20,7 @@ function analysisOverview(samples, unit, completed = null) {
 }
 
 function analysisKpi(label, value, note, change = null) {
-  return `<section class="analysis-kpi"><span>${escapeHtml(label)}</span><strong class="${change > 0 ? 'up' : change < 0 ? 'down' : ''}">${value}</strong><small>${escapeHtml(note)}</small></section>`;
+  return `<section class="analysis-kpi"><span>${escapeHtml(label)}</span><strong class="${change > 0 ? 'up' : change < 0 ? 'down' : ''}">${value}</strong><small title="${escapeAttribute(note)}">${escapeHtml(note)}</small></section>`;
 }
 
 function analysisCaption(samples, metric, unit, mode) {
@@ -30,14 +30,32 @@ function analysisCaption(samples, metric, unit, mode) {
     <p class="analysis-chart-help">${metric === 'change' ? (unit === '회' ? '기간 첫 실제 관측값 대비 증감입니다. ' : '선택 기간 첫 기록 대비 증감입니다. ') : ''}마우스를 움직여 수치 확인 · 휠로 확대${unit === '명' ? ' · 날짜를 드래그해 구간 분석' : ''}</p>`;
 }
 
-function analysisDailyTable(daily, unit) {
-  const rows = daily.slice(-10).reverse();
-  return `<section class="analysis-record-panel"><div class="analysis-chart-heading"><h3>일별 변화</h3><span>최근 완료일 최대 10개 · 오늘 제외</span></div>${rows.length ? `<table class="analysis-table"><thead><tr><th>날짜</th><th>마지막 값</th><th>직전 기록 대비</th><th>일평균 증가</th></tr></thead><tbody>${rows.map(d => `<tr><td>${escapeHtml(formatSelectionDate(d.dayTimestamp))}${d.elapsedDays > 1 ? `<small>${d.elapsedDays}일 간격</small>` : ''}</td><td>${formatNumber(d.count)}${unit}</td><td class="${d.rawChange > 0 ? 'up' : d.rawChange < 0 ? 'down' : ''}">${analysisNumber(d.rawChange, unit)}</td><td>${analysisNumber(d.dailyChange, `${unit}/일`)}</td></tr>`).join('')}</tbody></table>` : '<p class="analysis-chart-help">완료된 날짜의 기록이 쌓이면 일별 변화를 표시합니다.</p>'}</section>`;
+const analysisRecordPages = new Map();
+function analysisDailyTable(daily, unit, context, requestedPage) {
+  const previous = analysisRecordPages.get(unit);
+  const key = JSON.stringify(context);
+  const pages = Math.max(1, Math.ceil(daily.length / 10));
+  const page = Math.max(0, Math.min(pages - 1, requestedPage ?? (previous?.key === key ? previous.page : 0)));
+  analysisRecordPages.set(unit, {daily, unit, context, key, page});
+  const rows = daily.slice().reverse().slice(page * 10, (page + 1) * 10);
+  return `<section class="analysis-record-panel" data-record-unit="${unit}"><div class="analysis-chart-heading"><h3>일별 변화</h3><span>완료일 ${daily.length}개 · 오늘 제외</span></div>${rows.length ? `<nav class="record-pagination" aria-label="일별 기록 페이지"><button type="button" data-record-step="-1" ${page === 0 ? 'disabled' : ''}>최근 기록</button><span aria-live="polite">${page + 1} / ${pages} 페이지</span><button type="button" data-record-step="1" ${page === pages - 1 ? 'disabled' : ''}>이전 기록</button></nav><table class="analysis-table"><thead><tr><th>날짜</th><th>마지막 값</th><th>직전 기록 대비</th><th>일평균 증가</th></tr></thead><tbody>${rows.map(d => `<tr><td>${escapeHtml(formatSelectionDate(d.dayTimestamp))}${d.elapsedDays > 1 ? `<small>${d.elapsedDays}일 간격</small>` : ''}</td><td>${formatNumber(d.count)}${unit}</td><td class="${d.rawChange > 0 ? 'up' : d.rawChange < 0 ? 'down' : ''}">${analysisNumber(d.rawChange, unit)}</td><td>${analysisNumber(d.dailyChange, `${unit}/일`)}</td></tr>`).join('')}</tbody></table>` : '<p class="analysis-chart-help">완료된 날짜의 기록이 쌓이면 일별 변화를 표시합니다.</p>'}</section>`;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('click', event => {
+    const button = event.target.closest('[data-record-step]');
+    if (!button) return;
+    const panel = button.closest('[data-record-unit]');
+    const state = analysisRecordPages.get(panel.dataset.recordUnit);
+    const parent = panel.parentElement;
+    const step = button.dataset.recordStep;
+    panel.outerHTML = analysisDailyTable(state.daily, state.unit, state.context, state.page + Number(step));
+    const next = parent.querySelector(`[data-record-step="${step}"]:not(:disabled)`) || parent.querySelector('[data-record-step]:not(:disabled)');
+    next?.focus({preventScroll: true});
+  });
   for (const [kind, dialogId, renderChart] of [['subscriber', 'subscriber-dialog', renderSubscriberDetail], ['video', 'video-view-dialog', renderVideoViewDetail]]) {
     const dialog = document.getElementById(dialogId);
+    dialog.addEventListener('close', () => analysisRecordPages.delete(kind === 'subscriber' ? '명' : '회'));
     dialog.classList.add('analytics-workspace');
     const header = dialog.querySelector('.dialog-header');
     header.querySelector('.eyebrow').textContent = kind === 'subscriber' ? '구독자 분석' : '영상 분석';

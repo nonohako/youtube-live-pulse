@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after the analytics UX audit; improvement candidates and a reproduced comparison calculation issue are recorded in handoff.md. Runtime remains v1.11.1.
+Last maintained: 2026-09-20 for v1.12.0 analytics improvements; comparison calculation invariance, paged records and compact UI verification recorded.
 
 ## Project mission
 
@@ -134,6 +134,9 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Normal UI state carries bounded subscriber sparklines and only video endpoints. The validated analytics subscription exposes full chart projections only for the selected subscriber channel and at most four videos. Closing analytics releases detail data. Hidden/minimized windows receive no background state broadcasts and pause renderer countdowns; show/restore sends a fresh complete state. Core polling and cloud collection must continue while hidden.
 
 - Sample-time axes show hourly minor ticks within seven days, with density-aware hour labels and stronger local-midnight date lines. Daily/long-range views retain calendar ticks. Zoom plots include adjacent real points outside the viewport under an SVG clip, while hover/summary samples stay in-range. Keep the preset Y domain and change baseline stable during zoom; never store or expose interpolated boundary values as observations.
+
+- Comparison change baselines, interval rates and first/last observations always use raw in-range records, independent of samples/daily presentation. Daily comparison points retain their real observation timestamp for the readout; midnight is only a plot position. Exclude future records before collapsing days. Account for SVG screen transforms when mapping comparison pointer coordinates.
+- Daily record tables page through all actual completed dates in the selected range (ten per page); reset paging on channel/video, range, mode or viewport changes and release page data on dialog close. Keep hidden-by-filter comparison selections visible with individual removal. Comparison readout rows stay outside the plot, including four long titles at 900x660; compact single-chart views keep their date caption visible.
 
 ## Windows shell identity invariants
 

@@ -799,7 +799,7 @@ function renderSubscriberDetail() {
       ${renderSelectionSummary(selectionSummary)}
     </section>
     ${renderGrowthAnalysis(growth, growthChart)}
-    ${analysisDailyTable(growth.daily, '명')}
+    ${analysisDailyTable(growth.daily, '명', [subscriberChartChannelId, subscriberChartRange, displayMode, subscriberChartViewport])}
     `;
 }
 
@@ -922,7 +922,7 @@ function renderVideoViewDetail() {
       ${analysisCaption(samples, metric, '회', displayMode)}
       ${chart.svg}
     </section>
-    ${analysisDailyTable(videoViewChartViewport ? math.analyzeGrowthForTimeWindow(history.samples, timeAxis.startTime, timeAxis.endTime, now).daily : math.analyzeGrowthForRange(history.samples, videoViewChartRange, now).daily, '회')}
+    ${analysisDailyTable(videoViewChartViewport ? math.analyzeGrowthForTimeWindow(history.samples, timeAxis.startTime, timeAxis.endTime, now).daily : math.analyzeGrowthForRange(history.samples, videoViewChartRange, now).daily, '회', [videoViewChartChannelId, videoViewChartVideoId, videoViewChartRange, displayMode, videoViewChartViewport])}
     `;
 }
 

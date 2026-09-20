@@ -17,11 +17,19 @@
   }
   function comparison(items, range, mode, metric, now = Date.now()) {
     const series = items.map(item => {
-      const history = mode === 'daily' ? math.collapseSamplesByLocalDate(item.samples) : item.samples;
-      const samples = math.filterSamples(history, range, now).filter(s => s.timestamp <= now);
-      const baseline = samples[0]?.count;
+      const raw = math.filterSamples(item.samples, range, now).filter(s => s.timestamp <= now);
+      const summary = intervalSummary(raw);
+      const baseline = summary.first?.count;
+      const closes = new Map();
+      for (const sample of raw) {
+        const day = new Date(sample.timestamp); day.setHours(0, 0, 0, 0);
+        closes.set(day.getTime(), sample);
+      }
+      const samples = mode === 'daily'
+        ? [...closes].map(([timestamp, sample]) => ({...sample, timestamp, observedAt: sample.timestamp}))
+        : raw.map(sample => ({...sample, observedAt: sample.timestamp}));
       return {...item, samples: samples.map(s => ({...s, value: metric === 'change' ? s.count - baseline : s.count})),
-        first: samples[0], last: samples.at(-1), change: samples.length >= 2 ? samples.at(-1).count - baseline : null};
+        ...summary, baseline};
     });
     const samples = series.flatMap(s => s.samples);
     const times = samples.map(s => s.timestamp);
