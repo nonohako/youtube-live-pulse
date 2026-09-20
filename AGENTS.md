@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after v1.11.1 hourly axes/zoom release and installed upgrade verification.
+Last maintained: 2026-09-20 after the accepted v1.11.1 handoff refresh; Electron retained and verification limits recorded.
 
 ## Project mission
 

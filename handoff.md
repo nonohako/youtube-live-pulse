@@ -2,6 +2,17 @@
 
 Last updated: 2026-09-20
 
+## Current handoff checkpoint (2026-09-20)
+
+- User accepted the v1.11.1 chart changes and requested this handoff refresh. Keep Electron; migration was discussed and explicitly set aside. Continue prioritizing Korean UI/UX, readable charts and measured performance improvements.
+- Current release: v1.11.1, runtime source commit e8da935, release verification recorded in 2d59427. The installer was verified and installed as 1.11.1.0 in the preceding task. No new runtime change or installer is part of this documentation update.
+- Completed: analysis tabs and fixed hover readout; keyboard record navigation; on-demand detail loading and hidden-window UI pause; hourly minor ticks, bold midnight boundaries and continuous clipped zoom lines. Existing settings, local/cloud statistics and notification collection are preserved.
+- Key implementation entry points: src/lib/analytics-projection.js (summary/detail scope validation), src/main.js and src/preload.js (analytics subscription and visibility IPC), src/renderer/analytics-workspace.js (analysis layout/navigation), src/renderer/chart-math.js (hour ticks and adjacent plot samples), src/renderer/renderer.js (chart drawing/zoom), src/renderer/analytics-ui.js (video library/comparison).
+- Do not calculate detailed chart analytics from overview endpoints. Load the selected history through analytics:watch first. Plot-only boundary neighbors must never become extra stored samples or enter visible-window summaries.
+- Reverification: npm test (last run: 98 passing); Electron scripts/analytics-smoke.cjs --packaged --lazy after building. This includes scoped loading, visibility pause, hourly axes and zoom continuity. Product smoke, chart zoom and video smoke also passed for v1.11.1.
+- Remaining verification limits: native installed-window mouse interaction and sustained whole-app CPU/memory use were not measured. The recorded performance improvement is state preparation/transfer, not a total-memory reduction claim. Long-range axes intentionally thin labels; hourly minor ticks apply to sample-time windows up to seven days.
+- No requested implementation is left pending. Future work should follow new user feedback; CHZZK remains planned, not implemented.
+
 ## v1.11.1 hourly axes and zoom continuity
 
 Sample-time charts (subscriber/video/comparison) now show hourly tick marks for windows up to seven days, with label thinning to prevent overlap; local midnight uses a longer, stronger line and a bold date on a second row. Daily and long-range axes retain calendar labels. Single-chart zoom draws the neighboring real points beyond both boundaries inside an SVG clip, keeping the line continuous without adding fabricated observations to hover, summaries or storage. The selected-preset Y domain and change baseline remain stable through zoom. Wheel scale uses a smaller delta-proportional step. Removed unused trend-path calculation.
