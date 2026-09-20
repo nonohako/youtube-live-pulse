@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after v1.11.0 scoped analytics release and installed upgrade verification.
+Last maintained: 2026-09-20 after hourly chart axes and continuous zoom rendering regression checks.
 
 ## Project mission
 
@@ -132,6 +132,8 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 - Analytics separates trend, daily records and subscriber growth into keyboard-operable sections. Keep the hover readout above the plot, preserve arrow/Home/End record navigation, and verify the full plot fits the compact 900x660 overview.
 
 - Normal UI state carries bounded subscriber sparklines and only video endpoints. The validated analytics subscription exposes full chart projections only for the selected subscriber channel and at most four videos. Closing analytics releases detail data. Hidden/minimized windows receive no background state broadcasts and pause renderer countdowns; show/restore sends a fresh complete state. Core polling and cloud collection must continue while hidden.
+
+- Sample-time axes show hourly minor ticks within seven days, with density-aware hour labels and stronger local-midnight date lines. Daily/long-range views retain calendar ticks. Zoom plots include adjacent real points outside the viewport under an SVG clip, while hover/summary samples stay in-range. Keep the preset Y domain and change baseline stable during zoom; never store or expose interpolated boundary values as observations.
 
 ## Windows shell identity invariants
 

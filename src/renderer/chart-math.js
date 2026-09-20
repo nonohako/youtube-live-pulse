@@ -451,7 +451,36 @@
     };
   }
 
+  function plotSamples(history, start, end) {
+    const samples = normalizeSamples(history);
+    let first = samples.findIndex(s => s.timestamp >= start);
+    if (first < 0) return samples.slice(-1);
+    let last = first;
+    while (last < samples.length && samples[last].timestamp <= end) last++;
+    return samples.slice(Math.max(0, first - 1), Math.min(samples.length, last + 1));
+  }
+
+  function detailTicks(axis, mode = 'samples', width = 754) {
+    const {startTime: start, endTime: end} = axis;
+    const span = end - start;
+    if (mode === 'daily' || span > 7 * DAY_MS) {
+      return axis.ticks.map(time => ({time, major: true, label: true}));
+    }
+    const date = new Date(start); date.setMinutes(0, 0, 0);
+    if (date.getTime() < start) date.setTime(date.getTime() + 3600000);
+    const pixelsPerHour = width / (span / 3600000);
+    const stride = [1, 2, 3, 6, 12, 24].find(n => n * pixelsPerHour >= 32) || 24;
+    const ticks = [];
+    for (let time = date.getTime(); time <= end; time += 3600000) {
+      const hour = new Date(time).getHours();
+      ticks.push({time, major: hour === 0, label: hour !== 0 && hour % stride === 0});
+    }
+    return ticks;
+  }
+
   return {
+    plotSamples,
+    detailTicks,
     RANGE_DAYS,
     analyzeGrowth,
     analyzeGrowthForRange,

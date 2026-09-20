@@ -1958,3 +1958,9 @@ dialog { overflow: hidden; }
   .analytics-workspace .analysis-kpi { padding: 8px 10px; }
   .analysis-tabs button { padding-top: 10px; padding-bottom: 9px; }
 }
+
+/* Hours remain fine ticks; local midnight is a stronger full-height landmark. */
+.analytics-workspace .detail-hour-tick { stroke: #647590; stroke-width: 1; }
+.analytics-workspace .detail-day-boundary { stroke: #8da4c7; stroke-width: 1.6; opacity: .65; }
+.analytics-workspace .detail-day-label { fill: #d1dcef; font-weight: 700; }
+.analytics-workspace .detail-time-label { font-size: 10px; }

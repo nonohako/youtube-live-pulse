@@ -35,3 +35,22 @@ test('interval analytics preserve gaps, negative changes and insufficient baseli
  assert.equal(preferences({videoMetric:'change',subscriberMetric:'bad'}).videoMetric,'change');
  assert.equal(preferences({subscriberMetric:'bad'}).subscriberMetric,'total');
 });
+
+test('hour axis preserves every hourly tick and emphasizes local midnight',()=>{
+ const {detailTicks,buildTimeWindowAxis}=require('../src/renderer/chart-math');
+ const start=new Date(2026,8,15,19,30).getTime(),end=new Date(2026,8,17,3,30).getTime();
+ const ticks=detailTicks(buildTimeWindowAxis(start,end),'samples');
+ assert.equal(ticks.length,32);
+ for(let i=1;i<ticks.length;i++)assert.equal(ticks[i].time-ticks[i-1].time,3600000);
+ assert.equal(ticks.filter(t=>t.major).length,2);
+ assert.ok(ticks.filter(t=>t.major).every(t=>new Date(t.time).getHours()===0));
+ assert.ok(detailTicks(buildTimeWindowAxis(start,end),'daily').every(t=>t.major));
+});
+test('plot continuity retains adjacent real points without altering visible-window statistics',()=>{
+ const {plotSamples,filterSamplesInTimeWindow}=require('../src/renderer/chart-math');
+ const points=[0,10,20,30].map(h=>({at:new Date(2026,8,15,h).toISOString(),count:h+100}));
+ const from=new Date(2026,8,15,11).getTime(),to=new Date(2026,8,15,25).getTime();
+ assert.deepEqual(plotSamples(points,from,to).map(s=>s.count),[110,120,130]);
+ assert.deepEqual(filterSamplesInTimeWindow(points,from,to).map(s=>s.count),[120]);
+ assert.equal(points.length,4);
+});

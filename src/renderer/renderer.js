@@ -778,12 +778,12 @@ function renderSubscriberDetail() {
   }
   const chart = buildDetailChart(
     samples,
-    math.linearRegression(samples),
+    null,
     timeAxis,
     growth.daily,
     subscriberChartSelection,
     displayMode,
-    { metric }
+    { metric, baseline: baseSamples[0].count, plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples }
   );
   const growthChart = buildGrowthChart(growth.daily, growthTimeAxis);
   detailChartModel = {
@@ -895,7 +895,8 @@ function renderVideoViewDetail() {
     null,
     displayMode,
     {
-      metric, baseline: observedSamples[0]?.count,
+      metric, baseline: math.filterSamples(history.samples, videoViewChartRange, now)[0]?.count,
+      plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples,
       svgId: 'video-view-detail-svg',
       crosshairId: 'video-view-crosshair',
       dotId: 'video-view-hover-dot',
@@ -1175,8 +1176,7 @@ function buildDetailChart(
   const plotHeight = height - plot.top - plot.bottom;
   const metric = options.metric || 'total';
   const baseline = metric === 'change' ? (options.baseline ?? samples[0].count) : 0;
-  const values = samples.map(sample => sample.count - baseline);
-  const trendValues = [];
+  const values = (options.domainSamples || samples).map(sample => sample.count - baseline);
   const combined = values;
   const rawMin = Math.min(...combined);
   const rawMax = Math.max(...combined);
@@ -1203,11 +1203,9 @@ function buildDetailChart(
     x: Math.min(plot.left + plotWidth, Math.max(plot.left, toX(sample.dayTimestamp))),
     sample
   }));
-  const linePoints = points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
-  const areaPoints = `${points[0].x},${plot.top + plotHeight} ${linePoints} ${points.at(-1).x},${plot.top + plotHeight}`;
-  const trendPoints = samples.map((sample, index) => (
-    `${toX(sample.timestamp).toFixed(2)},${toY(trendValues[index] ?? sample.count).toFixed(2)}`
-  )).join(' ');
+  const linePointsData = (options.plotSamples || samples).map(sample => ({x: toX(sample.timestamp), y: toY(sample.count - baseline)}));
+  const linePoints = linePointsData.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+  const areaPoints = `${linePointsData[0].x},${plot.top + plotHeight} ${linePoints} ${linePointsData.at(-1).x},${plot.top + plotHeight}`;
   const yTicks = Array.from({ length: 5 }, (_, index) => {
     const ratio = index / 4;
     const y = plot.top + ratio * plotHeight;
@@ -1216,11 +1214,12 @@ function buildDetailChart(
       <line class="detail-grid" x1="${plot.left}" y1="${y}" x2="${plot.left + plotWidth}" y2="${y}"/>
       <text class="detail-axis-label y" x="${plot.left - 10}" y="${y + 3}">${escapeHtml(formatCompact(value))}</text>`;
   }).join('');
-  const xTicks = timeAxis.ticks.map((timestamp) => {
-    const x = toX(timestamp);
-    return `
-      <line class="detail-tick" x1="${x}" y1="${plot.top + plotHeight}" x2="${x}" y2="${plot.top + plotHeight + 5}"/>
-      <text class="detail-axis-label x" x="${x}" y="${height - 15}">${escapeHtml(formatChartDate(timestamp))}</text>`;
+  const xTicks = window.LivePulseChartMath.detailTicks(timeAxis, displayMode, plotWidth).map(tick => {
+    const x = toX(tick.time), base = plot.top + plotHeight;
+    const anchor = x < plot.left + 32 ? 'start' : x > width - plot.right - 32 ? 'end' : 'middle';
+    const label = tick.major ? formatChartDate(tick.time) : new Date(tick.time).getHours() + '시';
+    return `<line class="detail-tick ${tick.major ? 'detail-day-boundary' : 'detail-hour-tick'}" x1="${x}" x2="${x}" y1="${tick.major ? plot.top : base}" y2="${base + (tick.major ? 13 : 6)}"/>
+      ${tick.major || tick.label ? `<text class="detail-axis-label detail-time-label ${tick.major ? 'detail-day-label' : ''}" x="${x}" y="${base + (tick.major ? 34 : 19)}" text-anchor="${anchor}">${escapeHtml(label)}</text>` : ''}`;
   }).join('');
   const pointDots = points.length <= 40
     ? points.map((point) => `<circle class="detail-point" cx="${point.x}" cy="${point.y}" r="2.5"/>`).join('')
@@ -1240,6 +1239,7 @@ function buildDetailChart(
           <title id="${escapeAttribute(titleId)}">${escapeHtml(options.title || '구독자 수 상세 추이')}</title>
           <desc id="${escapeAttribute(descId)}">${escapeHtml(options.description || '선택한 기간의 실제 관측값 또는 첫 관측값 대비 증감을 나타냅니다.')}</desc>
           <defs>
+            <clipPath id="${escapeAttribute(svgId)}-clip"><rect x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}"/></clipPath>
             <linearGradient id="${escapeAttribute(gradientId)}" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color="#38d995" stop-opacity="0.23"/>
               <stop offset="100%" stop-color="#38d995" stop-opacity="0"/>
@@ -1247,10 +1247,12 @@ function buildDetailChart(
           </defs>
           ${yTicks}
           ${xTicks}
+          <g clip-path="url(#${escapeAttribute(svgId)}-clip)">
           <polygon class="detail-chart-area" fill="url(#${escapeAttribute(gradientId)})" points="${areaPoints}"/>
           ${metric === 'change' ? `<line class="analysis-zero-line" x1="${plot.left}" x2="${plot.left + plotWidth}" y1="${toY(0)}" y2="${toY(0)}"/>` : ''}
           <polyline class="detail-actual-line" points="${linePoints}"/>
           ${pointDots}
+          </g>
           ${selectionMarkup}
           <line id="${escapeAttribute(crosshairId)}" class="detail-crosshair hidden" y1="${plot.top}" y2="${plot.top + plotHeight}"/>
           <circle id="${escapeAttribute(dotId)}" class="detail-hover-dot hidden" r="5"/>
@@ -1370,7 +1372,7 @@ function handleDetailChartWheel(event) {
     currentWindow,
     model.fullTimeAxis,
     anchorTime,
-    event.deltaY < 0 ? 0.8 : 1.25,
+    Math.exp(Math.max(-120, Math.min(120, event.deltaY)) * 0.001),
     CHART_MINIMUM_SPAN_MS
   );
   if (!nextWindow || isSameTimeWindow(nextWindow, currentWindow)) return;

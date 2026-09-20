@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-20
 
+## v1.11.1 hourly axes and zoom continuity
+
+Sample-time charts (subscriber/video/comparison) now show hourly tick marks for windows up to seven days, with label thinning to prevent overlap; local midnight uses a longer, stronger line and a bold date on a second row. Daily and long-range axes retain calendar labels. Single-chart zoom draws the neighboring real points beyond both boundaries inside an SVG clip, keeping the line continuous without adding fabricated observations to hover, summaries or storage. The selected-preset Y domain and change baseline remain stable through zoom. Wheel scale uses a smaller delta-proportional step. Removed unused trend-path calculation.
+
+98 tests passed. Source lazy Electron suite passed hourly/midnight tick checks, stable Y labels/change baseline and clipped outside-neighbor lines; reviewed the 900x660 hourly zoom screenshot. Packaged lazy-mode UI suite and product/chart-zoom/video smoke passed. Installer SHA-512 and updater metadata passed. Public release verification pending.
+
 ## v1.11.0 scoped analytics and background work
 
 Normal renderer state now carries 120-point subscriber sparklines and two endpoints per video. A validated IPC subscription loads only one selected subscriber history and up to four selected video projections (existing 2,000-point video bound); range/mode/zoom calculations still use full selected projections so completed-day baselines stay intact. Closing chart dialogs releases those detailed arrays. Hidden/minimized windows stop state broadcasts and renderer countdowns; show/restore sends fresh state. Background detection and cloud sync continue. Raw archives are not truncated or changed.

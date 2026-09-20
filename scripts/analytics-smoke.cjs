@@ -107,6 +107,19 @@ app.whenReady().then(async()=>{
     win.webContents.send('window:active',true); await new Promise(r=>setTimeout(r,30));
     assert.ok(await js("countdownTimer !== null"));
   }
+  await js("document.querySelectorAll('dialog[open]').forEach(d=>d.close());new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+  data.channels[0].videoViewHistories[0].samples=Array.from({length:57},(_,i)=>({at:new Date(now-(56-i)*3600000).toISOString(),count:320000+i*1400}));
+  await js("(async()=>{appState=await window.livePulse.getState();saveChartPreference('videoMode','samples');saveChartPreference('videoRange','all');saveChartPreference('videoMetric','change');await openVideoViewChart(appState.channels[0].id,'mFM2hP5LEhM')})()");
+  const initialDomain=await js("[...document.querySelectorAll('#video-view-detail-svg .detail-axis-label.y')].map(t=>t.textContent).join('|')");
+  const initialBaseline=await js("videoViewChartModel.baseline");
+  await js("videoViewChartViewport={startTime:videoViewChartModel.baseSamples[0].timestamp+10.5*3600000,endTime:videoViewChartModel.baseSamples[0].timestamp+42.5*3600000};renderVideoViewDetail()");
+  assert.equal(await js("videoViewChartModel.baseline"),initialBaseline);
+  assert.equal(await js("[...document.querySelectorAll('#video-view-detail-svg .detail-axis-label.y')].map(t=>t.textContent).join('|')"),initialDomain);
+  assert.ok(await js("document.querySelectorAll('#video-view-detail-svg .detail-hour-tick').length>=30"));
+  assert.ok(await js("document.querySelectorAll('#video-view-detail-svg .detail-day-boundary').length>=1"));
+  assert.ok(await js("(()=>{const points=document.querySelector('#video-view-detail-svg .detail-actual-line').getAttribute('points').split(' ').map(p=>Number(p.split(',')[0]));return points[0]<videoViewChartModel.plot.left&&points.at(-1)>videoViewChartModel.width-videoViewChartModel.plot.right})()"));
+  assert.ok(await js("document.querySelector('#video-view-detail-svg .detail-actual-line').parentElement.hasAttribute('clip-path')"));
+  await shot('analytics-hourly-zoom.png');
   assert.equal(errors.length,0,errors.join('\n'));
   fs.writeFileSync(path.join(output,'analytics-smoke-result.json'),JSON.stringify({packaged,passed:true,lazy,scroll,checks:['library','search','thumbnail-open','comparison','mode-switch','range-reopen','reload-persistence','single-scroll','small-window','next-frame-hover','100-events-one-frame','leave-cancels-hover','status-delta-keeps-chart']},null,2));
   app.exit(0);

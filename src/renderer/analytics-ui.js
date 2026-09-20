@@ -114,9 +114,12 @@ function renderVideoComparison() {
     const value = model.low + spread*i/4;
     return `<line x1="${left}" x2="${width-right}" y1="${y(value)}" y2="${y(value)}" stroke="#292e39"/><text x="${left-10}" y="${y(value)+4}" text-anchor="end" fill="#9299a8" font-size="11">${formatNumber(Math.round(value))}</text>`;
   }).join('');
-  const dates = Array.from({length: model.start === model.end ? 1 : 5}, (_, i) => {
-    const time = model.start + span*i/4;
-    return `<text x="${x(time)}" y="${height-17}" text-anchor="middle" fill="#9299a8" font-size="11">${escapeHtml(formatChartDate(time))}</text>`;
+  const dateAxis = window.LivePulseChartMath.buildTimeWindowAxis(model.start, model.end);
+  const dates = window.LivePulseChartMath.detailTicks(dateAxis, prefs.compareMode, width-left-right).map(tick => {
+    const px = x(tick.time), base = height-bottom;
+    const anchor = px < left+32 ? 'start' : px > width-right-32 ? 'end' : 'middle';
+    return `<line class="detail-tick ${tick.major ? 'detail-day-boundary' : 'detail-hour-tick'}" x1="${px}" x2="${px}" y1="${tick.major ? top : base}" y2="${base + (tick.major ? 13 : 6)}"/>
+    ${tick.major || tick.label ? `<text class="detail-axis-label detail-time-label ${tick.major ? 'detail-day-label' : ''}" x="${px}" y="${base + (tick.major ? 34 : 19)}" text-anchor="${anchor}">${tick.major ? escapeHtml(formatChartDate(tick.time)) : new Date(tick.time).getHours() + '시'}</text>` : ''}`;
   }).join('');
   const paths = model.series.map((series, index) => {
     const color = comparisonColors[index];

@@ -27,7 +27,7 @@ function analysisCaption(samples, metric, unit, mode) {
   const first = samples[0], last = samples.at(-1);
   const date = mode === 'daily' ? formatSelectionDate : formatChartDateTime;
   return `<div class="analysis-chart-heading"><div><h3>${metric === 'change' ? '기간 내 증감' : unit === '명' ? '구독자 추이' : '누적 조회수'}</h3><span>${escapeHtml(date(first.timestamp))} — ${escapeHtml(date(last.timestamp))}</span></div><span class="analysis-records">${formatNumber(samples.length)}${mode === 'daily' ? '개 날짜' : '개 관측'}</span></div>
-    <p class="analysis-chart-help">${metric === 'change' ? (unit === '회' ? '기간 첫 실제 관측값 대비 증감입니다. ' : '첫 표시 기록 대비 증감입니다. ') : ''}마우스를 움직여 수치 확인 · 휠로 확대${unit === '명' ? ' · 날짜를 드래그해 구간 분석' : ''}</p>`;
+    <p class="analysis-chart-help">${metric === 'change' ? (unit === '회' ? '기간 첫 실제 관측값 대비 증감입니다. ' : '선택 기간 첫 기록 대비 증감입니다. ') : ''}마우스를 움직여 수치 확인 · 휠로 확대${unit === '명' ? ' · 날짜를 드래그해 구간 분석' : ''}</p>`;
 }
 
 function analysisDailyTable(daily, unit) {
