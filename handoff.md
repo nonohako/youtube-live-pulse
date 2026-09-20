@@ -2,6 +2,18 @@
 
 Last updated: 2026-09-20
 
+## Analytics UX audit (2026-09-20)
+
+User requested improvement discovery only. No runtime changes, version bump or installer release. Source at audit start: cbf6447 (v1.11.1). Findings below are candidates, not implemented fixes.
+
+- Highest priority: comparison summary and change baseline depend on display mode. analytics-math.js collapses dates before choosing the baseline, and analytics-ui.js calculates average speed from the displayed samples. Reproduced with September 17 12:00=100, September 17 23:00=200 and September 18 12:00=300 (local time): samples mode reports +200 and +200/day; daily mode reports +100 and +100/day. Keep raw interval summary/baseline independent of display projection, as single-video analytics already does. Daily midnight positions must not be presented as actual observation times.
+- Comparison hover: the current tooltip overlays the upper-right plot and interleaves titles, values and timestamps in one wrapping flex container. The fresh two-video screenshot confirms this. Reserve space outside the plot and group each video into a color-marked row; verify four long titles and compact windows.
+- Daily records: analysisDailyTable unconditionally limits output to the last ten completed dates. Add paging or a load-more action within the selected period so 30/90-day and all-history selections can be inspected fully without inventing missing dates.
+- Compact layout: at 900x660 the plot fits, but upper controls and KPI cards dominate its height. CSS fixes the chart wrapper to 175px including the hover strip and hides the exact date caption below 740px window height. Consider collapsible secondary KPI notes, more plot height and an always-visible compact date range.
+- Comparison selection: the library retains selections across filters but only shows their count in the toolbar. Add a selected-video strip with titles and individual removal so hidden selections remain understandable when switching channels or searches. This is a code-based UX candidate, not a reproduced data-loss defect.
+
+Verification: source Electron scripts/analytics-smoke.cjs --lazy passed with exit 0 and no captured renderer errors, using isolated fixture data. Fresh normal/900x660 screenshots reviewed in artifacts/analytics-comparison.png and artifacts/analytics-small.png. Initial restricted execution failed to start GPU subprocesses; normal execution succeeded. Existing smoke coverage does not check comparison raw/daily KPI invariance or browsing records older than ten days. Installed-window manual interaction, actual-user-data review and new packaged checks were not performed in this audit. Next implementation should first repair comparison calculations with regressions, then improve comparison readout and record navigation.
+
 ## Current handoff checkpoint (2026-09-20)
 
 - User accepted the v1.11.1 chart changes and requested this handoff refresh. Keep Electron; migration was discussed and explicitly set aside. Continue prioritizing Korean UI/UX, readable charts and measured performance improvements.

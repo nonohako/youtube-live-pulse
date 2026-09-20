@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after the accepted v1.11.1 handoff refresh; Electron retained and verification limits recorded.
+Last maintained: 2026-09-20 after the analytics UX audit; improvement candidates and a reproduced comparison calculation issue are recorded in handoff.md. Runtime remains v1.11.1.
 
 ## Project mission
 
