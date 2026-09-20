@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 for v1.12.0 analytics improvements; comparison calculation invariance, paged records and compact UI verification recorded.
+Last maintained: 2026-09-20 after verified v1.12.0 release; comparison calculation invariance, paged records, compact UI and published installer hashes recorded.
 
 ## Project mission
 

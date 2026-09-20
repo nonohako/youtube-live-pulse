@@ -2,11 +2,13 @@
 
 Last updated: 2026-09-20
 
-## v1.12.0 analytics improvements
+## Current handoff checkpoint: v1.12.0 analytics improvements
 
 Implemented the five accepted audit items: comparison statistics and change baseline now use raw in-range observations in both display modes; daily hover labels retain actual observation times. Comparison has reserved, color-marked readout rows above the plot and pointer mapping respects SVG transforms. Subscriber/video daily tables page through every completed record in the selected range, reset with analysis context and release data on close. Compact charts keep the date caption and increase the single-chart wrapper from 175px to 210px. Selected comparison videos remain visible in removable chips across search/channel filters.
 
-Validation: all 100 unit tests and changed JavaScript syntax checks passed. Expanded isolated source and packaged-ASAR Electron lazy-mode suites passed mode-invariant summaries/baselines, all video record pages, subscriber paging/reset, filtered selection removal, four long comparison titles, compact plot fit and exact SVG hover coordinates. Reviewed 900x660 comparison/records/chart captures. Live RESCENE fetch returned current public video data with no warnings. Initial restricted GPU/network execution failed; normal approved execution succeeded. x64 NSIS build, packaged product/chart-zoom/video smoke, local installer SHA-512 and updater repository metadata all passed. Installer remains unsigned. Public release verification is pending; installed-app native interaction remains unverified and the installed copy has not been replaced. No collection policy, user histories or IPC security settings changed.
+Validation: all 100 unit tests and changed JavaScript syntax checks passed. Expanded isolated source and packaged-ASAR Electron lazy-mode suites passed mode-invariant summaries/baselines, all video record pages, subscriber paging/reset, filtered selection removal, four long comparison titles, compact plot fit and exact SVG hover coordinates. Reviewed 900x660 comparison/records/chart captures. Live RESCENE fetch returned current public video data with no warnings. Initial restricted GPU/network execution failed; normal approved execution succeeded. x64 NSIS build, packaged product/chart-zoom/video smoke, local installer SHA-512 and updater repository metadata all passed. Installer remains unsigned. Installed-app native interaction remains unverified and this task did not replace the installed copy. No collection policy, user histories or IPC security settings changed.
+
+Release: source 9fc9969 and tag v1.12.0 pushed. GitHub Actions 35517441102 succeeded; public non-draft/non-prerelease Release contains installer, block map and latest.yml. Fresh published installer download (95,226,397 bytes, version 1.12.0) matched published SHA-512 and GitHub SHA-256 8069a008d03f58c1141ed260aa205753f8ae7c1d0e5961ac59771265cc764f9d. No requested implementation remains pending; installation/native usage checks are separate from the verified isolated packaged tests.
 
 ## Analytics UX audit (2026-09-20)
 
@@ -20,7 +22,7 @@ User requested improvement discovery only. No runtime changes, version bump or i
 
 Verification: source Electron scripts/analytics-smoke.cjs --lazy passed with exit 0 and no captured renderer errors, using isolated fixture data. Fresh normal/900x660 screenshots reviewed in artifacts/analytics-comparison.png and artifacts/analytics-small.png. Initial restricted execution failed to start GPU subprocesses; normal execution succeeded. Existing smoke coverage does not check comparison raw/daily KPI invariance or browsing records older than ten days. Installed-window manual interaction, actual-user-data review and new packaged checks were not performed in this audit. Next implementation should first repair comparison calculations with regressions, then improve comparison readout and record navigation.
 
-## Current handoff checkpoint (2026-09-20)
+## Accepted v1.11.1 handoff checkpoint (2026-09-20)
 
 - User accepted the v1.11.1 chart changes and requested this handoff refresh. Keep Electron; migration was discussed and explicitly set aside. Continue prioritizing Korean UI/UX, readable charts and measured performance improvements.
 - Current release: v1.11.1, runtime source commit e8da935, release verification recorded in 2d59427. The installer was verified and installed as 1.11.1.0 in the preceding task. No new runtime change or installer is part of this documentation update.
@@ -85,9 +87,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.11.1`
+- Application version: `1.12.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.11.1`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.12.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
