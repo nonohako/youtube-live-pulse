@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after scoped analytics loading and hidden-window work reduction.
+Last maintained: 2026-09-20 after v1.11.0 scoped analytics release and installed upgrade verification.
 
 ## Project mission
 

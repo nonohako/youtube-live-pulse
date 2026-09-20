@@ -6,7 +6,7 @@ Last updated: 2026-09-20
 
 Normal renderer state now carries 120-point subscriber sparklines and two endpoints per video. A validated IPC subscription loads only one selected subscriber history and up to four selected video projections (existing 2,000-point video bound); range/mode/zoom calculations still use full selected projections so completed-day baselines stay intact. Closing chart dialogs releases those detailed arrays. Hidden/minimized windows stop state broadcasts and renderer countdowns; show/restore sends fresh state. Background detection and cloud sync continue. Raw archives are not truncated or changed.
 
-On the same installed archive (210 videos), initial state was 10,542,439 bytes / 584.6 ms before; overview is 128,925 bytes / 1.5 ms and one-video state 174,842 bytes / 5.5 ms after. These measure state projection/serialization, not total application CPU or memory savings. 96 unit tests pass, and lazy-mode Electron interaction checks cover selected loading, multi-video comparison, close/release, hidden countdown pause and restoration. Packaged lazy-mode UI suite and product/chart-zoom/video smoke passed. Installer SHA-512 and updater metadata passed. Public release verification pending.
+On the same installed archive (210 videos), initial state was 10,542,439 bytes / 584.6 ms before; overview is 128,925 bytes / 1.5 ms and one-video state 174,842 bytes / 5.5 ms after. These measure state projection/serialization, not total application CPU or memory savings. 96 unit tests pass, and lazy-mode Electron interaction checks cover selected loading, multi-video comparison, close/release, hidden countdown pause and restoration. Packaged lazy-mode UI suite and product/chart-zoom/video smoke passed. Installer SHA-512 and updater metadata passed. Source 83a46a4 and tag v1.11.0 published. Actions 35493690034 succeeded; public non-draft/non-prerelease release has three assets. Fresh installer download matched published SHA-512. Silent install exited 0, installed version 1.11.0.0 verified, and history counts preserved. A packaged isolated renderer also passed against the actual stored archive. Overall long-running memory/CPU reduction was not claimed from the projection benchmark.
 
 ## v1.10.1 UI/UX refinement
 
@@ -50,9 +50,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.10.1`
+- Application version: `1.11.0`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.10.1`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.11.0`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
