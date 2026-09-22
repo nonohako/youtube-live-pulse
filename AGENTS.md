@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-22 for v1.12.1 storage durability and recovery; preserve corrupt originals and never silently reset established data.
+Last maintained: 2026-09-22 after verified v1.12.1 release and installed-data recovery; durable backups and local subscriber archive preservation confirmed.
 
 ## Project mission
 

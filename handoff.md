@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-22
 
-## v1.12.1 storage incident and recovery
+## Current handoff checkpoint: v1.12.1 storage incident and recovery
 
 The installed v1.12.0 store reset at 2026-09-21 18:13 KST after JSON parsing failed. The preserved 45,025,218-byte primary backup is entirely NUL bytes; Windows Kernel-Power 41/EventLog 6008 record an abnormal restart at 18:02, near its 18:02 last-write time. This supports a crash/durability failure but does not establish the exact OS/storage failure mechanism. The old store caught every load error, copied a broken file and silently saved defaults, losing both channel registration and cloud configuration from the active state.
 
@@ -10,9 +10,11 @@ Current and broken files were copied into ignored recovery artifacts before any 
 
 JsonStore now fsyncs temporary files before replacement, maintains two normal backup generations every five minutes/first session save, recovers temporary/backup files and preserves damaged originals. Existing unrecoverable files, permissions errors and normalization errors cannot cause silent default writes. Startup shows a recovery error and exits when load fails. Initial 107 tests and syntax checks passed, including corruption, interrupted rename, failed flush, permissions and backup generations. Recovered 52MB candidate passed store save/reload with every cloud video sample count preserved. Packaged actual-recovery charts, analytics suite and product smoke passed.
 
-Installed-app verification exposed a second issue: ordinary subscriber polling still removed records older than 365 days/beyond 500 samples, immediately removing 52 recovered RESCENE dates. Removed this local subscriber trimming and added a real monitor-cycle regression for old imported records and >500 samples; display projections remain bounded. Final 108 tests, syntax checks, rebuild, installer hash and packaged product smoke passed. Installed final v1.12.1.0, reapplied the preserved candidate while merging newly collected records, and restarted the installed app. Real subsequent polls at 20:57 KST retained every recovered subscriber sample (369/177 local samples, zero missing versus candidate); both cloud archives advanced to 7,122 samples with no sync error. Normal backup generations exist. Actual recovered data charts were verified in the isolated packaged renderer; native desktop mouse/visual interaction was not automated. Public release verification remains pending.
+Installed-app verification exposed a second issue: ordinary subscriber polling still removed records older than 365 days/beyond 500 samples, immediately removing 52 recovered RESCENE dates. Removed this local subscriber trimming and added a real monitor-cycle regression for old imported records and >500 samples; display projections remain bounded. Final 108 tests, syntax checks, rebuild, installer hash and packaged product smoke passed. Installed final v1.12.1.0, reapplied the preserved candidate while merging newly collected records, and restarted the installed app. Real subsequent polls at 20:57 and 21:00 KST retained every recovered subscriber sample (369/177 local samples, zero missing versus candidate); both cloud archives advanced beyond 7,122 samples with no sync error. The active file and both normal backup generations contain all recovered subscriber samples. Actual recovered data charts were verified in the isolated packaged renderer after waiting for fresh capture frames; native desktop mouse/visual interaction was not automated.
 
-## Current handoff checkpoint: v1.12.0 analytics improvements
+Release: source bb41c8f and v1.12.1 tag pushed. GitHub Actions 35724439128 succeeded. Public non-draft/non-prerelease release has installer, block map and latest.yml. Fresh public installer (95,227,174 bytes) matched published SHA-512 and GitHub SHA-256 a60413c77a078bc2896479f7edf5bebe9e711454afffbea2f246c4a9490afe78. Installed copy is the locally validated final build of the same source. Recovery is complete for the available cloud/import/current data; the local-only gaps described above remain unrecoverable from located sources. Original evidence and private recovery artifacts remain ignored, outside Git.
+
+## v1.12.0 analytics improvements
 
 Implemented the five accepted audit items: comparison statistics and change baseline now use raw in-range observations in both display modes; daily hover labels retain actual observation times. Comparison has reserved, color-marked readout rows above the plot and pointer mapping respects SVG transforms. Subscriber/video daily tables page through every completed record in the selected range, reset with analysis context and release data on close. Compact charts keep the date caption and increase the single-chart wrapper from 175px to 210px. Selected comparison videos remain visible in removable chips across search/channel filters.
 
@@ -97,9 +99,9 @@ Local v1.7.1 validation: x64 NSIS build succeeded, packaged dashboard smoke exit
 
 ## Current production state
 
-- Application version: `1.12.0`
+- Application version: `1.12.1`
 - Public repository: `https://github.com/nonohako/youtube-live-pulse`
-- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.12.0`
+- Production release: `https://github.com/nonohako/youtube-live-pulse/releases/tag/v1.12.1`
 - Default branch: `main`
 - Platform: Windows x64
 - Packaging: Electron + NSIS
