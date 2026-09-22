@@ -1,6 +1,16 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-20
+Last updated: 2026-09-22
+
+## v1.12.1 storage incident and recovery
+
+The installed v1.12.0 store reset at 2026-09-21 18:13 KST after JSON parsing failed. The preserved 45,025,218-byte primary backup is entirely NUL bytes; Windows Kernel-Power 41/EventLog 6008 record an abnormal restart at 18:02, near its 18:02 last-write time. This supports a crash/durability failure but does not establish the exact OS/storage failure mechanism. The old store caught every load error, copied a broken file and silently saved defaults, losing both channel registration and cloud configuration from the active state.
+
+Current and broken files were copied into ignored recovery artifacts before any restoration. Downloaded all available cloud pages from 2026-09-17 13:00 UTC through recovery time for both original channels (7,110 subscriber samples each, 112/101 video histories initially). User confirmed the two existing XLSX-to-channel mappings; imported 365/176 real subscriber dates through August 1. Preserved current September 21+ local records. August 2 through the September 17 cloud start and older local-only video samples remain unavailable; do not claim full recovery. No synthetic smoke samples are used.
+
+JsonStore now fsyncs temporary files before replacement, maintains two normal backup generations every five minutes/first session save, recovers temporary/backup files and preserves damaged originals. Existing unrecoverable files, permissions errors and normalization errors cannot cause silent default writes. Startup shows a recovery error and exits when load fails. Initial 107 tests and syntax checks passed, including corruption, interrupted rename, failed flush, permissions and backup generations. Recovered 52MB candidate passed store save/reload with every cloud video sample count preserved. Packaged actual-recovery charts, analytics suite and product smoke passed.
+
+Installed-app verification exposed a second issue: ordinary subscriber polling still removed records older than 365 days/beyond 500 samples, immediately removing 52 recovered RESCENE dates. Removed this local subscriber trimming and added a real monitor-cycle regression for old imported records and >500 samples; display projections remain bounded. Final 108 tests, syntax checks, rebuild, installer hash and packaged product smoke passed. Installed final v1.12.1.0, reapplied the preserved candidate while merging newly collected records, and restarted the installed app. Real subsequent polls at 20:57 KST retained every recovered subscriber sample (369/177 local samples, zero missing versus candidate); both cloud archives advanced to 7,122 samples with no sync error. Normal backup generations exist. Actual recovered data charts were verified in the isolated packaged renderer; native desktop mouse/visual interaction was not automated. Public release verification remains pending.
 
 ## Current handoff checkpoint: v1.12.0 analytics improvements
 

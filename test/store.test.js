@@ -8,6 +8,89 @@ const path = require('node:path');
 const { JsonStore, clampInterval, normalizeSubscriberChartMode } = require('../src/lib/store');
 const { TARGET_CHANNEL_ID } = require('../src/lib/defaults');
 
+function temporaryStore(context, options) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'live-pulse-recovery-'));
+  context.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  return new JsonStore(path.join(directory, 'live-pulse.json'), options);
+}
+
+test('zero-filled primary recovers channels and histories from a normal backup', context => {
+  const store = temporaryStore(context); store.load();
+  store.data.channels.push({id:'UCWpY0eSJtyO-qNAPbKFRSSg',subscriberHistory:[{at:'2026-09-17T13:00:00Z',count:123}]});
+  store.lastBackupAt=0; store.save();
+  const damaged=Buffer.alloc(4096); fs.writeFileSync(store.filePath,damaged);
+  const recovered=new JsonStore(store.filePath); const data=recovered.load();
+  assert.equal(data.channels.length,2);
+  assert.equal(data.channels[1].subscriberHistory[0].count,123);
+  assert.equal(recovered.recovery.source,'live-pulse.json.bak');
+  const broken=fs.readdirSync(path.dirname(store.filePath)).find(n=>n.includes('.broken-'));
+  assert.deepEqual(fs.readFileSync(path.join(path.dirname(store.filePath),broken)),damaged);
+});
+
+test('interrupted rename recovers a durable temporary file without default initialization', context => {
+  const store=temporaryStore(context); store.load();
+  store.data.channels[0].title='recovered temporary';
+  fs.writeFileSync(store.filePath+'.tmp',JSON.stringify(store.data));
+  fs.unlinkSync(store.filePath);
+  const reopened=new JsonStore(store.filePath);
+  assert.equal(reopened.load().channels[0].title,'recovered temporary');
+  assert.equal(reopened.recovery.source,'live-pulse.json.tmp');
+});
+
+test('unrecoverable corruption never replaces originals with defaults, including later saves', context => {
+  const store=temporaryStore(context);
+  fs.writeFileSync(store.filePath,Buffer.alloc(128));
+  fs.writeFileSync(store.filePath+'.bak','broken backup');
+  assert.throws(()=>store.load(),{code:'STORE_RECOVERY_REQUIRED'});
+  assert.throws(()=>store.save());
+  assert.deepEqual(fs.readFileSync(store.filePath),Buffer.alloc(128));
+  assert.equal(fs.readFileSync(store.filePath+'.bak','utf8'),'broken backup');
+});
+
+test('permission errors do not trigger fallback or initialization', context => {
+  const store=temporaryStore(context); store.load();
+  const before=fs.readFileSync(store.filePath); const read=fs.readFileSync;
+  context.mock.method(fs,'readFileSync',function(file,...args){if(file===store.filePath)throw Object.assign(new Error('denied'),{code:'EACCES'});return read.call(this,file,...args);});
+  assert.throws(()=>store.load(),{code:'EACCES'});
+  assert.throws(()=>store.save());
+  assert.deepEqual(read(store.filePath),before);
+});
+
+test('failed disk flush leaves the primary unchanged and a durable write flushes before rename', context => {
+  const store=temporaryStore(context); store.load();
+  const before=fs.readFileSync(store.filePath);
+  store.data.channels[0].title='changed';
+  context.mock.method(fs,'fsyncSync',()=>{throw Object.assign(new Error('disk failure'),{code:'EIO'});});
+  assert.throws(()=>store.save(),{code:'EIO'});
+  assert.deepEqual(fs.readFileSync(store.filePath),before);
+  context.mock.restoreAll();
+  const calls=[];const flush=fs.fsyncSync,rename=fs.renameSync;
+  context.mock.method(fs,'fsyncSync',function(fd){calls.push('flush');return flush.call(this,fd);});
+  context.mock.method(fs,'renameSync',function(from,to){calls.push('rename');return rename.call(this,from,to);});
+  store.save();assert.deepEqual(calls,['flush','rename']);
+});
+
+test('two backup generations survive damage to the primary and newest backup', context => {
+  const store=temporaryStore(context,{backupIntervalMs:0});store.load();
+  store.data.channels[0].title='older valid';store.save();
+  store.data.channels[0].title='newer valid';store.save();
+  fs.writeFileSync(store.filePath,'broken');fs.writeFileSync(store.filePath+'.bak','broken');
+  const recovered=new JsonStore(store.filePath);
+  assert.equal(recovered.load().channels[0].title,'older valid');
+  assert.equal(recovered.recovery.source,'live-pulse.json.bak.1');
+});
+
+test('normalization failure and invalid document shape cannot silently reset the store', context => {
+  const store=temporaryStore(context);store.load();
+  const data=JSON.parse(fs.readFileSync(store.filePath));
+  data.cloud={channels:{[TARGET_CHANNEL_ID]:null}};
+  const raw=JSON.stringify(data);fs.writeFileSync(store.filePath,raw);
+  assert.throws(()=>store.load(),TypeError);assert.throws(()=>store.save());
+  assert.equal(fs.readFileSync(store.filePath,'utf8'),raw);
+  fs.unlinkSync(store.filePath+'.bak');fs.writeFileSync(store.filePath,'{}');
+  assert.throws(()=>store.load(),{code:'STORE_RECOVERY_REQUIRED'});
+});
+
 test('첫 실행 시 기본 채널과 설정을 만든다', (context) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'live-pulse-store-'));
   context.after(() => fs.rmSync(directory, { recursive: true, force: true }));

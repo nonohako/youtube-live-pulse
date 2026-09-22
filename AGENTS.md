@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-20 after verified v1.12.0 release; comparison calculation invariance, paged records, compact UI and published installer hashes recorded.
+Last maintained: 2026-09-22 for v1.12.1 storage durability and recovery; preserve corrupt originals and never silently reset established data.
 
 ## Project mission
 
@@ -95,6 +95,7 @@ Renderer code must not receive Node.js access. Keep `contextIsolation: true`, `n
 
 - Keep current-day samples on the raw subscriber chart, but exclude the current local calendar day from every daily growth, momentum, slope-change and selected-range calculation because that day is incomplete.
 - Daily analytics use the last stored sample from each completed local date.
+- Preserve raw local and imported subscriber histories during polling without age or sample-count deletion. Bound renderer projections instead; restoring old imported dates must not be undone by the next channel check.
 - When recorded dates have gaps, divide change and growth by elapsed local calendar days; never invent or interpolate missing daily closes.
 - Date clicks select one completed day. Pointer drags select the inclusive span of actual completed-day records and must work in either direction.
 - A selected-day change includes that day’s change from the prior recorded close. If no prior close exists, show insufficient data instead of fabricating a baseline.
@@ -234,6 +235,9 @@ For runtime changes:
 For documentation-only changes, commit and push them but do not bump the application version or publish a new installer.
 
 ## Safety and repository hygiene
+
+- JsonStore must flush temporary files before atomic replacement. Maintain two validated backup generations at five-minute intervals and after the first save of a session. On a missing/corrupt primary, try the temporary file and backup generations; preserve a corrupt primary before restoration. Never initialize defaults over existing unreadable data or after permission/normalization errors. Startup must stop visibly if recovery is unavailable.
+- Recovery must preserve current records, keep forensic copies outside Git and restore only real cloud or user-confirmed imported records. Never fill unrecoverable local gaps with estimated values or smoke fixtures. Verify full archive sample counts after saving/reloading, and distinguish recovered dates from unrecoverable gaps.
 
 - Never commit API keys, GitHub tokens, cookies, local user data or subscriber-history files.
 - Never commit `node_modules/`, `dist/`, `artifacts/` or `.smoke-user-data/`.

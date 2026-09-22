@@ -70,7 +70,12 @@ app.on('second-instance', (_event, argv) => { applyCloudConfigArgument(argv); sh
 
 app.whenReady().then(() => {
   store = new JsonStore(path.join(app.getPath('userData'), 'live-pulse.json'));
-  store.load();
+  try { store.load(); }
+  catch {
+    dialog.showErrorBox('라이브 펄스 기록 복구 필요', '저장된 기록을 읽지 못했습니다. 기존 파일을 덮어쓰지 않고 앱을 종료합니다.\n\n데이터 폴더의 live-pulse.json 및 백업 파일을 보존한 상태로 복구해 주세요.');
+    app.quit();
+    return;
+  }
   applyCloudConfigArgument(process.argv);
   if (isSmokeChart || isSmokeVideoViews) seedSmokeChartData();
 

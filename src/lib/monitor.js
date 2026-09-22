@@ -8,12 +8,12 @@ const { withCloudHistory } = require('./cloud-sync');
 const OFFICIAL_STATS_INTERVAL_MS = 10 * 60 * 1000;
 const VIDEO_STATS_INTERVAL_MS = 5 * 60 * 1000;
 const HISTORY_HEARTBEAT_MS = 6 * 60 * 60 * 1000;
-const HISTORY_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 
 class ChannelMonitor {
-  constructor({ store, onState, onNotify, onOpen, projectChannel = withCloudHistory }) {
+  constructor({ store, onState, onNotify, onOpen, projectChannel = withCloudHistory, fetchSnapshot = fetchChannelSnapshot }) {
     this.store = store;
     this.projectChannel = projectChannel;
+    this.fetchSnapshot = fetchSnapshot;
     this.onState = onState;
     this.onNotify = onNotify;
     this.onOpen = onOpen;
@@ -111,7 +111,7 @@ class ChannelMonitor {
     this.#emit();
 
     try {
-      const snapshot = await fetchChannelSnapshot(channel, {
+      const snapshot = await this.fetchSnapshot(channel, {
         apiKey: this.store.data.settings.apiKey,
         includeOfficialStats,
         includeVideoStats
@@ -298,10 +298,9 @@ class ChannelMonitor {
     if (!last || last.count !== count || sampleTime - lastTime >= HISTORY_HEARTBEAT_MS) {
       history.push({ at: checkedAt, count });
     }
-    const cutoff = sampleTime - HISTORY_RETENTION_MS;
-    channel.subscriberHistory = history
-      .filter((sample) => new Date(sample.at).getTime() >= cutoff)
-      .slice(-500);
+    // Local observations and imported dates share this archive. Bound only UI projections,
+    // never delete real records merely because a new polling cycle completed.
+    channel.subscriberHistory = history;
   }
 
   #addEvent(event) {
