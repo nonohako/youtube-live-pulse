@@ -1,12 +1,21 @@
 # Agent Guide
 
-Last maintained: 2026-09-22 after verified v1.12.1 release and installed-data recovery; durable backups and local subscriber archive preservation confirmed.
+Last maintained: 2026-09-23 after C# + WebView2 migration preparation; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
 
 ## Project mission
 
 Build and maintain **Live Pulse (라이브 펄스)**, a Windows Electron tray application that monitors creator channels in the background and opens Chrome when a live stream or scheduled broadcast is detected.
 
 The current production provider is YouTube. A CHZZK (치지직) live popup provider is planned and must be added without weakening the existing YouTube behavior.
+
+## Accepted migration direction (2026-09-23)
+
+- The user now prioritizes lower memory while in the tray. This supersedes the older handoff decision to retain Electron indefinitely.
+- Target C# background monitoring with the existing HTML/CSS/JS UI hosted in WebView2. Do not rewrite the dashboard/charts in native WPF. A thin WPF window host is acceptable.
+- Hidden startup must not create a WebView. Closing to tray disposes the WebView and releases UI data/references; no default 10-30 minute retention or eager WebView warm-up. Monitoring, notifications and cloud sync continue independently.
+- Preserve the narrow `window.livePulse` contract through a validated native bridge, existing histories, deduplication, Windows identity and the upgrade path from installed Electron releases.
+- Read `docs/migration-csharp-webview2.md` before implementation. Its staged plan, data migration and memory measurement gates supplement all existing invariants below. Preparation is documentation only; do not mistake it for completed migration or a new release.
+- The existing Node release commands describe the production Electron app. When replacing the runtime, update equivalent native build/test/package/update checks and documentation in the same task; do not publish a native installer through the old update feed until installed-client compatibility is verified.
 
 ## User-facing principles
 

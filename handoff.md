@@ -1,6 +1,16 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-22
+Last updated: 2026-09-23
+
+## Current planning checkpoint: C# + WebView2 migration
+
+The user accepted a new direction: reduce memory specifically while running in the tray, retain the existing web dashboard/charts, move background behavior to C#, and dispose the WebView when closing to tray. No default idle retention or eager WebView startup. This supersedes the older Electron-retention decision below. Native WPF chart reimplementation is out of scope; a thin native window hosting WebView2 is appropriate.
+
+Implementation brief and ready-to-paste GPT-6 Sol high prompt: `docs/migration-csharp-webview2.md`. Preparation inspected clean source at e447509 (v1.12.1), preload methods, startup/window lifecycle, JSON durability, chart preferences, updater and tag workflow. Only .NET SDK 9.0.308 was present; installing a supported .NET 10 SDK is an implementation prerequisite, not completed preparation. No runtime, installed data, credentials, cloud service or installer was changed. No application version bump or release tag belongs to this documentation task.
+
+The earlier conversation's 659.6 MiB aggregate working set / 613.6 MiB private bytes were a single uncontrolled process snapshot, not a tray benchmark. The 100-200 MiB figures are candidate engineering targets, not measured savings or user-required limits. The next agent must establish an equivalent-data baseline and verify process exit, repeated open/close stability and continuing background work.
+
+Preparation verification: all 108 existing Node tests passed, and documentation paths/diff were checked. Native build, WebView lifecycle, imported-data equivalence, installed Electron-to-native updating and actual memory savings remain unimplemented/unverified. Preserve the v1.12.1 recovery evidence below.
 
 ## Current handoff checkpoint: v1.12.1 storage incident and recovery
 
@@ -36,7 +46,7 @@ Verification: source Electron scripts/analytics-smoke.cjs --lazy passed with exi
 
 ## Accepted v1.11.1 handoff checkpoint (2026-09-20)
 
-- User accepted the v1.11.1 chart changes and requested this handoff refresh. Keep Electron; migration was discussed and explicitly set aside. Continue prioritizing Korean UI/UX, readable charts and measured performance improvements.
+- Historical v1.11.1 decision: the user accepted the chart changes and set migration aside at that time. Superseded by the 2026-09-23 C# + WebView2 direction above. Continue prioritizing Korean UI/UX, readable charts and measured performance improvements.
 - Current release: v1.11.1, runtime source commit e8da935, release verification recorded in 2d59427. The installer was verified and installed as 1.11.1.0 in the preceding task. No new runtime change or installer is part of this documentation update.
 - Completed: analysis tabs and fixed hover readout; keyboard record navigation; on-demand detail loading and hidden-window UI pause; hourly minor ticks, bold midnight boundaries and continuous clipped zoom lines. Existing settings, local/cloud statistics and notification collection are preserved.
 - Key implementation entry points: src/lib/analytics-projection.js (summary/detail scope validation), src/main.js and src/preload.js (analytics subscription and visibility IPC), src/renderer/analytics-workspace.js (analysis layout/navigation), src/renderer/chart-math.js (hour ticks and adjacent plot samples), src/renderer/renderer.js (chart drawing/zoom), src/renderer/analytics-ui.js (video library/comparison).
