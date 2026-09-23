@@ -84,11 +84,13 @@ public static class MonitorChangePlanner
         return new MonitorChangePlan(next, events, notifications, urlsToOpen, subscriberSample);
     }
 
-    private static IReadOnlyList<string> RetainRecent(IReadOnlyList<string>? previous, IEnumerable<string> observed)
+    private static IReadOnlyList<string>? RetainRecent(IReadOnlyList<string>? previous, IEnumerable<string> observed)
     {
+        var observedIds = observed.Where(id => !string.IsNullOrEmpty(id)).ToArray();
+        if (previous is null && observedIds.Length == 0) return null;
         var ids = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var id in (previous ?? []).Concat(observed))
+        foreach (var id in (previous ?? []).Concat(observedIds))
             if (!string.IsNullOrEmpty(id) && seen.Add(id)) ids.Add(id);
         return ids.TakeLast(RecentIdLimit).ToArray();
     }

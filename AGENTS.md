@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-24 after the read-only native YouTube snapshot, channel-input, pure monitor-planning and page-memory checkpoints; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
+Last maintained: 2026-09-24 after the isolated native monitor-store and manual runner checkpoints; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
 
 ## Project mission
 
@@ -20,7 +20,9 @@ The current production provider is YouTube. A CHZZK (치지직) live popup provi
 - `native/LivePulse.Core` now fetches and parses public `/streams`, `/videos`, `/shorts`, `/posts`, RSS and `/live` into a read-only snapshot. Keep the existing JS fixtures and live public-page comparison as parity gates while porting polling, deduplication and notifications. Its diagnostic must never open Chrome or write user data; passing parser checks do not prove background monitoring.
 - Parse each fetched public page before waiting for all sources to finish so the snapshot composer retains only compact results. This reduces live body retention in source code; require measured equivalent-data tray memory before claiming actual savings.
 - Native channel input resolution accepts a valid UC ID, an allowlisted YouTube `/channel/UC…` URL, or an `@handle` fetched from a public YouTube page. Never accept a foreign host as a channel input; the optional Data API handle path remains to be ported.
-- `MonitorChangePlanner` computes first-seen baselines, new-content events, broadcast open keys and subscriber sample decisions without side effects. A future native runner must durably commit tracking/open keys before it shows notifications or opens Chrome; this pure plan is not yet a running monitor.
+- `MonitorChangePlanner` computes first-seen baselines, new-content events, broadcast open keys and subscriber sample decisions without side effects. The manual native runner durably commits tracking/open keys before it invokes injected effects; this proof is not yet a scheduled production monitor.
+- `native/LivePulse.NativeStore` is an explicit-path SQLite write proof on top of a completed JSON-v3 import. It leaves imported history series untouched and records tracking, events and new subscriber samples transactionally in separate runtime tables. Only test fixtures and ignored isolated copies may be opened until production backups, recovery, rollback, instance exclusion and full history projection pass. Do not treat its schema-level check as verification of the source JSON hash.
+- The manual `NativeMonitorRunner` must commit the plan before calling any notification or URL effect. If every public source fails, do not commit; an empty first content result must not initialize its seen-ID baseline. No recurring schedule or real Windows effect sink is connected yet.
 - The existing Node release commands describe the production Electron app. When replacing the runtime, update equivalent native build/test/package/update checks and documentation in the same task; do not publish a native installer through the old update feed until installed-client compatibility is verified.
 
 ## User-facing principles

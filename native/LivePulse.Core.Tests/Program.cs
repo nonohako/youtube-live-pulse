@@ -122,8 +122,10 @@ Require(YouTubeChannelInput.FindChannelId("\"channelId\":\"UCaaaaaaaaaaaaaaaaaaa
 
 var channelId = "UCtKtCiaWRz-d3EZn2xd1mdA";
 var liveFailure = false;
+var allFailure = false;
 using var handler = new FixtureHandler(request =>
 {
+    if (allFailure) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
     var path = request.RequestUri!.AbsolutePath;
     if (Uri.UnescapeDataString(path) == "/@sample.channel")
         return new HttpResponseMessage(HttpStatusCode.OK)
@@ -157,6 +159,11 @@ liveFailure = true;
 var fallback = await client.FetchChannelSnapshotAsync(channelId);
 Require(fallback.Live?.Id == "abcdefghijk" && fallback.Warnings.Contains("현재 라이브 확인 실패 (HTTP 503)"),
     "live 네트워크 실패 시 목록 대체 경로 오류");
+allFailure = true;
+var unavailable = await client.FetchChannelSnapshotAsync(channelId);
+Require(unavailable.SuccessfulSourceCount == 0 && unavailable.Warnings.Count == 6,
+    "모든 공개 소스 실패를 사용 가능한 스냅샷으로 취급함");
+allFailure = false;
 try
 {
     await client.FetchChannelSnapshotAsync("invalid");
@@ -166,6 +173,10 @@ catch (ArgumentException) { }
 
 var tracking = new ChannelTrackingState(null, null, []);
 var settings = new MonitorSettings(false, false, true, true);
+var emptySnapshot = snapshot with { RecentVideos = [], RecentPosts = [], LatestVideo = null, LatestPost = null };
+var emptyBaseline = MonitorChangePlanner.Plan(channelId, tracking, null, settings, emptySnapshot);
+Require(emptyBaseline.NextTrackingState.SeenVideoIds is null && emptyBaseline.NextTrackingState.SeenPostIds is null,
+    "빈 첫 조회에서 콘텐츠 기준선을 초기화함");
 var plannerSnapshot = snapshot with { Metadata = snapshot.Metadata with { SubscriberCount = 1210000 } };
 var baseline = MonitorChangePlanner.Plan(channelId, tracking, null, settings, plannerSnapshot);
 Require(baseline.Events.Count == 0 && baseline.Notifications.Count == 0 && baseline.UrlsToOpen.Count == 0,

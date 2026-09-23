@@ -6,10 +6,16 @@ namespace LivePulse.Core;
 public sealed record YouTubeSnapshot(DateTimeOffset CheckedAt, YouTubePageParser.ChannelMetadata Metadata,
     Broadcast? Live, IReadOnlyList<Broadcast> Upcoming, VideoCandidate? LatestVideo,
     YouTubePageParser.CommunityPost? LatestPost, IReadOnlyList<VideoCandidate> RecentVideos,
-    IReadOnlyList<YouTubePageParser.CommunityPost> RecentPosts, IReadOnlyList<string> Warnings);
+    IReadOnlyList<YouTubePageParser.CommunityPost> RecentPosts, IReadOnlyList<string> Warnings,
+    int SuccessfulSourceCount = 6);
+
+public interface IYouTubeSnapshotSource
+{
+    Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId, CancellationToken cancellationToken = default);
+}
 
 // Read-only public-page diagnostic. It does not poll, notify, open URLs, or persist data.
-public sealed class YouTubeSnapshotClient : IDisposable
+public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IDisposable
 {
     private const string Origin = "https://www.youtube.com";
     private const int MaxPageBytes = 8 * 1024 * 1024;
@@ -114,8 +120,11 @@ public sealed class YouTubeSnapshotClient : IDisposable
         Warn(warnings, "게시물", posts);
         Warn(warnings, "새 영상", feed);
         Warn(warnings, "현재 라이브", live);
+        var successfulSources = new[] { streams.Success, videos.Success, shorts.Success,
+            posts.Success, feed.Success, live.Success }.Count(success => success);
         return new YouTubeSnapshot(DateTimeOffset.UtcNow, metadata, currentLive, sortedUpcoming,
-            recentVideos.FirstOrDefault(), posts.Posts.FirstOrDefault(), recentVideos, posts.Posts, warnings);
+            recentVideos.FirstOrDefault(), posts.Posts.FirstOrDefault(), recentVideos, posts.Posts, warnings,
+            successfulSources);
     }
 
     private static Broadcast AsBroadcast(VideoCandidate item)
