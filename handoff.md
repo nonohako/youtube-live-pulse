@@ -2,6 +2,10 @@
 
 Last updated: 2026-09-23
 
+## Native core classification checkpoint
+
+Added `native/LivePulse.Core` with the first offline port of player-response extraction, actual-live/future-upcoming classification, successful `/live` player precedence over stale list badges, and four-source recent-video candidate interleaving. The native harness reuses the safety cases from `test/youtube.test.js`: finished `hm6LLaIfMho` with missing/past timestamps, a genuinely future scheduled start, list-only stale live, network-failure fallback, exclusion of live/upcoming IDs across sources, and balanced JSON extraction. Release builds have zero warnings/errors and `CORE_TESTS_PASSED`. This is parser/classifier logic only; public HTTP fetching, API batching, polling, deduplication, notifications and storage are not connected.
+
 ## Isolated data and tray baseline checkpoint
 
 Development is being staged on `codex/csharp-webview2-migration` at source checkpoint `fdacd0e`, with draft PR #12. Production `main` and the v1.12.1 updater feed remain unchanged until the compatibility gates pass.
