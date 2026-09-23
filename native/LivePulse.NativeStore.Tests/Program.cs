@@ -11,7 +11,7 @@ static void Require(bool condition, string message)
 static void ExpectFailure(Action action, string message)
 {
     try { action(); }
-    catch (Exception error) when (error is InvalidOperationException or InvalidDataException or KeyNotFoundException)
+    catch (Exception error) when (error is InvalidOperationException or InvalidDataException or KeyNotFoundException or SqliteException or IOException)
     {
         return;
     }
@@ -38,6 +38,21 @@ if (args is ["--probe", var explicitDatabase])
         while (reader.Read()) ids.Add(reader.GetString(0));
     foreach (var id in ids) probe.Load(id);
     Console.WriteLine($"NATIVE_STORE_PROBE_PASSED channels={ids.Count}");
+    return;
+}
+
+if (args is ["--backup-probe", var explicitSource, var explicitDatabaseCopy])
+{
+    if (File.Exists(explicitDatabaseCopy + ".bak.1") || File.Exists(explicitDatabaseCopy + ".bak.2"))
+        throw new InvalidOperationException("백업 증명 경로에 이미 백업이 있습니다.");
+    _ = new NativeMonitorStore(explicitDatabaseCopy);
+    NativeStoreRecovery.CreateBackup(explicitDatabaseCopy);
+    var primarySummary = StoreImporter.Verify(explicitSource, explicitDatabaseCopy);
+    var backupSummary = StoreImporter.Verify(explicitSource, explicitDatabaseCopy + ".bak.1");
+    Require(primarySummary.Channels == backupSummary.Channels && primarySummary.Series == backupSummary.Series
+        && primarySummary.Samples == backupSummary.Samples && primarySummary.SourceSha256 == backupSummary.SourceSha256,
+        "대용량 백업의 원본 표본 검증 결과가 다름");
+    Console.WriteLine($"NATIVE_BACKUP_PROBE_PASSED channels={backupSummary.Channels} series={backupSummary.Series} samples={backupSummary.Samples}");
     return;
 }
 
@@ -202,6 +217,50 @@ Require(runnerStore.Load(channelId).Revision == 2 && fakeEffects.OpenedUrls.Coun
     "모든 공개 소스 실패 후 저장 상태 또는 열기 효과가 바뀜");
 Require(StoreImporter.Verify(source, runnerDb).Samples == 1,
     "감시 실행이 이전 원본 표본을 변경함");
+
+NativeStoreRecovery.CreateBackup(runnerDb);
+NativeStoreRecovery.Validate(runnerDb + ".bak.1");
+var tracked = runnerStore.Load(channelId);
+var noChangePlan = MonitorChangePlanner.Plan(channelId, tracked.Tracking, tracked.LastSubscriberSample,
+    settings, snapshot with { CheckedAt = checkedAt.AddMinutes(2) });
+Require(runnerStore.Commit(channelId, tracked.Revision, snapshot, noChangePlan) == 3,
+    "백업 순환 전 상태 변경 실패");
+NativeStoreRecovery.CreateBackup(runnerDb);
+Require(new NativeMonitorStore(runnerDb + ".bak.1").Load(channelId).Revision == 3
+    && new NativeMonitorStore(runnerDb + ".bak.2").Load(channelId).Revision == 2,
+    "두 세대 SQLite 백업의 순서가 올바르지 않음");
+
+SqliteConnection.ClearAllPools();
+File.WriteAllBytes(runnerDb, [0, 1, 2, 3, 4]);
+var restored = NativeStoreRecovery.Recover(runnerDb);
+Require(restored.Restored && restored.Source == runnerDb + ".bak.1"
+    && restored.PreservedPrimary is { } forensic && File.ReadAllBytes(forensic).SequenceEqual(new byte[] { 0, 1, 2, 3, 4 })
+    && new NativeMonitorStore(runnerDb).Load(channelId).Revision == 3,
+    "손상 원본 보존 또는 최신 백업 복구 오류");
+Require(StoreImporter.Verify(source, runnerDb).Samples == 1, "복구 후 이전 표본이 바뀜");
+
+SqliteConnection.ClearAllPools();
+File.WriteAllBytes(runnerDb + ".bak.1", [9, 8, 7]);
+File.WriteAllBytes(runnerDb, [5, 6, 7]);
+var fallback = NativeStoreRecovery.Recover(runnerDb);
+Require(fallback.Source == runnerDb + ".bak.2"
+    && new NativeMonitorStore(runnerDb).Load(channelId).Revision == 2,
+    "최신 백업 손상 시 이전 세대로 복구하지 못함");
+
+File.Copy(runnerDb, runnerDb + ".backup.tmp");
+ExpectFailure(() => NativeStoreRecovery.CreateBackup(runnerDb), "미처리 임시 백업을 덮어씀");
+File.WriteAllBytes(runnerDb, [6, 6, 6]);
+var interrupted = NativeStoreRecovery.Recover(runnerDb);
+Require(interrupted.Source == runnerDb + ".backup.tmp"
+    && new NativeMonitorStore(runnerDb).Load(channelId).Revision == 2,
+    "중단된 백업 회전의 검증된 임시 스냅샷을 복구하지 못함");
+File.WriteAllBytes(runnerDb, [6, 6, 6]);
+File.WriteAllBytes(runnerDb + "-wal", [1]);
+ExpectFailure(() => NativeStoreRecovery.Recover(runnerDb), "알 수 없는 WAL을 둔 채 복구함");
+Require(File.ReadAllBytes(runnerDb).SequenceEqual(new byte[] { 6, 6, 6 }),
+    "저널이 있을 때 손상 원본을 바꿈");
+File.Delete(runnerDb + "-wal");
+ExpectFailure(() => NativeStoreRecovery.Recover(invalidDb), "검증된 백업 없이 복구함");
 var tempRoot = Path.GetFullPath(Path.GetTempPath());
 if (!Path.GetFullPath(folder).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException("테스트 임시 경로가 안전하지 않습니다.");
