@@ -102,11 +102,30 @@ Require(metadata is { SubscriberText: "구독자 85.5만명", SubscriberCount: 8
 Require(YouTubePageParser.ParseLocalizedCount("1.5M subscribers") == 1500000, "영문 구독자 수 해석 오류");
 Require(YouTubePageParser.ParseLocalizedCount("비공개") is null, "비공개 구독자 수 판정 오류");
 
+Require(YouTubeChannelInput.Normalize("UCtKtCiaWRz-d3EZn2xd1mdA").Url
+    == "https://www.youtube.com/channel/UCtKtCiaWRz-d3EZn2xd1mdA", "채널 ID 정규화 오류");
+Require(YouTubeChannelInput.DirectId("https://www.youtube.com/channel/UCtKtCiaWRz-d3EZn2xd1mdA")
+    == "UCtKtCiaWRz-d3EZn2xd1mdA", "채널 URL 해석 오류");
+Require(YouTubeChannelInput.DirectId("https://evil.example/channel/UCtKtCiaWRz-d3EZn2xd1mdA") is null,
+    "외부 사이트 채널 URL을 허용함");
+Require(YouTubeChannelInput.ExtractHandle("@sample.channel") == "@sample.channel"
+    && YouTubeChannelInput.ExtractHandle("https://www.youtube.com/@sample.channel/videos") == "@sample.channel",
+    "@핸들 입력 해석 오류");
+Require(YouTubeChannelInput.ExtractHandle("https://evil.example/@sample.channel") is null,
+    "외부 사이트 핸들을 허용함");
+Require(YouTubeChannelInput.FindChannelId("<script>{\"externalId\":\"UCtKtCiaWRz-d3EZn2xd1mdA\"}</script>")
+    == "UCtKtCiaWRz-d3EZn2xd1mdA", "채널 HTML ID 추출 오류");
+Require(YouTubeChannelInput.FindChannelId("\"channelId\":\"UCaaaaaaaaaaaaaaaaaaaaaa\",\"externalId\":\"UCtKtCiaWRz-d3EZn2xd1mdA\"")
+    == "UCtKtCiaWRz-d3EZn2xd1mdA", "HTML에서 외부 채널 ID 우선순위 오류");
+
 var channelId = "UCtKtCiaWRz-d3EZn2xd1mdA";
 var liveFailure = false;
 using var handler = new FixtureHandler(request =>
 {
     var path = request.RequestUri!.AbsolutePath;
+    if (Uri.UnescapeDataString(path) == "/@sample.channel")
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent($"<script>{{\"externalId\":\"{channelId}\"}}</script>") };
     if (path.EndsWith("/live", StringComparison.Ordinal))
         return liveFailure ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
             : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Player("abcdefghijk", false, true)) };
@@ -122,6 +141,10 @@ using var handler = new FixtureHandler(request =>
 });
 using var http = new HttpClient(handler);
 using var client = new YouTubeSnapshotClient(http);
+Require((await client.ResolveChannelInputAsync("@sample.channel")).Id == channelId,
+    "공개 핸들 페이지의 채널 ID 해석 오류");
+Require((await client.ResolveChannelInputAsync(channelId)).Id == channelId,
+    "직접 입력한 채널 ID 해석 오류");
 var snapshot = await client.FetchChannelSnapshotAsync(channelId);
 Require(snapshot.Live is null, "정상 응답한 비라이브 재생기보다 목록 배지를 신뢰함");
 Require(snapshot.Upcoming is [{ Id: "lmnopqrstuv" }], "스냅샷 미래 예약 목록 오류");

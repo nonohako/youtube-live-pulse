@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace LivePulse.Core;
 
@@ -14,8 +13,6 @@ public sealed class YouTubeSnapshotClient : IDisposable
 {
     private const string Origin = "https://www.youtube.com";
     private const int MaxPageBytes = 8 * 1024 * 1024;
-    private static readonly Regex ChannelIdPattern = new("^UC[A-Za-z0-9_-]{22}$",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly HttpClient http;
     private readonly bool ownsHttp;
 
@@ -28,10 +25,26 @@ public sealed class YouTubeSnapshotClient : IDisposable
         });
     }
 
+    public async Task<ResolvedYouTubeChannel> ResolveChannelInputAsync(string input,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(input)) throw new ArgumentException("채널 주소 또는 @핸들을 입력하세요.", nameof(input));
+        var directId = YouTubeChannelInput.DirectId(input);
+        if (directId is not null) return YouTubeChannelInput.Normalize(directId);
+        var handle = YouTubeChannelInput.ExtractHandle(input);
+        if (handle is null)
+            throw new ArgumentException("지원하는 형식: YouTube 채널 URL, @핸들, 또는 UC로 시작하는 채널 ID", nameof(input));
+        var page = await FetchAsync($"{Origin}/{Uri.EscapeDataString(handle)}", cancellationToken);
+        if (!page.Success) throw new HttpRequestException($"YouTube 채널 확인 실패{(page.StatusCode is { } status ? $" (HTTP {status})" : "")}");
+        var id = YouTubeChannelInput.FindChannelId(page.Body);
+        if (id is null) throw new InvalidDataException("채널 ID를 찾지 못했습니다. 채널의 /channel/UC… 주소를 입력해 주세요.");
+        return YouTubeChannelInput.Normalize(id);
+    }
+
     public async Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId,
         CancellationToken cancellationToken = default)
     {
-        if (!ChannelIdPattern.IsMatch(channelId)) throw new ArgumentException("올바르지 않은 YouTube 채널 ID입니다.", nameof(channelId));
+        channelId = YouTubeChannelInput.Normalize(channelId).Id;
         var channelUrl = $"{Origin}/channel/{channelId}";
         var now = DateTimeOffset.UtcNow;
         var streamsTask = FetchVideosAsync($"{channelUrl}/streams", now, true, cancellationToken);
