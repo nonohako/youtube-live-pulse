@@ -106,6 +106,8 @@ Require(YouTubeChannelInput.Normalize("UCtKtCiaWRz-d3EZn2xd1mdA").Url
     == "https://www.youtube.com/channel/UCtKtCiaWRz-d3EZn2xd1mdA", "채널 ID 정규화 오류");
 Require(YouTubeChannelInput.DirectId("https://www.youtube.com/channel/UCtKtCiaWRz-d3EZn2xd1mdA")
     == "UCtKtCiaWRz-d3EZn2xd1mdA", "채널 URL 해석 오류");
+Require(YouTubeChannelInput.DirectId("https://www.youtube.com/channel/UCtKtCiaWRz-d3EZn2xd1mdA/videos")
+    == "UCtKtCiaWRz-d3EZn2xd1mdA", "채널 동영상 탭 URL 해석 오류");
 Require(YouTubeChannelInput.DirectId("https://evil.example/channel/UCtKtCiaWRz-d3EZn2xd1mdA") is null,
     "외부 사이트 채널 URL을 허용함");
 Require(YouTubeChannelInput.ExtractHandle("@sample.channel") == "@sample.channel"

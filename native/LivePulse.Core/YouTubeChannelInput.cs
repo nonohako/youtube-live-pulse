@@ -35,7 +35,7 @@ public static partial class YouTubeChannelInput
         if (ChannelIdPattern().IsMatch(trimmed)) return trimmed;
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) || !IsYouTubeUri(uri)) return null;
         var parts = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length == 2 && parts[0] == "channel" && ChannelIdPattern().IsMatch(parts[1]) ? parts[1] : null;
+        return parts.Length >= 2 && parts[0] == "channel" && ChannelIdPattern().IsMatch(parts[1]) ? parts[1] : null;
     }
 
     public static string? ExtractHandle(string? input)

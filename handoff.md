@@ -4,7 +4,7 @@ Last updated: 2026-09-24
 
 ## Native channel input checkpoint
 
-`YouTubeChannelInput` and `YouTubeSnapshotClient.ResolveChannelInputAsync` now normalize a UC channel ID or allowlisted YouTube `/channel/UC…` URL directly and resolve an `@handle` through a bounded public page fetch. The core rejects foreign-host URLs and invalid IDs; native tests cover the JS channel-input fixtures plus a fake handle response. On 2026-09-24 the default public channel page exposed a canonical handle, and the C# diagnostic resolved that handle back to `UCtKtCiaWRz-d3EZn2xd1mdA`. The optional Data API `forHandle` path remains open. This is not yet wired into the WPF add-channel action.
+`YouTubeChannelInput` and `YouTubeSnapshotClient.ResolveChannelInputAsync` now normalize a UC channel ID or allowlisted YouTube `/channel/UC…` URL, including a `/videos` tab suffix, directly and resolve an `@handle` through a bounded public page fetch. The core rejects foreign-host URLs and invalid IDs; native tests cover the JS channel-input fixtures plus a fake handle response. On 2026-09-24 the default public channel page exposed a canonical handle, and the C# diagnostic resolved that handle back to `UCtKtCiaWRz-d3EZn2xd1mdA`. The optional Data API `forHandle` path remains open. This is not yet wired into the WPF add-channel action. After the workstation no longer had a previously configured `D:` NuGet fallback folder, restoring the ignored Core/Test assets with `-p:RestoreFallbackFolders=''` restored zero-warning Release builds and `CORE_TESTS_PASSED`.
 
 ## Native monitor decision checkpoint
 
