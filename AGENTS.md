@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-23 after the read-only native YouTube snapshot checkpoint; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
+Last maintained: 2026-09-23 after the read-only native YouTube snapshot and pure monitor-planning checkpoints; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
 
 ## Project mission
 
@@ -18,6 +18,7 @@ The current production provider is YouTube. A CHZZK (치지직) live popup provi
 - `native/LivePulse.Windows` is an unshipped lifecycle prototype. Its fixture bridge, empty dashboard and tray timer are not monitoring, storage, notification or cloud-sync implementations. Keep its data/profile isolated from the installed app and do not publish it through the Electron update feed.
 - `native/LivePulse.DataMigration` is an explicit-path import experiment. It must operate on a private, ignored copy of JSON v3; preserving sample order and local/cloud separation does not by itself authorize switching the installed app to SQLite. Production switching still requires recovery, backup, rollback, concurrent-instance and equivalent-data gates in the migration guide.
 - `native/LivePulse.Core` now fetches and parses public `/streams`, `/videos`, `/shorts`, `/posts`, RSS and `/live` into a read-only snapshot. Keep the existing JS fixtures and live public-page comparison as parity gates while porting polling, deduplication and notifications. Its diagnostic must never open Chrome or write user data; passing parser checks do not prove background monitoring.
+- `MonitorChangePlanner` computes first-seen baselines, new-content events, broadcast open keys and subscriber sample decisions without side effects. A future native runner must durably commit tracking/open keys before it shows notifications or opens Chrome; this pure plan is not yet a running monitor.
 - The existing Node release commands describe the production Electron app. When replacing the runtime, update equivalent native build/test/package/update checks and documentation in the same task; do not publish a native installer through the old update feed until installed-client compatibility is verified.
 
 ## User-facing principles

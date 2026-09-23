@@ -2,13 +2,17 @@
 
 Last updated: 2026-09-23
 
+## Native monitor decision checkpoint
+
+`native/LivePulse.Core/MonitorChangePlanner.cs` adds a side-effect-free decision step using the fetched snapshot and small tracking state. It plans first-seen baselines, new video/post events in oldest-first order, optional notifications, `live:id`/`upcoming:id` open keys, and subscriber observations on count change or six-hour heartbeat. Reordered content and replayed broadcasts produce no repeat actions in the native harness. The planner returns state and actions separately so a future native runner can durably commit dedup state before any notification or Chrome launch. No runner, timer, durable writes, Windows toast or browser action is connected yet; the installed Electron monitor continues to operate unchanged.
+
 ## Native YouTube public snapshot checkpoint
 
 `native/LivePulse.Core` now fetches and parses the six public sources used by Electron without an API key: `/streams`, `/videos`, `/shorts`, `/posts`, channel RSS and `/live`. The native snapshot applies player-confirmed live precedence, real future start times for upcoming, cross-source live/upcoming exclusion, and eight-per-source interleaving. It also reads posts, channel metadata and subscriber counts. Requests use fixed YouTube URLs, validated channel IDs, an 8 MiB response cap and 15-second per-request timeout. `native/LivePulse.Core.Diagnostic` prints a read-only summary; it neither opens Chrome nor touches installed data.
 
 The native harness passes the reduced public Shorts fixture (`mFM2hP5LEhM`), legacy/lockup live and upcoming cards, missing/past timestamp safety, RSS, posts, metadata, invalid channel IDs and six-source snapshot composition including successful non-live `/live` and failed `/live` fallback. A live public comparison on 2026-09-23 against `node scripts/check-channel.js` matched RESCENE title, 1.21M public subscriber count, no live/upcoming, latest video ID, latest post ID and all 24 recent-video IDs in the same order; both returned no warnings. This is a point-in-time parser/protocol check, not a real notification or long-running memory test.
 
-Still missing from the native core: handle/channel input resolution, optional Data API metadata and video statistics, recurring polling and first-seen baselines, deduplication, Chrome launch, toast activation, durable writes/backup recovery, cloud sync and production UI bridge. The snapshot currently retains fetched page bodies until composition, so its peak and steady tray memory still need measurement and optimization before acceptance. Production remains Electron v1.12.1; the native branch is not release-ready.
+Still missing from the native runtime: handle/channel input resolution, optional Data API metadata and video statistics, recurring polling, durable deduplication, Chrome launch, toast activation, durable writes/backup recovery, cloud sync and production UI bridge. The snapshot currently retains fetched page bodies until composition, so its peak and steady tray memory still need measurement and optimization before acceptance. Production remains Electron v1.12.1; the native branch is not release-ready.
 
 ## Native core classification checkpoint
 

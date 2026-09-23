@@ -138,6 +138,59 @@ try
     throw new InvalidOperationException("잘못된 채널 ID가 허용됨");
 }
 catch (ArgumentException) { }
+
+var tracking = new ChannelTrackingState(null, null, []);
+var settings = new MonitorSettings(false, false, true, true);
+var plannerSnapshot = snapshot with { Metadata = snapshot.Metadata with { SubscriberCount = 1210000 } };
+var baseline = MonitorChangePlanner.Plan(channelId, tracking, null, settings, plannerSnapshot);
+Require(baseline.Events.Count == 0 && baseline.Notifications.Count == 0 && baseline.UrlsToOpen.Count == 0,
+    "첫 조회가 기존 영상/게시물을 알림으로 처리함");
+Require(baseline.NextTrackingState.SeenVideoIds?.Count == plannerSnapshot.RecentVideos.Count
+    && baseline.NextTrackingState.SeenPostIds?.Count == plannerSnapshot.RecentPosts.Count,
+    "첫 조회 기준선 저장 오류");
+Require(baseline.SubscriberSampleToAppend is { Count: 1210000 }, "첫 구독자 관측 기록 누락");
+
+var newVideo = new VideoCandidate("NEWVIDEO001", Title: "새 영상", Url: "https://www.youtube.com/watch?v=NEWVIDEO001");
+var newPost = new YouTubePageParser.CommunityPost("new-post", "새 글", "지금", "https://www.youtube.com/post/new-post", "");
+var changed = plannerSnapshot with
+{
+    RecentVideos = new[] { newVideo }.Concat(plannerSnapshot.RecentVideos).ToArray(),
+    LatestVideo = newVideo,
+    RecentPosts = new[] { newPost }.Concat(plannerSnapshot.RecentPosts).ToArray(),
+    LatestPost = newPost,
+    CheckedAt = plannerSnapshot.CheckedAt.AddMinutes(1)
+};
+var newContent = MonitorChangePlanner.Plan(channelId, baseline.NextTrackingState,
+    baseline.SubscriberSampleToAppend, settings, changed);
+Require(newContent.Events.Select(item => item.SourceId).SequenceEqual(new[] { "NEWVIDEO001", "new-post" })
+    && newContent.Notifications.Count == 2, "신규 영상/게시물 감지 오류");
+Require(newContent.SubscriberSampleToAppend is null, "변화 없는 구독자 수를 매 회 기록함");
+var reordered = changed with { RecentVideos = changed.RecentVideos.Reverse().ToArray() };
+var repeatContent = MonitorChangePlanner.Plan(channelId, newContent.NextTrackingState,
+    baseline.SubscriberSampleToAppend, settings, reordered);
+Require(repeatContent.Events.Count == 0 && repeatContent.Notifications.Count == 0,
+    "목록 재정렬 또는 재확인에서 중복 알림 발생");
+
+var broadcastSnapshot = plannerSnapshot with
+{
+    Live = new Broadcast("abcdefghijk", "현재 라이브", "https://www.youtube.com/watch?v=abcdefghijk", "", null, true, false),
+    Upcoming = [new Broadcast("lmnopqrstuv", "예약 방송", "https://www.youtube.com/watch?v=lmnopqrstuv",
+        "", "2100-01-01T00:00:00Z", false, true)]
+};
+var broadcastSettings = new MonitorSettings(true, true, false, false);
+var broadcastPlan = MonitorChangePlanner.Plan(channelId, baseline.NextTrackingState,
+    baseline.SubscriberSampleToAppend, broadcastSettings, broadcastSnapshot);
+Require(broadcastPlan.UrlsToOpen.Count == 2 && broadcastPlan.Notifications.Count == 2
+    && broadcastPlan.NextTrackingState.OpenedBroadcastIds.SequenceEqual(new[] { "live:abcdefghijk", "upcoming:lmnopqrstuv" }),
+    "라이브/예약 방송 일회성 열기 계획 오류");
+var broadcastReplay = MonitorChangePlanner.Plan(channelId, broadcastPlan.NextTrackingState,
+    baseline.SubscriberSampleToAppend, broadcastSettings, broadcastSnapshot);
+Require(broadcastReplay.UrlsToOpen.Count == 0 && broadcastReplay.Events.Count == 0,
+    "이미 연 방송을 반복해서 열도록 계획함");
+var heartbeat = MonitorChangePlanner.Plan(channelId, broadcastPlan.NextTrackingState,
+    baseline.SubscriberSampleToAppend, broadcastSettings, broadcastSnapshot with
+    { CheckedAt = plannerSnapshot.CheckedAt.AddHours(6) });
+Require(heartbeat.SubscriberSampleToAppend is { Count: 1210000 }, "6시간 구독자 heartbeat 누락");
 Console.WriteLine("CORE_TESTS_PASSED");
 
 sealed class FixtureHandler(Func<HttpRequestMessage, HttpResponseMessage> handle) : HttpMessageHandler

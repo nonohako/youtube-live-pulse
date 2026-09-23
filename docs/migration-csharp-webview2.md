@@ -2,7 +2,7 @@
 
 작성: 2026-09-23. 준비 기준: e447509, 운영 버전 v1.12.1. 이 문서는 구현 계획이며 완료 보고가 아니다.
 
-진행 기록: 같은 날 `native/LivePulse.Windows`에 첫 수명 시제품을, `native/LivePulse.DataMigration`에 격리 JSON→SQLite 이전 검증 도구를, `native/LivePulse.Core`에 공개 YouTube 읽기 전용 스냅샷을 추가했다. 아래의 '준비 작업' 문구는 문서 작성 당시 상태를 설명한다. 검증 범위와 다음 단계는 `handoff.md` 및 `native/README.md`를 본다. 운영 앱은 여전히 Electron v1.12.1이다.
+진행 기록: 같은 날 `native/LivePulse.Windows`에 첫 수명 시제품을, `native/LivePulse.DataMigration`에 격리 JSON→SQLite 이전 검증 도구를, `native/LivePulse.Core`에 공개 YouTube 읽기 전용 스냅샷과 순수 감시 변경 계획기를 추가했다. 아래의 '준비 작업' 문구는 문서 작성 당시 상태를 설명한다. 검증 범위와 다음 단계는 `handoff.md` 및 `native/README.md`를 본다. 운영 앱은 여전히 Electron v1.12.1이다.
 
 ## 1. 사용자 결정과 범위
 
