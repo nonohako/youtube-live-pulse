@@ -4,7 +4,7 @@ Last updated: 2026-09-23
 
 ## Isolated data and tray baseline checkpoint
 
-Development is being staged on `codex/csharp-webview2-migration`; production `main` and the v1.12.1 updater feed must remain unchanged until the compatibility gates pass.
+Development is being staged on `codex/csharp-webview2-migration` at source checkpoint `fdacd0e`, with draft PR #12. Production `main` and the v1.12.1 updater feed remain unchanged until the compatibility gates pass.
 
 The installed Electron data file was located under `%APPDATA%/youtube-live-pulse/live-pulse.json`. A separate Electron probe without the packaged app context returned a different empty directory, so it was not used as the data source. The live primary (62,765,930 bytes) and both validated backup generations were copied into ignored `artifacts/migration-isolated-data/` without modifying the installed copy. The primary contains 2 channels, 243 local/cloud series and 544,142 actual samples; both backup JSON files also parsed successfully. No IDs, tokens or record contents were committed or logged.
 
