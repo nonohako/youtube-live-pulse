@@ -1,0 +1,26 @@
+{
+  "settings": {
+    "pollIntervalSeconds": 30,
+    "startAtLogin": false,
+    "autoOpenLive": false,
+    "autoOpenUpcoming": false,
+    "notifyNewVideos": false,
+    "notifyNewPosts": false,
+    "subscriberChartMode": "samples",
+    "hasApiKey": false,
+    "hasCloudToken": false,
+    "cloudUrl": ""
+  },
+  "channels": [],
+  "events": [],
+  "cloud": { "lastSyncAt": null, "lastCollectionAt": null, "error": null },
+  "monitor": { "running": false, "nextCheckAt": null, "pollIntervalSeconds": 30 },
+  "analyticsLazy": true,
+  "app": {
+    "windowActive": true,
+    "isPackaged": false,
+    "loginSettingApplied": false,
+    "version": "prototype",
+    "update": { "status": "development", "currentVersion": "prototype", "message": "수명 시제품에서는 업데이트를 확인하지 않습니다." }
+  }
+}

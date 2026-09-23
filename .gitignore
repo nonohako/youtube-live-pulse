@@ -3,6 +3,8 @@ dist/
 coverage/
 artifacts/
 .smoke-user-data/
+native/**/bin/
+native/**/obj/
 *.log
 .DS_Store
 .env*
