@@ -33,45 +33,67 @@ public sealed class YouTubeSnapshotClient : IDisposable
     {
         if (!ChannelIdPattern.IsMatch(channelId)) throw new ArgumentException("올바르지 않은 YouTube 채널 ID입니다.", nameof(channelId));
         var channelUrl = $"{Origin}/channel/{channelId}";
-        var streamsTask = FetchAsync($"{channelUrl}/streams", cancellationToken);
-        var videosTask = FetchAsync($"{channelUrl}/videos", cancellationToken);
-        var shortsTask = FetchAsync($"{channelUrl}/shorts", cancellationToken);
-        var postsTask = FetchAsync($"{channelUrl}/posts", cancellationToken);
-        var feedTask = FetchAsync($"{Origin}/feeds/videos.xml?channel_id={channelId}", cancellationToken);
-        var liveTask = FetchAsync($"{channelUrl}/live", cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var streamsTask = FetchVideosAsync($"{channelUrl}/streams", now, true, cancellationToken);
+        var videosTask = FetchVideosAsync($"{channelUrl}/videos", now, true, cancellationToken);
+        var shortsTask = FetchVideosAsync($"{channelUrl}/shorts", now, false, cancellationToken);
+        var postsTask = FetchPostsAsync($"{channelUrl}/posts", cancellationToken);
+        var feedTask = FetchFeedAsync($"{Origin}/feeds/videos.xml?channel_id={channelId}", cancellationToken);
+        var liveTask = FetchLiveAsync($"{channelUrl}/live", now, cancellationToken);
         await Task.WhenAll(streamsTask, videosTask, shortsTask, postsTask, feedTask, liveTask);
         return Compose(await streamsTask, await videosTask, await shortsTask, await postsTask,
             await feedTask, await liveTask);
     }
 
-    private static YouTubeSnapshot Compose(PageResult streams, PageResult videos, PageResult shorts,
-        PageResult posts, PageResult feed, PageResult live)
+    private async Task<VideoPage> FetchVideosAsync(string url, DateTimeOffset now, bool includeMetadata,
+        CancellationToken cancellationToken)
     {
-        var now = DateTimeOffset.UtcNow;
-        var streamsData = streams.Success ? YouTubePageParser.ParseInitialData(streams.Body) : null;
-        var videosData = videos.Success ? YouTubePageParser.ParseInitialData(videos.Body) : null;
-        var shortData = shorts.Success ? YouTubePageParser.ParseInitialData(shorts.Body) : null;
-        var postsData = posts.Success ? YouTubePageParser.ParseInitialData(posts.Body) : null;
-        var streamVideos = YouTubePageParser.ParseVideos(streamsData, now);
-        var uploadedVideos = YouTubePageParser.ParseVideos(videosData, now);
-        var shortVideos = YouTubePageParser.ParseVideos(shortData, now);
-        var recentPosts = YouTubePageParser.ParsePosts(postsData).Take(8).ToArray();
-        var feedVideos = feed.Success ? YouTubePageParser.ParseVideoFeed(feed.Body) : [];
-        var player = live.Success ? YouTubeBroadcast.ParsePlayer(live.Body, live.FinalUrl, now) : null;
+        var page = await FetchAsync(url, cancellationToken);
+        if (!page.Success) return new VideoPage(false, page.StatusCode, false, [], null);
+        var data = YouTubePageParser.ParseInitialData(page.Body);
+        return new VideoPage(true, null, data is not null, YouTubePageParser.ParseVideos(data, now),
+            includeMetadata ? YouTubePageParser.ParseChannelMetadata(data, page.Body) : null);
+    }
 
-        var metadata = YouTubePageParser.ParseChannelMetadata(streamsData ?? videosData,
-            streams.Success ? streams.Body : videos.Success ? videos.Body : "");
-        var listedVideos = streamVideos.Concat(uploadedVideos).DistinctBy(item => item.Id, StringComparer.Ordinal).ToArray();
+    private async Task<PostsPage> FetchPostsAsync(string url, CancellationToken cancellationToken)
+    {
+        var page = await FetchAsync(url, cancellationToken);
+        if (!page.Success) return new PostsPage(false, page.StatusCode, []);
+        return new PostsPage(true, null, YouTubePageParser.ParsePosts(YouTubePageParser.ParseInitialData(page.Body))
+            .Take(8).ToArray());
+    }
+
+    private async Task<FeedPage> FetchFeedAsync(string url, CancellationToken cancellationToken)
+    {
+        var page = await FetchAsync(url, cancellationToken);
+        return new FeedPage(page.Success, page.StatusCode,
+            page.Success ? YouTubePageParser.ParseVideoFeed(page.Body) : []);
+    }
+
+    private async Task<LivePage> FetchLiveAsync(string url, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var page = await FetchAsync(url, cancellationToken);
+        return new LivePage(page.Success, page.StatusCode,
+            page.Success ? YouTubeBroadcast.ParsePlayer(page.Body, page.FinalUrl, now) : null);
+    }
+
+    private static YouTubeSnapshot Compose(VideoPage streams, VideoPage videos, VideoPage shorts,
+        PostsPage posts, FeedPage feed, LivePage live)
+    {
+        var metadata = (streams.HasInitialData ? streams.Metadata : videos.HasInitialData ? videos.Metadata
+            : streams.Success ? streams.Metadata : videos.Metadata)
+            ?? new YouTubePageParser.ChannelMetadata("YouTube 채널", "", "확인 중", null);
+        var listedVideos = streams.Videos.Concat(videos.Videos).DistinctBy(item => item.Id, StringComparer.Ordinal).ToArray();
         var pageLive = listedVideos.FirstOrDefault(item => item.IsLive);
-        var currentLive = YouTubeBroadcast.SelectCurrentLive(player,
+        var currentLive = YouTubeBroadcast.SelectCurrentLive(live.Player,
             pageLive is null ? null : AsBroadcast(pageLive), live.Success);
         var upcoming = listedVideos.Where(item => item.IsUpcoming && item.Id != currentLive?.Id)
             .Select(AsBroadcast).ToList();
-        if (player?.IsUpcoming == true && player.Id != currentLive?.Id) upcoming.Add(player);
+        if (live.Player?.IsUpcoming == true && live.Player.Id != currentLive?.Id) upcoming.Add(live.Player);
         var sortedUpcoming = upcoming.OrderBy(item => DateTimeOffset.TryParse(item.ScheduledStart,
                 out var start) ? start : DateTimeOffset.MaxValue)
             .DistinctBy(item => item.Id, StringComparer.Ordinal).Take(5).ToArray();
-        var recentVideos = YouTubeBroadcast.SelectRecentVideos(uploadedVideos, feedVideos, streamVideos, shortVideos);
+        var recentVideos = YouTubeBroadcast.SelectRecentVideos(videos.Videos, feed.Videos, streams.Videos, shorts.Videos);
         var warnings = new List<string>();
         Warn(warnings, "방송 목록", streams);
         Warn(warnings, "동영상 목록", videos);
@@ -79,14 +101,14 @@ public sealed class YouTubeSnapshotClient : IDisposable
         Warn(warnings, "게시물", posts);
         Warn(warnings, "새 영상", feed);
         Warn(warnings, "현재 라이브", live);
-        return new YouTubeSnapshot(now, metadata, currentLive, sortedUpcoming,
-            recentVideos.FirstOrDefault(), recentPosts.FirstOrDefault(), recentVideos, recentPosts, warnings);
+        return new YouTubeSnapshot(DateTimeOffset.UtcNow, metadata, currentLive, sortedUpcoming,
+            recentVideos.FirstOrDefault(), posts.Posts.FirstOrDefault(), recentVideos, posts.Posts, warnings);
     }
 
     private static Broadcast AsBroadcast(VideoCandidate item)
         => new(item.Id, item.Title, item.Url, item.ThumbnailUrl, item.ScheduledStart, item.IsLive, item.IsUpcoming);
 
-    private static void Warn(List<string> warnings, string label, PageResult result)
+    private static void Warn(List<string> warnings, string label, ParsedPage result)
     {
         if (!result.Success) warnings.Add($"{label} 확인 실패{(result.StatusCode is { } status ? $" (HTTP {status})" : "")}");
     }
@@ -118,7 +140,7 @@ public sealed class YouTubeSnapshotClient : IDisposable
                     response.RequestMessage?.RequestUri?.ToString());
                 buffer.Write(chunk, 0, count);
             }
-            return new PageResult(true, Encoding.UTF8.GetString(buffer.ToArray()),
+            return new PageResult(true, Encoding.UTF8.GetString(buffer.GetBuffer().AsSpan(0, (int)buffer.Length)),
                 response.RequestMessage?.RequestUri?.ToString());
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return new PageResult(false, ""); }
@@ -134,4 +156,13 @@ public sealed class YouTubeSnapshotClient : IDisposable
     }
 
     private sealed record PageResult(bool Success, string Body, string? FinalUrl = null, int? StatusCode = null);
+    private abstract record ParsedPage(bool Success, int? StatusCode);
+    private sealed record VideoPage(bool Success, int? StatusCode, bool HasInitialData,
+        IReadOnlyList<VideoCandidate> Videos, YouTubePageParser.ChannelMetadata? Metadata)
+        : ParsedPage(Success, StatusCode);
+    private sealed record PostsPage(bool Success, int? StatusCode,
+        IReadOnlyList<YouTubePageParser.CommunityPost> Posts) : ParsedPage(Success, StatusCode);
+    private sealed record FeedPage(bool Success, int? StatusCode,
+        IReadOnlyList<VideoCandidate> Videos) : ParsedPage(Success, StatusCode);
+    private sealed record LivePage(bool Success, int? StatusCode, Broadcast? Player) : ParsedPage(Success, StatusCode);
 }
