@@ -7,7 +7,10 @@ namespace LivePulse.Core;
 public sealed record Broadcast(string Id, string Title, string Url, string ThumbnailUrl,
     string? ScheduledStart, bool IsLive, bool IsUpcoming);
 
-public sealed record VideoCandidate(string Id, bool IsLive = false, bool IsUpcoming = false);
+public sealed record VideoCandidate(string Id, bool IsLive = false, bool IsUpcoming = false,
+    string Title = "", string Url = "", string ThumbnailUrl = "", string PublishedText = "",
+    long? ViewCount = null, string? ScheduledStart = null, string? PublishedAt = null,
+    string? UpdatedAt = null);
 
 public static partial class YouTubeBroadcast
 {
@@ -20,20 +23,20 @@ public static partial class YouTubeBroadcast
     {
         var player = PlayerResponse(html);
         if (player is null) return null;
-        var details = Property(player, "videoDetails");
-        var videoId = String(Property(details, "videoId")) ?? VideoIdFromUrl(finalUrl);
+        var details = YouTubeJson.At(player, "videoDetails");
+        var videoId = YouTubeJson.String(YouTubeJson.At(details, "videoId")) ?? VideoIdFromUrl(finalUrl);
         if (videoId is null || !VideoIdPattern().IsMatch(videoId)) return null;
-        var liveDetails = Property(Property(Property(player, "microformat"), "playerMicroformatRenderer"), "liveBroadcastDetails");
-        var scheduledStart = String(Property(liveDetails, "startTimestamp"));
-        var live = Bool(Property(liveDetails, "isLiveNow")) || Bool(Property(details, "isLive"));
-        var upcoming = !live && Bool(Property(details, "isLiveContent"))
+        var liveDetails = YouTubeJson.At(player, "microformat", "playerMicroformatRenderer", "liveBroadcastDetails");
+        var scheduledStart = YouTubeJson.String(YouTubeJson.At(liveDetails, "startTimestamp"));
+        var live = YouTubeJson.Bool(YouTubeJson.At(liveDetails, "isLiveNow")) || YouTubeJson.Bool(YouTubeJson.At(details, "isLive"));
+        var upcoming = !live && YouTubeJson.Bool(YouTubeJson.At(details, "isLiveContent"))
             && scheduledStart is not null
             && DateTimeOffset.TryParse(scheduledStart, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeUniversal, out var start)
             && start > (now ?? DateTimeOffset.UtcNow);
         if (!live && !upcoming) return null;
-        return new Broadcast(videoId, String(Property(details, "title")) ?? "YouTube 라이브",
-            $"{Origin}/watch?v={videoId}", BestThumbnail(Property(Property(details, "thumbnail"), "thumbnails")),
+        return new Broadcast(videoId, YouTubeJson.String(YouTubeJson.At(details, "title")) ?? "YouTube 라이브",
+            $"{Origin}/watch?v={videoId}", YouTubeJson.BestThumbnail(YouTubeJson.At(details, "thumbnail", "thumbnails")),
             scheduledStart, live, upcoming);
     }
 
@@ -96,7 +99,7 @@ public static partial class YouTubeBroadcast
             if (json is null) continue;
             try
             {
-                using var document = JsonDocument.Parse(json);
+                using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 256 });
                 return document.RootElement.Clone();
             }
             catch (JsonException) { }
@@ -127,28 +130,4 @@ public static partial class YouTubeBroadcast
         return null;
     }
 
-    private static JsonElement? Property(JsonElement? element, string name)
-        => element is { ValueKind: JsonValueKind.Object } value && value.TryGetProperty(name, out var property)
-            ? property : null;
-
-    private static string? String(JsonElement? element)
-        => element is { ValueKind: JsonValueKind.String } value ? value.GetString() : null;
-
-    private static bool Bool(JsonElement? element)
-        => element is { ValueKind: JsonValueKind.True };
-
-    private static string BestThumbnail(JsonElement? thumbnails)
-    {
-        if (thumbnails is not { ValueKind: JsonValueKind.Array } array) return "";
-        var bestUrl = "";
-        var bestWidth = -1;
-        foreach (var item in array.EnumerateArray())
-        {
-            var url = String(Property(item, "url"));
-            var widthElement = Property(item, "width");
-            var width = widthElement is { ValueKind: JsonValueKind.Number } value && value.TryGetInt32(out var number) ? number : 0;
-            if (!string.IsNullOrEmpty(url) && width > bestWidth) { bestUrl = url; bestWidth = width; }
-        }
-        return bestUrl;
-    }
 }

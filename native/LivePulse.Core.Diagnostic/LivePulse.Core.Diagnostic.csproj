@@ -7,6 +7,5 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../LivePulse.Core/LivePulse.Core.csproj" />
-    <Content Include="../../test/fixtures/shorts-lockup.json" Link="fixtures/shorts-lockup.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

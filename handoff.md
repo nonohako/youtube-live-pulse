@@ -2,6 +2,14 @@
 
 Last updated: 2026-09-23
 
+## Native YouTube public snapshot checkpoint
+
+`native/LivePulse.Core` now fetches and parses the six public sources used by Electron without an API key: `/streams`, `/videos`, `/shorts`, `/posts`, channel RSS and `/live`. The native snapshot applies player-confirmed live precedence, real future start times for upcoming, cross-source live/upcoming exclusion, and eight-per-source interleaving. It also reads posts, channel metadata and subscriber counts. Requests use fixed YouTube URLs, validated channel IDs, an 8 MiB response cap and 15-second per-request timeout. `native/LivePulse.Core.Diagnostic` prints a read-only summary; it neither opens Chrome nor touches installed data.
+
+The native harness passes the reduced public Shorts fixture (`mFM2hP5LEhM`), legacy/lockup live and upcoming cards, missing/past timestamp safety, RSS, posts, metadata, invalid channel IDs and six-source snapshot composition including successful non-live `/live` and failed `/live` fallback. A live public comparison on 2026-09-23 against `node scripts/check-channel.js` matched RESCENE title, 1.21M public subscriber count, no live/upcoming, latest video ID, latest post ID and all 24 recent-video IDs in the same order; both returned no warnings. This is a point-in-time parser/protocol check, not a real notification or long-running memory test.
+
+Still missing from the native core: handle/channel input resolution, optional Data API metadata and video statistics, recurring polling and first-seen baselines, deduplication, Chrome launch, toast activation, durable writes/backup recovery, cloud sync and production UI bridge. The snapshot currently retains fetched page bodies until composition, so its peak and steady tray memory still need measurement and optimization before acceptance. Production remains Electron v1.12.1; the native branch is not release-ready.
+
 ## Native core classification checkpoint
 
 Added `native/LivePulse.Core` with the first offline port of player-response extraction, actual-live/future-upcoming classification, successful `/live` player precedence over stale list badges, and four-source recent-video candidate interleaving. The native harness reuses the safety cases from `test/youtube.test.js`: finished `hm6LLaIfMho` with missing/past timestamps, a genuinely future scheduled start, list-only stale live, network-failure fallback, exclusion of live/upcoming IDs across sources, and balanced JSON extraction. Release builds have zero warnings/errors and `CORE_TESTS_PASSED`. This is parser/classifier logic only; public HTTP fetching, API batching, polling, deduplication, notifications and storage are not connected.

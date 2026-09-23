@@ -23,11 +23,13 @@ dotnet native/LivePulse.DataMigration/bin/Release/net10.0/LivePulse.DataMigratio
 
 Use an isolated copy for `SOURCE_COPY.json` and an output under ignored `artifacts/`. This experiment has no production database opening, backup rotation, ongoing write path or rollback conversion. It is not connected to the tray prototype.
 
-`LivePulse.Core` has started the offline YouTube port with player-confirmed live/upcoming classification and four-source recent-video interleaving. Its regression harness uses the same key inputs as `test/youtube.test.js`:
+`LivePulse.Core` has a read-only public YouTube snapshot path. It parses `/streams`, `/videos`, `/shorts`, `/posts`, RSS and `/live`, including player-confirmed live/upcoming classification and four-source recent-video interleaving. Its regression harness uses the same key inputs and reduced Shorts fixture as `test/youtube.test.js`:
 
 ```powershell
 dotnet build native/LivePulse.Core.Tests/LivePulse.Core.Tests.csproj -c Release
 dotnet native/LivePulse.Core.Tests/bin/Release/net10.0/LivePulse.Core.Tests.dll
+dotnet build native/LivePulse.Core.Diagnostic/LivePulse.Core.Diagnostic.csproj -c Release
+dotnet native/LivePulse.Core.Diagnostic/bin/Release/net10.0/LivePulse.Core.Diagnostic.dll [CHANNEL_ID]
 ```
 
-The core library is not connected to HTTP fetching, polling, notifications, deduplication, persistence or the WPF host yet.
+The diagnostic makes six bounded public HTTP requests with 15-second per-request timeouts and prints summary IDs and warnings. It never opens Chrome, sends notifications or accesses user data. A live comparison on 2026-09-23 against `node scripts/check-channel.js` matched the default channel's title, subscriber count, live/upcoming state, latest video/post and all 24 recent-video IDs in order, with no warnings. This is a point-in-time read-only parser check, not evidence of future broadcast detection. Optional API metadata/video-statistics, channel input resolution, monitoring, deduplication, notifications, persistence, cloud sync and WPF integration remain unimplemented.

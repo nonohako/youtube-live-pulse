@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-23 after the first C# + WebView2 lifecycle prototype, isolated JSON-to-SQLite import proof, and offline YouTube broadcast classifier port; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
+Last maintained: 2026-09-23 after the read-only native YouTube snapshot checkpoint; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
 
 ## Project mission
 
@@ -17,7 +17,7 @@ The current production provider is YouTube. A CHZZK (치지직) live popup provi
 - Read `docs/migration-csharp-webview2.md` before implementation. Its staged plan, data migration and memory measurement gates supplement all existing invariants below. The original preparation was documentation only, and the current lifecycle prototype is still far from a completed migration or new release.
 - `native/LivePulse.Windows` is an unshipped lifecycle prototype. Its fixture bridge, empty dashboard and tray timer are not monitoring, storage, notification or cloud-sync implementations. Keep its data/profile isolated from the installed app and do not publish it through the Electron update feed.
 - `native/LivePulse.DataMigration` is an explicit-path import experiment. It must operate on a private, ignored copy of JSON v3; preserving sample order and local/cloud separation does not by itself authorize switching the installed app to SQLite. Production switching still requires recovery, backup, rollback, concurrent-instance and equivalent-data gates in the migration guide.
-- `native/LivePulse.Core` currently ports only offline player-confirmed live/upcoming classification and four-source video selection. Do not treat its passing tests as evidence of complete YouTube fetching, notifications, deduplication or background monitoring.
+- `native/LivePulse.Core` now fetches and parses public `/streams`, `/videos`, `/shorts`, `/posts`, RSS and `/live` into a read-only snapshot. Keep the existing JS fixtures and live public-page comparison as parity gates while porting polling, deduplication and notifications. Its diagnostic must never open Chrome or write user data; passing parser checks do not prove background monitoring.
 - The existing Node release commands describe the production Electron app. When replacing the runtime, update equivalent native build/test/package/update checks and documentation in the same task; do not publish a native installer through the old update feed until installed-client compatibility is verified.
 
 ## User-facing principles
