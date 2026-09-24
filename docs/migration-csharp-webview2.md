@@ -133,6 +133,8 @@ CHZZK나 unrelated 리팩터링을 끼워 넣지 않는다. 진행 중엔 각 �
 
 앞선 대화의 현재 앱 관측치는 process 4개의 working set 합계 659.6 MiB, private bytes 합계 613.6 MiB였다. 한 번의 통제되지 않은 스냅샷이며 창 상태/운영 기간/GC/부하가 고정되지 않았다. working set에는 공유 페이지 중복이 있고 private bytes는 실제 상주 RAM과 다르다. 두 지표를 더하거나 이를 tray baseline으로 사용하지 않는다.
 
+2026-09-24 경로 탐침에서 Windows `APPDATA` 환경변수를 바꿔도 Electron `app.getPath('userData')`는 기존 Roaming 경로를 사용했다. `--user-data-dir`는 별도 탐침에서 실제 userData 경로 변경을 확인했다. 기준선 측정은 격리 JSON 복사본과 이 옵션을 사용하고, 설치본의 읽기 전용 관측값은 시작 조건이 다르므로 따로 표시한다. 개발 Electron에서는 로그인 시작·자동 업데이트가 비활성화된다. 외부 알림/URL 실행을 끈 복사본은 기록 동등성은 유지해도 모든 운영 설정과 동일한 packaged 비교는 아니다.
+
 100~200 MiB는 이전 대화에서 제안한 공학적 목표일 뿐 보장/측정 결과나 사용자 확정 상한이 아니다. 핵심 사용자 요구는 트레이 자원 감소이며 UI 활성 상태 최소화가 아니다.
 
 같은 PC, Release/packaged 빌드, 동일 데이터/채널/설정/동기화 상태에서 비교한다. 디버거 없이 앱 전용 전체 프로세스(C# + 소유한 WebView browser/renderer/GPU)를 포함한다.

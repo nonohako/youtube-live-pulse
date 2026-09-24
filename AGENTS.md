@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-24 after the isolated native writer-lease checkpoint; tray-memory priority, immediate UI disposal, storage recovery and compatibility gates remain. Production remains Electron v1.12.1.
+Last maintained: 2026-09-24 after the isolated Electron tray-baseline audit; tray-memory priority, immediate UI disposal, storage recovery and compatibility gates remain. Production remains Electron v1.12.1.
 
 ## Project mission
 
@@ -27,6 +27,7 @@ The current production provider is YouTube. A CHZZK (치지직) live popup provi
 - The manual `NativeMonitorRunner` must commit the plan before calling any notification or URL effect. If every public source fails, do not commit; an empty first content result must not initialize its seen-ID baseline. The isolated tray opt-in uses this runner only with suppressed effects; no real Windows effect sink is connected yet.
 - `NativeMonitorScheduler` is a cancellation-controlled, isolated periodic proof. It reads only channel IDs and validated monitoring settings from SQLite each sweep, starts after 250 ms, runs channels sequentially, contains per-channel failures, stops visibly through a faulted task on settings errors and rejects a second concurrent loop. The WPF prototype starts it only for an explicit isolated DB option; no normal tray startup, cloud sync, Windows effects or installed data is connected. Two public sweeps 30 seconds apart are not a long-running polling or equivalent-data memory gate.
 - The existing Node release commands describe the production Electron app. When replacing the runtime, update equivalent native build/test/package/update checks and documentation in the same task; do not publish a native installer through the old update feed until installed-client compatibility is verified.
+- For Electron migration memory measurements, changing the Windows `APPDATA` environment variable does not redirect Electron's `app.getPath('userData')` on this workstation. Use a separately verified `--user-data-dir` under ignored artifacts and check the process command line and saved copy before measuring. A development Electron run skips packaged startup/update effects; a copy with external effects disabled is a limited baseline, not an equal-settings packaged comparison. Keep raw process samples and never report short native fixture measurements as achieved memory savings.
 
 ## User-facing principles
 
