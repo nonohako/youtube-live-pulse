@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-24 after isolated native monitor-store, manual runner and SQLite recovery checkpoints; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
+Last maintained: 2026-09-24 after isolated native monitor-store, periodic scheduler and SQLite recovery checkpoints; tray-memory priority, immediate UI disposal, compatibility gates and implementation handoff recorded. Production remains Electron v1.12.1.
 
 ## Project mission
 
@@ -23,7 +23,8 @@ The current production provider is YouTube. A CHZZK (치지직) live popup provi
 - `MonitorChangePlanner` computes first-seen baselines, new-content events, broadcast open keys and subscriber sample decisions without side effects. The manual native runner durably commits tracking/open keys before it invokes injected effects; this proof is not yet a scheduled production monitor.
 - `native/LivePulse.NativeStore` is an explicit-path SQLite write proof on top of a completed JSON-v3 import. It leaves imported history series untouched and records tracking, events and new subscriber samples transactionally in separate runtime tables. Only test fixtures and ignored isolated copies may be opened until production backups, recovery, rollback, instance exclusion and full history projection pass. Do not treat its schema-level check as verification of the source JSON hash.
 - `NativeStoreRecovery` can manually snapshot an isolated SQLite DB with SQLite's backup API, flush and structurally validate two backup generations, and explicitly restore after preserving a corrupt primary. This is an offline proof only: it has no periodic schedule, writer coordination, source-record verification or Electron rollback conversion. Never restore while any writer is running, and stop rather than mixing unknown WAL/journal sidecars with a backup.
-- The manual `NativeMonitorRunner` must commit the plan before calling any notification or URL effect. If every public source fails, do not commit; an empty first content result must not initialize its seen-ID baseline. No recurring schedule or real Windows effect sink is connected yet.
+- The manual `NativeMonitorRunner` must commit the plan before calling any notification or URL effect. If every public source fails, do not commit; an empty first content result must not initialize its seen-ID baseline. The isolated scheduler can call this runner, but no tray startup or real Windows effect sink is connected yet.
+- `NativeMonitorScheduler` is a cancellation-controlled, isolated periodic proof. It reads only channel IDs and validated monitoring settings from SQLite each sweep, starts after 250 ms, runs channels sequentially, contains per-channel failures, stops visibly through a faulted task on settings errors and rejects a second concurrent loop. It is not connected to tray startup, cloud sync, Windows effects or installed data; a passed fixture clock is not a long-running real network test.
 - The existing Node release commands describe the production Electron app. When replacing the runtime, update equivalent native build/test/package/update checks and documentation in the same task; do not publish a native installer through the old update feed until installed-client compatibility is verified.
 
 ## User-facing principles

@@ -37,7 +37,13 @@ if (args is ["--probe", var explicitDatabase])
     using (var reader = channelIds.ExecuteReader())
         while (reader.Read()) ids.Add(reader.GetString(0));
     foreach (var id in ids) probe.Load(id);
-    Console.WriteLine($"NATIVE_STORE_PROBE_PASSED channels={ids.Count}");
+    var configuration = probe.ReadPollConfiguration();
+    Require(configuration.ChannelIds.Count == ids.Count
+        && configuration.ChannelIds.ToHashSet(StringComparer.Ordinal).SetEquals(ids)
+        && configuration.Interval >= TimeSpan.FromSeconds(15)
+        && configuration.Interval <= TimeSpan.FromSeconds(300),
+        "격리 데이터의 감시 채널 또는 간격을 읽지 못함");
+    Console.WriteLine($"NATIVE_STORE_PROBE_PASSED channels={ids.Count} intervalSeconds={configuration.Interval.TotalSeconds}");
     return;
 }
 
@@ -218,6 +224,151 @@ Require(runnerStore.Load(channelId).Revision == 2 && fakeEffects.OpenedUrls.Coun
 Require(StoreImporter.Verify(source, runnerDb).Samples == 1,
     "감시 실행이 이전 원본 표본을 변경함");
 
+var schedulerDb = Path.Combine(folder, "scheduler.sqlite");
+StoreImporter.Import(source, schedulerDb);
+var schedulerStore = new NativeMonitorStore(schedulerDb);
+var initialConfiguration = schedulerStore.ReadPollConfiguration();
+Require(initialConfiguration.Interval == TimeSpan.FromSeconds(30)
+    && initialConfiguration.ChannelIds.SequenceEqual(new[] { channelId })
+    && initialConfiguration.Settings is { AutoOpenLive: true, AutoOpenUpcoming: true,
+        NotifyNewVideos: true, NotifyNewPosts: true },
+    "이전 DB의 채널 목록 또는 기본 감시 설정을 읽지 못함");
+var schedulerEffects = new RecordingEffects(() => schedulerStore.Load(channelId).Revision);
+var scheduledRunner = new NativeMonitorRunner(schedulerStore, new FixtureSnapshotSource(snapshot), schedulerEffects);
+var observedDelays = new List<TimeSpan>();
+using (var cancellation = new CancellationTokenSource())
+{
+    NativeMonitorScheduler? scheduler = null;
+    scheduler = new NativeMonitorScheduler(schedulerStore, scheduledRunner, (duration, token) =>
+    {
+        observedDelays.Add(duration);
+        if (observedDelays.Count == 2)
+        {
+            Require(scheduler!.LastSweep is { Completed.Count: 1, Errors.Count: 0 },
+                "첫 감시 주기가 완료되지 않음");
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = schedulerDb, Pooling = false }.ToString());
+            connection.Open();
+            using var update = connection.CreateCommand();
+            update.CommandText = "UPDATE meta SET value=$settings WHERE key='settings'";
+            update.Parameters.AddWithValue("$settings", """
+                {"pollIntervalSeconds":15,"autoOpenLive":false,"autoOpenUpcoming":true,
+                 "notifyNewVideos":true,"notifyNewPosts":true}
+                """);
+            update.ExecuteNonQuery();
+        }
+        if (observedDelays.Count == 3)
+        {
+            cancellation.Cancel();
+            return Task.Delay(Timeout.InfiniteTimeSpan, token);
+        }
+        return Task.CompletedTask;
+    });
+    await scheduler.RunAsync(cancellation.Token);
+    Require(observedDelays.SequenceEqual(new[] { TimeSpan.FromMilliseconds(250),
+            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(15) })
+        && scheduler.LastSweep is { Completed.Count: 1, Errors.Count: 0 }
+        && schedulerStore.Load(channelId).Revision == 2 && schedulerEffects.OpenedUrls.Count == 1,
+        "주기 간격 갱신, 직렬 실행 또는 중복 열기 방지 오류");
+}
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = schedulerDb, Pooling = false }.ToString()))
+{
+    connection.Open();
+    using var update = connection.CreateCommand();
+    update.CommandText = "UPDATE meta SET value='{\"autoOpenLive\":\"false\"}' WHERE key='settings'";
+    update.ExecuteNonQuery();
+}
+ExpectFailure(() => schedulerStore.ReadPollConfiguration(), "잘못된 감시 설정을 참으로 취급함");
+var invalidScheduler = new NativeMonitorScheduler(schedulerStore, scheduledRunner,
+    (_, _) => Task.CompletedTask);
+ExpectFailure(() => invalidScheduler.RunAsync(CancellationToken.None).GetAwaiter().GetResult(),
+    "잘못된 감시 설정에서 주기 실행을 계속함");
+Require(invalidScheduler.LastSweep is { Completed.Count: 0, Errors.Count: 1 }
+    && schedulerStore.Load(channelId).Revision == 2,
+    "설정 오류를 기록하지 않았거나 상태를 변경함");
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = schedulerDb, Pooling = false }.ToString()))
+{
+    connection.Open();
+    using var update = connection.CreateCommand();
+    update.CommandText = "UPDATE meta SET value='{\"pollIntervalSeconds\":15}' WHERE key='settings'";
+    update.ExecuteNonQuery();
+}
+using (var cancellation = new CancellationTokenSource())
+{
+    var waits = 0;
+    var scheduler = new NativeMonitorScheduler(schedulerStore, scheduledRunner, (_, token) =>
+    {
+        if (++waits == 2)
+        {
+            cancellation.Cancel();
+            return Task.Delay(Timeout.InfiniteTimeSpan, token);
+        }
+        return Task.CompletedTask;
+    });
+    await scheduler.RunAsync(cancellation.Token);
+    Require(waits == 2 && scheduler.LastSweep is { Completed.Count: 1, Errors.Count: 0 }
+        && schedulerStore.Load(channelId).Revision == 3,
+        "설정 오류를 고친 뒤 새 실행기로 감시를 재개하지 못함");
+}
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = schedulerDb, Pooling = false }.ToString()))
+{
+    connection.Open();
+    using var update = connection.CreateCommand();
+    update.CommandText = "UPDATE meta SET value='{\"pollIntervalSeconds\":400,\"autoOpenLive\":false}' WHERE key='settings'";
+    update.ExecuteNonQuery();
+}
+Require(schedulerStore.ReadPollConfiguration() is { Interval: var clamped, Settings.AutoOpenLive: false }
+    && clamped == TimeSpan.FromSeconds(300), "감시 간격 제한 또는 자동 열기 설정 오류");
+const string secondChannelId = "UCaaaaaaaaaaaaaaaaaaaaaa";
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = schedulerDb, Pooling = false }.ToString()))
+{
+    connection.Open();
+    using var addChannel = connection.CreateCommand();
+    addChannel.CommandText = "INSERT INTO channels(id,metadata_json) VALUES($id,$metadata)";
+    addChannel.Parameters.AddWithValue("$id", secondChannelId);
+    addChannel.Parameters.AddWithValue("$metadata", """
+        {"id":"UCaaaaaaaaaaaaaaaaaaaaaa","title":"Second"}
+        """);
+    addChannel.ExecuteNonQuery();
+}
+Require(schedulerStore.ReadPollConfiguration().ChannelIds.SequenceEqual(new[] { channelId, secondChannelId }),
+    "두 채널의 순서가 기존 저장 순서와 다름");
+using (var cancellation = new CancellationTokenSource())
+{
+    var waits = 0;
+    var isolatedRunner = new NativeMonitorRunner(schedulerStore,
+        new FailingFirstChannelSource(channelId, snapshot), schedulerEffects);
+    var scheduler = new NativeMonitorScheduler(schedulerStore, isolatedRunner, (_, token) =>
+    {
+        if (++waits == 2)
+        {
+            cancellation.Cancel();
+            return Task.Delay(Timeout.InfiniteTimeSpan, token);
+        }
+        return Task.CompletedTask;
+    });
+    await scheduler.RunAsync(cancellation.Token);
+    Require(scheduler.LastSweep is { Completed.Count: 1, Errors.Count: 1 }
+        && schedulerStore.Load(channelId).Revision == 3
+        && schedulerStore.Load(secondChannelId).Revision == 1,
+        "한 채널의 네트워크 오류가 다른 채널 확인을 막음");
+}
+using (var cancellation = new CancellationTokenSource())
+{
+    var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var scheduler = new NativeMonitorScheduler(schedulerStore, scheduledRunner,
+        (_, token) => gate.Task.WaitAsync(token));
+    var runningTask = scheduler.RunAsync(cancellation.Token);
+    ExpectFailure(() => scheduler.RunAsync(cancellation.Token).GetAwaiter().GetResult(),
+        "두 개의 주기 루프를 동시에 시작함");
+    cancellation.Cancel();
+    await runningTask;
+}
+
 NativeStoreRecovery.CreateBackup(runnerDb);
 NativeStoreRecovery.Validate(runnerDb + ".bak.1");
 var tracked = runnerStore.Load(channelId);
@@ -272,6 +423,13 @@ sealed class FixtureSnapshotSource(YouTubeSnapshot snapshot) : IYouTubeSnapshotS
 {
     public Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId, CancellationToken cancellationToken = default)
         => Task.FromResult(snapshot);
+}
+
+sealed class FailingFirstChannelSource(string failingId, YouTubeSnapshot snapshot) : IYouTubeSnapshotSource
+{
+    public Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId, CancellationToken cancellationToken = default)
+        => channelId == failingId ? Task.FromException<YouTubeSnapshot>(new IOException("fixture network failure"))
+            : Task.FromResult(snapshot);
 }
 
 sealed class RecordingEffects(Func<long> revision) : IMonitorEffectSink

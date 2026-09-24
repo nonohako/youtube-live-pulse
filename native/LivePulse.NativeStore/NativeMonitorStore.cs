@@ -102,6 +102,29 @@ public sealed class NativeMonitorStore
         return new StoredTracking(revision, tracking, ReadLastSubscriber(connection, channelId));
     }
 
+    public MonitorPollConfiguration ReadPollConfiguration()
+    {
+        using var connection = Open();
+        using var settingsCommand = connection.CreateCommand();
+        settingsCommand.CommandText = "SELECT value FROM meta WHERE key='settings'";
+        if (settingsCommand.ExecuteScalar() is not string json)
+            throw new InvalidDataException("감시 설정이 없습니다.");
+        using var document = JsonDocument.Parse(json);
+        var settings = document.RootElement;
+        if (settings.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("감시 설정이 올바르지 않습니다.");
+        var interval = ReadPollInterval(settings);
+        var monitorSettings = new MonitorSettings(
+            ReadBoolean(settings, "autoOpenLive"), ReadBoolean(settings, "autoOpenUpcoming"),
+            ReadBoolean(settings, "notifyNewVideos"), ReadBoolean(settings, "notifyNewPosts"));
+        var ids = new List<string>();
+        using var channels = connection.CreateCommand();
+        channels.CommandText = "SELECT id FROM channels ORDER BY rowid";
+        using var reader = channels.ExecuteReader();
+        while (reader.Read()) ids.Add(reader.GetString(0));
+        return new MonitorPollConfiguration(TimeSpan.FromSeconds(interval), ids, monitorSettings);
+    }
+
     public long Commit(string channelId, long expectedRevision, YouTubeSnapshot snapshot, MonitorChangePlan plan)
     {
         using var connection = Open();
@@ -225,6 +248,28 @@ public sealed class NativeMonitorStore
         if (!root.TryGetProperty(property, out var value) || value.ValueKind == JsonValueKind.Null) return null;
         return value.ValueKind == JsonValueKind.String ? value.GetString()
             : throw new InvalidDataException("채널 메타데이터 문자열이 올바르지 않습니다.");
+    }
+
+    private static bool ReadBoolean(JsonElement root, string property)
+    {
+        if (!root.TryGetProperty(property, out var value)) return true;
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new InvalidDataException($"감시 설정 {property}이 올바르지 않습니다.")
+        };
+    }
+
+    private static int ReadPollInterval(JsonElement root)
+    {
+        if (!root.TryGetProperty("pollIntervalSeconds", out var value)) return 30;
+        double seconds;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number)) seconds = number;
+        else if (value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(),
+                     NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)) seconds = parsed;
+        else return 30;
+        return double.IsFinite(seconds) ? (int)Math.Clamp(Math.Floor(seconds + 0.5), 15, 300) : 30;
     }
 
     private static SubscriberObservation? ReadLastSubscriber(SqliteConnection connection, string channelId)

@@ -2,7 +2,7 @@
 
 작성: 2026-09-23. 준비 기준: e447509, 운영 버전 v1.12.1. 이 문서는 구현 계획이며 완료 보고가 아니다.
 
-진행 기록: `native/LivePulse.Windows`에 첫 수명 시제품을, `native/LivePulse.DataMigration`에 격리 JSON→SQLite 이전 검증 도구를, `native/LivePulse.Core`에 공개 YouTube 읽기 전용 스냅샷, 채널 입력 해석과 순수 감시 변경 계획기를 추가했다. `native/LivePulse.NativeStore`는 이전 DB 위에 별도 런타임 테이블을 쓰고 한 번의 감시 판정을 저장 후 효과로 실행하는 격리 검증 단계다. 수동 SQLite 백업·복구 증명도 추가했지만 운영 자동 백업/복구로 연결하지 않았다. 아래의 '준비 작업' 문구는 문서 작성 당시 상태를 설명한다. 검증 범위와 다음 단계는 `handoff.md` 및 `native/README.md`를 본다. 운영 앱은 여전히 Electron v1.12.1이다.
+진행 기록: `native/LivePulse.Windows`에 첫 수명 시제품을, `native/LivePulse.DataMigration`에 격리 JSON→SQLite 이전 검증 도구를, `native/LivePulse.Core`에 공개 YouTube 읽기 전용 스냅샷, 채널 입력 해석과 순수 감시 변경 계획기를 추가했다. `native/LivePulse.NativeStore`는 이전 DB 위에 별도 런타임 테이블을 쓰고 한 번의 감시 판정을 저장 후 효과로 실행하는 격리 검증 단계다. 격리된 주기 감시 실행기와 수동 SQLite 백업·복구 증명도 추가했지만 운영 트레이·자동 백업/복구로 연결하지 않았다. 아래의 '준비 작업' 문구는 문서 작성 당시 상태를 설명한다. 검증 범위와 다음 단계는 `handoff.md` 및 `native/README.md`를 본다. 운영 앱은 여전히 Electron v1.12.1이다.
 
 ## 1. 사용자 결정과 범위
 
