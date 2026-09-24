@@ -13,8 +13,9 @@ Run `LivePulse.NativePrototype.exe --lifecycle-smoke` from the build output for 
 For a personal, self-contained build and data preparation after stopping Electron:
 
 ```powershell
-dotnet build native/LivePulse.NativeStore.Tests/LivePulse.NativeStore.Tests.csproj -c Release
-dotnet publish native/LivePulse.Windows/LivePulse.Windows.csproj -c Release -r win-x64 --self-contained true --output artifacts/native-personal-build
+$dotnet10 = Join-Path $env:TEMP 'livepulse-dotnet10/dotnet.exe'
+& $dotnet10 build native/LivePulse.NativeStore.Tests/LivePulse.NativeStore.Tests.csproj -c Release
+& $dotnet10 publish native/LivePulse.Windows/LivePulse.Windows.csproj -c Release -r win-x64 --self-contained true --output artifacts/native-personal-build
 .\native\prepare-personal.ps1 -SourceJson "$env:APPDATA\youtube-live-pulse\live-pulse.json"
 & .\artifacts\native-personal-build\LivePulse.NativePrototype.exe --hidden --personal-db "$env:LOCALAPPDATA\LivePulseNative\live-pulse.sqlite"
 ```

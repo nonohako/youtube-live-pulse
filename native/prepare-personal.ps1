@@ -5,6 +5,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$localSdk = Join-Path $env:TEMP 'livepulse-dotnet10/dotnet.exe'
+if ($Dotnet -eq 'dotnet' -and (Test-Path -LiteralPath $localSdk)) {
+    $Dotnet = $localSdk
+    $env:DOTNET_ROOT = Split-Path -Parent $localSdk
+    $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
+}
 $source = (Resolve-Path -LiteralPath $SourceJson).Path
 $targetDirectory = Join-Path $env:LOCALAPPDATA 'LivePulseNative'
 $targetDatabase = Join-Path $targetDirectory 'live-pulse.sqlite'
