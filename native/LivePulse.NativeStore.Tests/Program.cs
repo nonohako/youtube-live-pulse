@@ -36,14 +36,16 @@ if (args is ["--probe", var explicitDatabase])
     var ids = new List<string>();
     using (var reader = channelIds.ExecuteReader())
         while (reader.Read()) ids.Add(reader.GetString(0));
-    foreach (var id in ids) probe.Load(id);
+    var revisions = ids.Select(id => probe.Load(id).Revision).ToArray();
     var configuration = probe.ReadPollConfiguration();
     Require(configuration.ChannelIds.Count == ids.Count
         && configuration.ChannelIds.ToHashSet(StringComparer.Ordinal).SetEquals(ids)
         && configuration.Interval >= TimeSpan.FromSeconds(15)
         && configuration.Interval <= TimeSpan.FromSeconds(300),
         "격리 데이터의 감시 채널 또는 간격을 읽지 못함");
-    Console.WriteLine($"NATIVE_STORE_PROBE_PASSED channels={ids.Count} intervalSeconds={configuration.Interval.TotalSeconds}");
+    Console.WriteLine($"NATIVE_STORE_PROBE_PASSED channels={ids.Count} intervalSeconds={configuration.Interval.TotalSeconds} "
+        + $"minRevision={(revisions.Length == 0 ? 0 : revisions.Min())} "
+        + $"maxRevision={(revisions.Length == 0 ? 0 : revisions.Max())}");
     return;
 }
 
