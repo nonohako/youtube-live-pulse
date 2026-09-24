@@ -19,6 +19,7 @@ internal sealed class PrototypeApp : System.Windows.Application
     private Task? _monitorTask;
     private YouTubeSnapshotClient? _snapshotClient;
     private NativeMonitorScheduler? _monitorScheduler;
+    private NativeBackupCheckpoint? _monitorBackup;
     private readonly PrototypeEffectSink _monitorEffects = new();
 
     internal PrototypeApp(string[] args)
@@ -150,7 +151,8 @@ internal sealed class PrototypeApp : System.Windows.Application
 
         var store = new NativeMonitorStore(database);
         _snapshotClient = new YouTubeSnapshotClient();
-        var runner = new NativeMonitorRunner(store, _snapshotClient, _monitorEffects);
+        _monitorBackup = new NativeBackupCheckpoint(database);
+        var runner = new NativeMonitorRunner(store, _snapshotClient, _monitorEffects, _monitorBackup);
         _monitorScheduler = new NativeMonitorScheduler(store, runner);
         _monitorCancellation = new CancellationTokenSource();
         _monitorTask = Task.Run(() => _monitorScheduler.RunAsync(_monitorCancellation.Token));
@@ -209,6 +211,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                         + $"workingMiB={process.WorkingSet64 / 1048576.0:F1}");
                     if (sweepCount < requiredSweeps) continue;
                     Console.WriteLine($"NATIVE_MONITOR_SMOKE_PASSED sweeps={sweepCount} channels={sweep.Completed.Count} "
+                        + $"backups={_monitorBackup?.BackupCount} "
                         + $"suppressedNotifications={_monitorEffects.NotificationCount} "
                         + $"suppressedUrls={_monitorEffects.UrlCount} windowCreated={_window is not null}");
                     return;

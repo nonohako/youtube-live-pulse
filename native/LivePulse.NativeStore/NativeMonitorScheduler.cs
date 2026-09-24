@@ -44,6 +44,12 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
                     cancellationToken.ThrowIfCancellationRequested();
                     try { completed.Add(await runner.RunChannelOnceAsync(channelId, configuration.Settings, cancellationToken)); }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (NativeBackupException error)
+                    {
+                        errors.Add(error.Message);
+                        Volatile.Write(ref lastSweep, new MonitorSweepResult(DateTimeOffset.UtcNow, completed, errors));
+                        throw;
+                    }
                     catch (Exception error) when (error is not OutOfMemoryException)
                     { errors.Add($"채널 {channelId} 확인 실패: {error.Message}"); }
                 }

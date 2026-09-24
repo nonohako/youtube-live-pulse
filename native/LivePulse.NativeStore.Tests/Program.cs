@@ -226,6 +226,87 @@ Require(runnerStore.Load(channelId).Revision == 2 && fakeEffects.OpenedUrls.Coun
 Require(StoreImporter.Verify(source, runnerDb).Samples == 1,
     "감시 실행이 이전 원본 표본을 변경함");
 
+var checkpointDb = Path.Combine(folder, "checkpoint.sqlite");
+StoreImporter.Import(source, checkpointDb);
+var checkpointStore = new NativeMonitorStore(checkpointDb);
+var checkpointClock = checkedAt;
+var checkpoint = new NativeBackupCheckpoint(checkpointDb, () => checkpointClock);
+var checkpointEffects = new RecordingEffects(() => checkpointStore.Load(channelId).Revision);
+var checkpointRunner = new NativeMonitorRunner(checkpointStore,
+    new FixtureSnapshotSource(snapshot), checkpointEffects, checkpoint);
+Require((await checkpointRunner.RunChannelOnceAsync(channelId, settings)).SavedRevision == 1
+    && checkpoint.BackupCount == 1 && File.Exists(checkpointDb + ".bak.1")
+    && checkpointEffects.OpenedUrls.Count == 1,
+    "첫 저장 직후 백업을 만들지 않았거나 효과 순서가 틀림");
+checkpointClock = checkedAt.AddMinutes(1);
+Require((await checkpointRunner.RunChannelOnceAsync(channelId, settings)).SavedRevision == 2
+    && checkpoint.BackupCount == 1 && !File.Exists(checkpointDb + ".bak.2"),
+    "5분 전 저장에서 불필요한 백업을 생성함");
+checkpointClock = checkedAt.AddMinutes(5);
+Require((await checkpointRunner.RunChannelOnceAsync(channelId, settings)).SavedRevision == 3
+    && checkpoint.BackupCount == 2
+    && new NativeMonitorStore(checkpointDb + ".bak.1").Load(channelId).Revision == 3
+    && new NativeMonitorStore(checkpointDb + ".bak.2").Load(channelId).Revision == 1,
+    "5분 후 두 세대 백업 회전이 실패함");
+
+var secondLive = live with { Id = "secondlive1", Url = "https://www.youtube.com/watch?v=secondlive1" };
+var changedLiveSnapshot = snapshot with { Live = secondLive, CheckedAt = checkedAt.AddMinutes(11) };
+File.WriteAllBytes(checkpointDb + ".backup.tmp", [1, 2, 3]);
+checkpointClock = checkedAt.AddMinutes(11);
+var failingCheckpointRunner = new NativeMonitorRunner(checkpointStore,
+    new FixtureSnapshotSource(changedLiveSnapshot), checkpointEffects, checkpoint);
+ExpectFailure(() => failingCheckpointRunner.RunChannelOnceAsync(channelId, settings).GetAwaiter().GetResult(),
+    "백업 실패 후 알림 또는 URL 효과를 계속 실행함");
+Require(checkpointStore.Load(channelId).Revision == 4 && checkpoint.BackupCount == 2
+    && checkpointEffects.OpenedUrls.Count == 1,
+    "백업 실패 뒤 커밋 상태 또는 효과 차단이 올바르지 않음");
+var fatalScheduler = new NativeMonitorScheduler(checkpointStore, failingCheckpointRunner,
+    (_, _) => Task.CompletedTask);
+ExpectFailure(() => fatalScheduler.RunAsync(CancellationToken.None).GetAwaiter().GetResult(),
+    "백업 실패 후 주기 감시가 계속됨");
+Require(fatalScheduler.LastSweep is { Completed.Count: 0, Errors.Count: 1 }
+    && checkpointStore.Load(channelId).Revision == 5 && checkpointEffects.OpenedUrls.Count == 1,
+    "백업 실패를 감시 오류로 기록하지 않거나 효과를 반복함");
+Require(StoreImporter.Verify(source, checkpointDb).Samples == 1,
+    "백업 실패 뒤 이전 원본 표본이 바뀜");
+
+var forcedDb = Path.Combine(folder, "forced-checkpoint.sqlite");
+StoreImporter.Import(source, forcedDb);
+var forcedStore = new NativeMonitorStore(forcedDb);
+var forcedClock = checkedAt;
+var forcedCheckpoint = new NativeBackupCheckpoint(forcedDb, () => forcedClock);
+var forcedEffects = new RecordingEffects(() => forcedStore.Load(channelId).Revision,
+    () => new NativeMonitorStore(forcedDb + ".bak.1").Load(channelId).Revision);
+var firstForcedRunner = new NativeMonitorRunner(forcedStore,
+    new FixtureSnapshotSource(snapshot), forcedEffects, forcedCheckpoint);
+await firstForcedRunner.RunChannelOnceAsync(channelId, settings);
+forcedClock = checkedAt.AddMinutes(1);
+var secondForcedRunner = new NativeMonitorRunner(forcedStore,
+    new FixtureSnapshotSource(changedLiveSnapshot), forcedEffects, forcedCheckpoint);
+await secondForcedRunner.RunChannelOnceAsync(channelId, settings);
+Require(forcedCheckpoint.BackupCount == 2 && forcedEffects.OpenedUrls.Count == 2
+    && forcedEffects.RevisionsObserved.Count == forcedEffects.BackupRevisionsObserved.Count
+    && forcedEffects.RevisionsObserved.Zip(forcedEffects.BackupRevisionsObserved,
+        (revision, backupRevision) => revision == backupRevision).All(matched => matched)
+    && new NativeMonitorStore(forcedDb + ".bak.1").Load(channelId).Tracking.OpenedBroadcastIds
+        .Contains("live:secondlive1")
+    && new NativeMonitorStore(forcedDb + ".bak.2").Load(channelId).Revision == 1,
+    "새 방송 효과 전에 5분 간격과 무관하게 중복 방지 키를 백업하지 못함");
+forcedClock = checkedAt.AddMinutes(2);
+await secondForcedRunner.RunChannelOnceAsync(channelId, settings);
+Require(forcedCheckpoint.BackupCount == 2 && forcedEffects.OpenedUrls.Count == 2,
+    "같은 방송을 다시 열거나 불필요한 백업을 만듦");
+File.WriteAllBytes(forcedDb + ".backup.tmp", [1]);
+forcedClock = checkedAt.AddMinutes(3);
+var thirdLive = live with { Id = "thirdlive11", Url = "https://www.youtube.com/watch?v=thirdlive11" };
+var thirdForcedRunner = new NativeMonitorRunner(forcedStore,
+    new FixtureSnapshotSource(snapshot with { Live = thirdLive, CheckedAt = forcedClock }),
+    forcedEffects, forcedCheckpoint);
+ExpectFailure(() => thirdForcedRunner.RunChannelOnceAsync(channelId, settings).GetAwaiter().GetResult(),
+    "새 방송의 긴급 백업 실패 후 URL을 열었음");
+Require(forcedStore.Load(channelId).Revision == 4 && forcedEffects.OpenedUrls.Count == 2,
+    "긴급 백업 실패에서 이미 저장한 키 또는 효과 차단이 깨짐");
+
 var schedulerDb = Path.Combine(folder, "scheduler.sqlite");
 StoreImporter.Import(source, schedulerDb);
 var schedulerStore = new NativeMonitorStore(schedulerDb);
@@ -434,15 +515,17 @@ sealed class FailingFirstChannelSource(string failingId, YouTubeSnapshot snapsho
             : Task.FromResult(snapshot);
 }
 
-sealed class RecordingEffects(Func<long> revision) : IMonitorEffectSink
+sealed class RecordingEffects(Func<long> revision, Func<long>? backupRevision = null) : IMonitorEffectSink
 {
     public bool FailNotifications { get; set; }
     public List<long> RevisionsObserved { get; } = [];
+    public List<long> BackupRevisionsObserved { get; } = [];
     public List<string> OpenedUrls { get; } = [];
 
     public Task NotifyAsync(MonitorNotification notification, CancellationToken cancellationToken)
     {
         RevisionsObserved.Add(revision());
+        if (backupRevision is not null) BackupRevisionsObserved.Add(backupRevision());
         if (FailNotifications) throw new InvalidOperationException("fixture notification failure");
         return Task.CompletedTask;
     }
@@ -450,6 +533,7 @@ sealed class RecordingEffects(Func<long> revision) : IMonitorEffectSink
     public Task OpenUrlAsync(string url, CancellationToken cancellationToken)
     {
         RevisionsObserved.Add(revision());
+        if (backupRevision is not null) BackupRevisionsObserved.Add(backupRevision());
         OpenedUrls.Add(url);
         return Task.CompletedTask;
     }

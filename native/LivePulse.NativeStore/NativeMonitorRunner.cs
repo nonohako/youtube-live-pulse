@@ -14,7 +14,7 @@ public sealed record MonitorRunResult(string ChannelId, long SavedRevision, int 
 
 // Manual poll proof. Scheduling and Windows effects are intentionally outside this class.
 public sealed class NativeMonitorRunner(NativeMonitorStore store, IYouTubeSnapshotSource source,
-    IMonitorEffectSink effects)
+    IMonitorEffectSink effects, IMonitorCommitCheckpoint? checkpoint = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -32,6 +32,7 @@ public sealed class NativeMonitorRunner(NativeMonitorStore store, IYouTubeSnapsh
             var plan = MonitorChangePlanner.Plan(channelId, previous.Tracking,
                 previous.LastSubscriberSample, settings, snapshot);
             var revision = store.Commit(channelId, previous.Revision, snapshot, plan);
+            checkpoint?.AfterCommit(plan.Notifications.Count != 0 || plan.UrlsToOpen.Count != 0);
 
             var errors = new List<string>();
             foreach (var notification in plan.Notifications)
