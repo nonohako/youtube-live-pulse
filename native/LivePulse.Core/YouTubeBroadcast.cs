@@ -40,6 +40,27 @@ public static partial class YouTubeBroadcast
             scheduledStart, live, upcoming);
     }
 
+    public static VideoCandidate? ParseVideoStatistics(string html, string? finalUrl = null)
+    {
+        var player = PlayerResponse(html);
+        if (player is null || YouTubeJson.String(YouTubeJson.At(player, "playabilityStatus", "status")) != "OK")
+            return null;
+        var details = YouTubeJson.At(player, "videoDetails");
+        var id = YouTubeJson.String(YouTubeJson.At(details, "videoId")) ?? VideoIdFromUrl(finalUrl);
+        if (id is null || !VideoIdPattern().IsMatch(id)) return null;
+        var microformat = YouTubeJson.At(player, "microformat", "playerMicroformatRenderer");
+        var views = YouTubeJson.Number(YouTubeJson.At(details, "viewCount"))
+            ?? YouTubeJson.Number(YouTubeJson.At(microformat, "viewCount"));
+        if (views is null or < 0 or > 9_007_199_254_740_991) return null;
+        return new VideoCandidate(id, Title: YouTubeJson.String(YouTubeJson.At(details, "title"))
+                ?? YouTubeJson.Text(YouTubeJson.At(microformat, "title")),
+            Url: $"{Origin}/watch?v={id}",
+            ThumbnailUrl: YouTubeJson.BestThumbnail(YouTubeJson.At(details, "thumbnail", "thumbnails")),
+            ViewCount: views,
+            PublishedAt: YouTubeJson.String(YouTubeJson.At(microformat, "publishDate"))
+                ?? YouTubeJson.String(YouTubeJson.At(microformat, "uploadDate")));
+    }
+
     public static Broadcast? SelectCurrentLive(Broadcast? player, Broadcast? list, bool livePageAvailable = true)
     {
         if (player?.IsLive == true)

@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.IO.Compression;
+using System.Net;
 using System.Reflection;
+using System.Text.Json;
 using LivePulse.Core;
 using LivePulse.DataMigration;
 using LivePulse.NativeStore;
@@ -17,6 +20,13 @@ static void ExpectFailure(Action action, string message)
     {
         return;
     }
+    throw new InvalidOperationException(message);
+}
+
+static void ExpectInvalidData(Action action, string message)
+{
+    try { action(); }
+    catch (InvalidDataException) { return; }
     throw new InvalidOperationException(message);
 }
 
@@ -48,6 +58,7 @@ if (args is ["--probe", var explicitDatabase])
         while (reader.Read()) ids.Add(reader.GetString(0));
     var revisions = ids.Select(id => probe.Load(id).Revision).ToArray();
     var configuration = probe.ReadPollConfiguration();
+    var videoRows = Count(connection, "runtime_video_samples");
     Require(configuration.ChannelIds.Count == ids.Count
         && configuration.ChannelIds.ToHashSet(StringComparer.Ordinal).SetEquals(ids)
         && configuration.Interval >= TimeSpan.FromSeconds(15)
@@ -55,7 +66,7 @@ if (args is ["--probe", var explicitDatabase])
         "격리 데이터의 감시 채널 또는 간격을 읽지 못함");
     Console.WriteLine($"NATIVE_STORE_PROBE_PASSED channels={ids.Count} intervalSeconds={configuration.Interval.TotalSeconds} "
         + $"minRevision={(revisions.Length == 0 ? 0 : revisions.Min())} "
-        + $"maxRevision={(revisions.Length == 0 ? 0 : revisions.Max())}");
+        + $"maxRevision={(revisions.Length == 0 ? 0 : revisions.Max())} videoSamples={videoRows}");
     return;
 }
 
@@ -235,6 +246,221 @@ Require(runnerStore.Load(channelId).Revision == 2 && fakeEffects.OpenedUrls.Coun
     "모든 공개 소스 실패 후 저장 상태 또는 열기 효과가 바뀜");
 Require(StoreImporter.Verify(source, runnerDb).Samples == 1,
     "감시 실행이 이전 원본 표본을 변경함");
+
+var videoStatsDb = Path.Combine(folder, "video-stats.sqlite");
+StoreImporter.Import(source, videoStatsDb);
+var videoStore = new NativeMonitorStore(videoStatsDb);
+var videoInitial = videoStore.Load(channelId);
+var videoPlan = MonitorChangePlanner.Plan(channelId, videoInitial.Tracking,
+    videoInitial.LastSubscriberSample, settings, snapshot);
+var recordedVideo = firstVideo with { ViewCount = 400 };
+videoStore.Commit(channelId, videoInitial.Revision, snapshot, videoPlan, [recordedVideo], checkedAt);
+Require(!videoStore.NeedsVideoStatistics(channelId, checkedAt.AddMinutes(4))
+    && videoStore.NeedsVideoStatistics(channelId, checkedAt.AddMinutes(5))
+    && new NativeStateReader(videoStatsDb).Read()["channels"]![0]!["videoViewHistories"]![0]!["samples"]!.AsArray().Count == 1,
+    "영상 조회수 첫 기록 또는 5분 수집 간격 오류");
+var videoNext = videoStore.Load(channelId);
+var videoPlan2 = MonitorChangePlanner.Plan(channelId, videoNext.Tracking,
+    videoNext.LastSubscriberSample, settings, snapshot with { CheckedAt = checkedAt.AddMinutes(5) });
+videoStore.Commit(channelId, videoNext.Revision, snapshot with { CheckedAt = checkedAt.AddMinutes(5) },
+    videoPlan2, [recordedVideo with { ViewCount = 401 }], checkedAt.AddMinutes(5));
+Require(new NativeStateReader(videoStatsDb).Read(channelId, [(channelId, firstVideo.Id)])
+        ["channels"]![0]!["videoViewHistories"]![0]!["samples"]!.AsArray().Count == 2
+    && StoreImporter.Verify(source, videoStatsDb).Samples == 1,
+    "영상 조회수 변경 기록 또는 이전 원본 보존 오류");
+
+var cloudSource = Path.Combine(folder, "cloud-source.json");
+var cloudDb = Path.Combine(folder, "cloud.sqlite");
+File.WriteAllText(cloudSource, """
+    {
+      "version": 3,
+      "settings": {
+        "pollIntervalSeconds": 30,
+        "cloudUrl": "https://pulse-test.fly.dev",
+        "cloudToken": "tttttttttttttttttttttttttttttttt"
+      },
+      "events": [],
+      "channels": [{
+        "id": "UCtKtCiaWRz-d3EZn2xd1mdA", "title": "Cloud fixture",
+        "subscriberHistory": [{"at":"2026-09-01T00:00:00.000Z","count":100}],
+        "videoViewHistories": []
+      }],
+      "cloud": {
+        "endpoint": "https://pulse-test.fly.dev", "archiveVersion": 2, "cursor": 1,
+        "channels": {
+          "UCtKtCiaWRz-d3EZn2xd1mdA": {
+            "subscriberHistory": [{"at":"2026-09-02T00:00:00.000Z","count":101}],
+            "videoViewHistories": []
+          }
+        }
+      }
+    }
+    """);
+Require(StoreImporter.Import(cloudSource, cloudDb).Samples == 2,
+    "클라우드 원본 fixture 이전 실패");
+var cloudAt1 = DateTimeOffset.UtcNow.AddMinutes(-3).ToUnixTimeMilliseconds();
+var cloudAt2 = cloudAt1 + 60_000;
+string CloudPage(long at, bool hasMore) => JsonSerializer.Serialize(new
+{
+    version = 1, next = at, hasMore,
+    samples = new[] { new { at, channels = new[] {
+        new { id = channelId, subscriberCount = 150L,
+            views = new Dictionary<string, long> { ["abcdefghijk"] = 400 } }
+    } } },
+    status = new { lastSuccessAt = DateTimeOffset.UtcNow.ToString("O"), error = (string?)null }
+});
+var cloudHandler = new CloudFixtureHandler([CloudPage(cloudAt1, true), CloudPage(cloudAt2, false)]);
+using (var client = new HttpClient(cloudHandler))
+{
+    var cloudCheckpoint = new NativeBackupCheckpoint(cloudDb);
+    var cloudSync = new NativeCloudSync(cloudDb, client, cloudCheckpoint);
+    var cloudResult = await cloudSync.SyncOnceAsync();
+    Require(cloudResult is { Configured: true, Pages: 2, Observations: 4 }
+        && cloudResult.Cursor == cloudAt2 && cloudCheckpoint.BackupCount == 1
+        && cloudHandler.Cursors.SequenceEqual(new long[] { 1, cloudAt1 }),
+        "클라우드 두 페이지 다운로드·커서·백업 오류");
+}
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = cloudDb, Mode = SqliteOpenMode.ReadOnly }.ToString()))
+{
+    connection.Open();
+    Require(Count(connection, "samples") == 2 && Count(connection, "runtime_cloud_samples") == 4,
+        "클라우드 페이지가 이전 원본을 변경했거나 표본을 누락함");
+}
+Require(StoreImporter.Verify(cloudSource, cloudDb).Samples == 2
+    && StoreImporter.Verify(cloudSource, cloudDb + ".bak.1").Samples == 2,
+    "클라우드 동기화 뒤 원본 또는 첫 백업 표본 검증 실패");
+var projected = new NativeStateReader(cloudDb).Read(channelId, [(channelId, "abcdefghijk")]);
+var projectedChannel = projected["channels"]![0]!;
+Require(projected["settings"]!["cloudToken"] is null
+    && projected["settings"]!["hasCloudToken"]!.GetValue<bool>()
+    && projectedChannel["subscriberHistory"]!.AsArray().Count == 4
+    && projectedChannel["videoViewHistories"]![0]!["samples"]!.AsArray().Count == 2,
+    "실제 상태 투영에서 토큰 노출 또는 이전/신규 클라우드 기록 누락");
+var cloudExtraId = "UCbbbbbbbbbbbbbbbbbbbbbb";
+var cloudStore = new NativeMonitorStore(cloudDb);
+cloudStore.AddChannel(YouTubeChannelInput.Normalize(cloudExtraId));
+Require(cloudStore.ReadPollConfiguration().ChannelIds.Count == 2
+    && new NativeStateReader(cloudDb).Read()["channels"]!.AsArray().Count == 2,
+    "추가 채널이 감시·화면에 반영되지 않음");
+cloudStore.RemoveChannel(cloudExtraId);
+Require(cloudStore.ReadPollConfiguration().ChannelIds.Count == 1
+    && new NativeStateReader(cloudDb).Read()["channels"]!.AsArray().Count == 1
+    && StoreImporter.Verify(cloudSource, cloudDb).Samples == 2,
+    "채널 제거가 화면·감시에서 빠지지 않거나 이전 기록을 변경함");
+using (var backup = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = cloudDb + ".bak.1", Mode = SqliteOpenMode.ReadOnly }.ToString()))
+{
+    backup.Open();
+    Require(Count(backup, "runtime_cloud_samples") == 2,
+        "첫 동기화 체크포인트가 커밋된 클라우드 표본을 포함하지 않음");
+}
+var cloudReplay = new CloudFixtureHandler([JsonSerializer.Serialize(new
+{ version = 1, next = cloudAt2, hasMore = false, samples = Array.Empty<object>() })]);
+using (var client = new HttpClient(cloudReplay))
+{
+    var replayResult = await new NativeCloudSync(cloudDb, client).SyncOnceAsync();
+    Require(replayResult is { Pages: 1, Observations: 0 }
+        && cloudReplay.Cursors.SequenceEqual(new[] { cloudAt2 }),
+        "재시작 후 클라우드 커서에서 이어받지 못함");
+}
+var invalidCloud = new CloudFixtureHandler([CloudPage(DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeMilliseconds(), false)]);
+using (var client = new HttpClient(invalidCloud))
+    ExpectInvalidData(() => new NativeCloudSync(cloudDb, client).SyncOnceAsync().GetAwaiter().GetResult(),
+        "미래 클라우드 표본을 저장함");
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = cloudDb, Mode = SqliteOpenMode.ReadOnly }.ToString()))
+{
+    connection.Open();
+    Require(Count(connection, "runtime_cloud_samples") == 4,
+        "잘못된 클라우드 페이지 뒤 런타임 표본이 바뀜");
+}
+var unorderedCloudPage = JsonSerializer.Serialize(new
+{
+    version = 1, next = cloudAt2 + 30_000, hasMore = false,
+    samples = new[] { cloudAt2 + 60_000, cloudAt2 + 30_000 }
+        .Select(at => new { at, channels = Array.Empty<object>() }).ToArray()
+});
+using (var client = new HttpClient(new CloudFixtureHandler([unorderedCloudPage])))
+    ExpectInvalidData(() => new NativeCloudSync(cloudDb, client).SyncOnceAsync().GetAwaiter().GetResult(),
+        "순서가 뒤집힌 클라우드 페이지를 저장함");
+var changedSettings = new CloudFixtureHandler([CloudPage(cloudAt2 + 60_000, false)], () =>
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+    { DataSource = cloudDb, Mode = SqliteOpenMode.ReadWrite }.ToString());
+    connection.Open();
+    using var update = connection.CreateCommand();
+    update.CommandText = "UPDATE meta SET value=$value WHERE key='settings'";
+    update.Parameters.AddWithValue("$value", """
+        {"cloudUrl":"https://pulse-test.fly.dev","cloudToken":"ssssssssssssssssssssssssssssssss"}
+        """);
+    update.ExecuteNonQuery();
+});
+using (var client = new HttpClient(changedSettings))
+    Require((await new NativeCloudSync(cloudDb, client).SyncOnceAsync()) is
+        { Configured: true, Pages: 0, Observations: 0, Cursor: var unchanged }
+        && unchanged == cloudAt2, "요청 중 클라우드 키 변경 뒤 받은 페이지를 저장함");
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+{ DataSource = cloudDb, Mode = SqliteOpenMode.ReadWrite }.ToString()))
+{
+    connection.Open();
+    Require(Count(connection, "runtime_cloud_samples") == 4,
+        "잘못된 클라우드 페이지에서 일부 표본을 저장함");
+    using var invalidSettings = connection.CreateCommand();
+    invalidSettings.CommandText = "UPDATE meta SET value=$value WHERE key='settings'";
+    invalidSettings.Parameters.AddWithValue("$value", """
+        {"cloudUrl":"https://evil.example","cloudToken":"tttttttttttttttttttttttttttttttt"}
+        """);
+    invalidSettings.ExecuteNonQuery();
+}
+using (var client = new HttpClient(new CloudFixtureHandler([])))
+    ExpectInvalidData(() => new NativeCloudSync(cloudDb, client).SyncOnceAsync().GetAwaiter().GetResult(),
+        "외부 클라우드 호스트를 허용함");
+using (var client = new HttpClient(new CloudFixtureHandler([])))
+    Require((await new NativeCloudSync(importedDb, client).SyncOnceAsync()) is
+        { Configured: false, Pages: 0 }, "연결 키가 없는 저장소에서 클라우드 요청을 시도함");
+
+var settingsDb = Path.Combine(folder, "settings.sqlite");
+StoreImporter.Import(source, settingsDb);
+var settingsStore = new NativeMonitorStore(settingsDb);
+using (var update = JsonDocument.Parse("""
+    {"pollIntervalSeconds":45,"autoOpenLive":false,"subscriberChartMode":"daily","apiKey":"private-key"}
+    """))
+    settingsStore.UpdateSettings(update.RootElement);
+Require(settingsStore.ReadPollConfiguration() is { Interval.TotalSeconds: 45, Settings.AutoOpenLive: false }
+    && new NativeStateReader(settingsDb).Read()["settings"]!["apiKey"] is null
+    && new NativeStateReader(settingsDb).Read()["settings"]!["hasApiKey"]!.GetValue<bool>()
+    && StoreImporter.Verify(source, settingsDb).Samples == 1,
+    "설정 저장·비밀값 제거 또는 이전 기록 보존 오류");
+using (var invalidUpdate = JsonDocument.Parse("""{"autoOpenLive":"false"}"""))
+    ExpectInvalidData(() => settingsStore.UpdateSettings(invalidUpdate.RootElement),
+        "문자열을 감시 설정 불리언으로 허용함");
+var workbookPath = Path.Combine(folder, "subscriber-fixture.xlsx");
+using (var archive = ZipFile.Open(workbookPath, ZipArchiveMode.Create))
+using (var writer = new StreamWriter(archive.CreateEntry("xl/worksheets/sheet1.xml").Open()))
+{
+    var existingLocal = DateTimeOffset.Parse("2026-09-01T00:00:00Z").ToLocalTime().Date;
+    var oldDay = existingLocal.AddDays(-1).ToOADate().ToString(System.Globalization.CultureInfo.InvariantCulture);
+    var existingDay = existingLocal.ToOADate().ToString(System.Globalization.CultureInfo.InvariantCulture);
+    writer.Write($"""
+        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
+        <row r="1"><c r="A1" t="inlineStr"><is><t>날짜</t></is></c><c r="B1" t="inlineStr"><is><t>전체 구독자</t></is></c></row>
+        <row r="2"><c r="A2"><v>{oldDay}</v></c><c r="B2"><v>95</v></c></row>
+        <row r="3"><c r="A3"><v>{existingDay}</v></c><c r="B3"><v>999</v></c></row>
+        <row r="4"><c r="A4"><v>{oldDay}</v></c><c r="B4"><v>96</v></c></row>
+        <row r="5"><c r="A5" t="inlineStr"><is><t>합계</t></is></c><c r="B5"><v>9999</v></c></row>
+        <row r="6"><c r="A6" t="inlineStr"><is><t>bad</t></is></c><c r="B6"><v>1</v></c></row>
+        </sheetData></worksheet>
+        """);
+}
+var workbook = SubscriberXlsxImport.Read(workbookPath);
+var importedDays = settingsStore.ImportSubscriberDays(channelId, workbook.Days);
+Require(workbook.Days.Count == 2 && workbook.SkippedDuplicate == 1 && workbook.SkippedInvalid == 1
+    && importedDays == (1, 1)
+    && new NativeStateReader(settingsDb).Read(channelId)["channels"]![0]!["subscriberHistory"]!.AsArray().Count == 2
+    && settingsStore.Load(channelId).LastSubscriberSample?.Count == 100
+    && StoreImporter.Verify(source, settingsDb).Samples == 1,
+    "XLSX 날짜 병합에서 기존 값이나 최신 감시 표본을 변경함");
 
 var checkpointDb = Path.Combine(folder, "checkpoint.sqlite");
 StoreImporter.Import(source, checkpointDb);
@@ -585,5 +811,28 @@ sealed class RecordingEffects(Func<long> revision, Func<long>? backupRevision = 
         if (backupRevision is not null) BackupRevisionsObserved.Add(backupRevision());
         OpenedUrls.Add(url);
         return Task.CompletedTask;
+    }
+}
+
+sealed class CloudFixtureHandler(IEnumerable<string> pages, Action? onResponse = null) : HttpMessageHandler
+{
+    private readonly Queue<string> responses = new(pages);
+    public List<long> Cursors { get; } = [];
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Method != HttpMethod.Get || request.RequestUri is not { Host: "pulse-test.fly.dev" } url
+            || url.Scheme != "https" || url.AbsolutePath != "/v1/sync"
+            || request.Headers.Authorization?.Scheme != "Bearer"
+            || request.Headers.Authorization.Parameter != "tttttttttttttttttttttttttttttttt"
+            || !long.TryParse(url.Query.TrimStart('?').Replace("after=", ""), out var cursor))
+            throw new InvalidOperationException("네이티브 클라우드 요청의 주소·인증·커서 오류");
+        Cursors.Add(cursor);
+        if (!responses.TryDequeue(out var body))
+            throw new InvalidOperationException("예상보다 많은 클라우드 요청");
+        onResponse?.Invoke();
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent(body) });
     }
 }

@@ -1,6 +1,14 @@
 using System.Text.Json;
 using LivePulse.Core;
 
+if (args.Length == 2 && args[0] == "--video")
+{
+    using var videos = new YouTubeSnapshotClient();
+    var statistics = await videos.FetchVideoStatisticsAsync([args[1]]);
+    Console.WriteLine(JsonSerializer.Serialize(statistics));
+    return statistics.Count == 1 ? 0 : 1;
+}
+
 if (args.Length == 2 && args[0] == "--resolve")
 {
     using var resolver = new YouTubeSnapshotClient();
@@ -19,7 +27,7 @@ if (args.Length == 2 && args[0] == "--resolve")
 var channelId = args.Length == 0 ? "UCtKtCiaWRz-d3EZn2xd1mdA" : args[0];
 if (args.Length > 1)
 {
-    Console.Error.WriteLine("사용법: LivePulse.Core.Diagnostic [UC로 시작하는 채널 ID] | --resolve 채널주소또는@핸들");
+    Console.Error.WriteLine("사용법: LivePulse.Core.Diagnostic [채널 ID] | --resolve 채널주소또는@핸들 | --video 영상ID");
     return 2;
 }
 

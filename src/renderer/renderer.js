@@ -326,13 +326,15 @@ function bindEvents() {
 
 function render() {
   if (!appState || !windowActive) return;
-  elements.appVersion.textContent = appState.app?.version ? `v${appState.app.version}` : '';
+  elements.appVersion.textContent = appState.app?.nativePersonal
+    ? '개인용 빌드' : (appState.app?.version ? `v${appState.app.version}` : '');
   const update = appState.app?.update;
   elements.updateStatus.textContent = update?.message || '업데이트 확인 대기 중';
-  elements.updateButton.textContent = update?.status === 'downloading'
+  elements.updateButton.textContent = appState.app?.nativePersonal ? '업데이트 수동 적용'
+    : update?.status === 'downloading'
     ? `업데이트 ${update.percent || 0}%`
     : '앱 업데이트 확인';
-  elements.updateButton.disabled = ['checking', 'downloading'].includes(update?.status);
+  elements.updateButton.disabled = appState.app?.nativePersonal || ['checking', 'downloading'].includes(update?.status);
   renderMonitorStatus();
   if (!document.querySelector('dialog[open]')) {
     renderChannels(); renderEvents(); renderViewsPanel();
@@ -1580,6 +1582,8 @@ async function handleUpdateCheck() {
 
 function openSettings() {
   const settings = appState.settings;
+  elements.settingStartup.disabled = Boolean(appState.app?.nativePersonal);
+  elements.settingApiKey.disabled = Boolean(appState.app?.nativePersonal);
   elements.settingStartup.checked = settings.startAtLogin;
   elements.settingLive.checked = settings.autoOpenLive;
   elements.settingUpcoming.checked = settings.autoOpenUpcoming;
@@ -1597,10 +1601,14 @@ function openSettings() {
   elements.settingApiKey.placeholder = settings.hasApiKey
     ? '저장된 키 유지 (변경할 때만 입력)'
     : '입력하지 않아도 작동합니다';
-  elements.apiKeyStatus.textContent = settings.hasApiKey
+  elements.apiKeyStatus.textContent = appState.app?.nativePersonal
+    ? '개인용 빌드는 공개 페이지로 영상 감지와 조회수를 수집합니다. API 키 연동은 아직 적용되지 않습니다.'
+    : settings.hasApiKey
     ? 'API 키 저장됨 · 공식 채널·영상 통계를 사용합니다. 구독자 수는 공개 정책상 반올림됩니다.'
     : 'API 키 없음 · 공개 페이지로 영상 감지와 조회수 수집을 계속합니다.';
-  elements.startupHelp.textContent = appState.app?.isPackaged
+  elements.startupHelp.textContent = appState.app?.nativePersonal
+    ? '개인용 빌드에서는 Windows 시작 등록을 아직 적용하지 않습니다.'
+    : appState.app?.isPackaged
     ? 'Windows 시작 앱 설정에 반영됩니다.'
     : '개발 실행 중에는 등록하지 않으며, 설치본에서 적용됩니다.';
   elements.settingsDialog.showModal();

@@ -7,15 +7,21 @@ public sealed record YouTubeSnapshot(DateTimeOffset CheckedAt, YouTubePageParser
     Broadcast? Live, IReadOnlyList<Broadcast> Upcoming, VideoCandidate? LatestVideo,
     YouTubePageParser.CommunityPost? LatestPost, IReadOnlyList<VideoCandidate> RecentVideos,
     IReadOnlyList<YouTubePageParser.CommunityPost> RecentPosts, IReadOnlyList<string> Warnings,
-    int SuccessfulSourceCount = 6);
+    int SuccessfulSourceCount = 6, IReadOnlyList<VideoCandidate>? RegularVideos = null);
 
 public interface IYouTubeSnapshotSource
 {
     Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId, CancellationToken cancellationToken = default);
 }
 
+public interface IVideoStatisticsSource
+{
+    Task<IReadOnlyList<VideoCandidate>> FetchVideoStatisticsAsync(IReadOnlyList<string> videoIds,
+        CancellationToken cancellationToken = default);
+}
+
 // Read-only public-page diagnostic. It does not poll, notify, open URLs, or persist data.
-public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IDisposable
+public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatisticsSource, IDisposable
 {
     private const string Origin = "https://www.youtube.com";
     private const int MaxPageBytes = 8 * 1024 * 1024;
@@ -45,6 +51,20 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IDisposable
         var id = YouTubeChannelInput.FindChannelId(page.Body);
         if (id is null) throw new InvalidDataException("채널 ID를 찾지 못했습니다. 채널의 /channel/UC… 주소를 입력해 주세요.");
         return YouTubeChannelInput.Normalize(id);
+    }
+
+    public async Task<IReadOnlyList<VideoCandidate>> FetchVideoStatisticsAsync(IReadOnlyList<string> videoIds,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = videoIds.Where(id => id.Length == 11
+            && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-')).Distinct(StringComparer.Ordinal)
+            .Take(8).ToArray();
+        var tasks = ids.Select(async id =>
+        {
+            var page = await FetchAsync($"{Origin}/watch?v={id}", cancellationToken);
+            return page.Success ? YouTubeBroadcast.ParseVideoStatistics(page.Body, page.FinalUrl) : null;
+        });
+        return (await Task.WhenAll(tasks)).Where(item => item is not null).Cast<VideoCandidate>().ToArray();
     }
 
     public async Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId,
@@ -124,7 +144,7 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IDisposable
             posts.Success, feed.Success, live.Success }.Count(success => success);
         return new YouTubeSnapshot(DateTimeOffset.UtcNow, metadata, currentLive, sortedUpcoming,
             recentVideos.FirstOrDefault(), posts.Posts.FirstOrDefault(), recentVideos, posts.Posts, warnings,
-            successfulSources);
+            successfulSources, videos.Videos.Where(video => !video.IsLive && !video.IsUpcoming).Take(8).ToArray());
     }
 
     private static Broadcast AsBroadcast(VideoCandidate item)

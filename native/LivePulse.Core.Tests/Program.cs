@@ -44,6 +44,16 @@ Require(recent.Select(x => x.Id).SequenceEqual(new[] { "FEEDVIDEO01", "SH0RTS000
     "라이브 제외 또는 네 소스 interleave 오류");
 Require(YouTubeBroadcast.VideoIdFromUrl("https://www.youtube.com/watch?v=abcdefghijk") == "abcdefghijk", "YouTube URL 해석 오류");
 Require(YouTubeBroadcast.VideoIdFromUrl("https://evil.example/watch?v=abcdefghijk") is null, "외부 URL 허용 오류");
+var watchStats = "var ytInitialPlayerResponse = " + JsonSerializer.Serialize(new
+{
+    playabilityStatus = new { status = "OK" },
+    videoDetails = new { videoId = "abcdefghijk", title = "영상", viewCount = "1234",
+        thumbnail = new { thumbnails = new[] { new { url = "https://img/large.jpg", width = 320 } } } },
+    microformat = new { playerMicroformatRenderer = new { publishDate = "2026-09-01" } }
+}) + ";";
+Require(YouTubeBroadcast.ParseVideoStatistics(watchStats) is
+    { Id: "abcdefghijk", ViewCount: 1234, PublishedAt: "2026-09-01" },
+    "공개 시청 페이지 조회수 또는 게시일 파싱 오류");
 Require(YouTubeBroadcast.BalancedObject("{\"text\":\"} escaped \\\" quote\"}", 0) is not null, "문자열 안 중괄호 해석 오류");
 
 using var shortsFixture = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory,

@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using LivePulse.Core;
 using Microsoft.Data.Sqlite;
 
@@ -63,6 +65,19 @@ public sealed class NativeMonitorStore
               count INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_subscribers_by_channel
               ON runtime_subscriber_samples(channel_id,id);
+            CREATE TABLE IF NOT EXISTS runtime_snapshots(
+              channel_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS runtime_channels(
+              id TEXT PRIMARY KEY, metadata_json TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS runtime_removed_channels(id TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS runtime_video_samples(
+              channel_id TEXT NOT NULL, video_id TEXT NOT NULL, at TEXT NOT NULL, count INTEGER NOT NULL,
+              PRIMARY KEY(channel_id,video_id,at));
+            CREATE TABLE IF NOT EXISTS runtime_video_metadata(
+              channel_id TEXT NOT NULL, video_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
+              PRIMARY KEY(channel_id,video_id));
+            CREATE TABLE IF NOT EXISTS runtime_video_stats_state(
+              channel_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL);
             """;
         schema.ExecuteNonQuery();
     }
@@ -71,7 +86,11 @@ public sealed class NativeMonitorStore
     {
         using var connection = Open();
         using var channel = connection.CreateCommand();
-        channel.CommandText = "SELECT metadata_json FROM channels WHERE id=$id";
+        channel.CommandText = """
+            SELECT metadata_json FROM (
+              SELECT id,metadata_json FROM channels UNION ALL SELECT id,metadata_json FROM runtime_channels)
+            WHERE id=$id AND id NOT IN (SELECT id FROM runtime_removed_channels)
+            """;
         channel.Parameters.AddWithValue("$id", channelId);
         if (channel.ExecuteScalar() is not string importedJson)
             throw new KeyNotFoundException("저장된 채널을 찾지 못했습니다.");
@@ -119,20 +138,42 @@ public sealed class NativeMonitorStore
             ReadBoolean(settings, "notifyNewVideos"), ReadBoolean(settings, "notifyNewPosts"));
         var ids = new List<string>();
         using var channels = connection.CreateCommand();
-        channels.CommandText = "SELECT id FROM channels ORDER BY rowid";
+        channels.CommandText = """
+            SELECT id FROM (
+              SELECT id,rowid AS position,0 AS section FROM channels
+              UNION ALL SELECT id,rowid AS position,1 AS section FROM runtime_channels)
+            WHERE id NOT IN (SELECT id FROM runtime_removed_channels)
+            ORDER BY section,position
+            """;
         using var reader = channels.ExecuteReader();
         while (reader.Read()) ids.Add(reader.GetString(0));
         return new MonitorPollConfiguration(TimeSpan.FromSeconds(interval), ids, monitorSettings);
     }
 
-    public long Commit(string channelId, long expectedRevision, YouTubeSnapshot snapshot, MonitorChangePlan plan)
+    public bool NeedsVideoStatistics(string channelId, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT checked_at FROM runtime_video_stats_state WHERE channel_id=$id";
+        command.Parameters.AddWithValue("$id", channelId);
+        return command.ExecuteScalar() is not string text
+            || !DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var last)
+            || now - last >= TimeSpan.FromMinutes(5);
+    }
+
+    public long Commit(string channelId, long expectedRevision, YouTubeSnapshot snapshot, MonitorChangePlan plan,
+        IReadOnlyList<VideoCandidate>? videoStatistics = null, DateTimeOffset? videoCheckedAt = null)
     {
         using var connection = Open();
         using var transaction = connection.BeginTransaction();
         using (var exists = connection.CreateCommand())
         {
             exists.Transaction = transaction;
-            exists.CommandText = "SELECT 1 FROM channels WHERE id=$id";
+            exists.CommandText = """
+                SELECT 1 FROM (
+                  SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels)
+                WHERE id=$id AND id NOT IN (SELECT id FROM runtime_removed_channels)
+                """;
             exists.Parameters.AddWithValue("$id", channelId);
             if (exists.ExecuteScalar() is null) throw new KeyNotFoundException("저장된 채널을 찾지 못했습니다.");
         }
@@ -202,8 +243,242 @@ public sealed class NativeMonitorStore
             insert.Parameters.AddWithValue("$count", sample.Count);
             insert.ExecuteNonQuery();
         }
+        using (var savedSnapshot = connection.CreateCommand())
+        {
+            savedSnapshot.Transaction = transaction;
+            savedSnapshot.CommandText = """
+                INSERT INTO runtime_snapshots(channel_id,payload_json) VALUES($id,$json)
+                ON CONFLICT(channel_id) DO UPDATE SET payload_json=excluded.payload_json
+                """;
+            savedSnapshot.Parameters.AddWithValue("$id", channelId);
+            savedSnapshot.Parameters.AddWithValue("$json", JsonSerializer.Serialize(snapshot,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            savedSnapshot.ExecuteNonQuery();
+        }
+        if (videoCheckedAt is { } checkedAt)
+        {
+            foreach (var video in videoStatistics ?? [])
+            {
+                if (video.ViewCount is not { } count || count < 0 || count > 9_007_199_254_740_991)
+                    continue;
+                using (var metadata = connection.CreateCommand())
+                {
+                    metadata.Transaction = transaction;
+                    metadata.CommandText = """
+                        INSERT INTO runtime_video_metadata(channel_id,video_id,metadata_json)
+                        VALUES($channel,$video,$json)
+                        ON CONFLICT(channel_id,video_id) DO UPDATE SET metadata_json=excluded.metadata_json
+                        """;
+                    metadata.Parameters.AddWithValue("$channel", channelId);
+                    metadata.Parameters.AddWithValue("$video", video.Id);
+                    metadata.Parameters.AddWithValue("$json", JsonSerializer.Serialize(new
+                    { videoId = video.Id, title = video.Title, url = video.Url,
+                        thumbnailUrl = video.ThumbnailUrl, publishedAt = video.PublishedAt, source = "page" }));
+                    metadata.ExecuteNonQuery();
+                }
+                using var previousVideo = connection.CreateCommand();
+                previousVideo.Transaction = transaction;
+                previousVideo.CommandText = """
+                    SELECT at,count FROM (
+                      SELECT at,count FROM samples WHERE source='local' AND kind='video'
+                        AND channel_id=$channel AND video_id=$video
+                      UNION ALL SELECT at,count FROM runtime_video_samples
+                        WHERE channel_id=$channel AND video_id=$video)
+                    ORDER BY julianday(at) DESC LIMIT 1
+                    """;
+                previousVideo.Parameters.AddWithValue("$channel", channelId);
+                previousVideo.Parameters.AddWithValue("$video", video.Id);
+                using var previousReader = previousVideo.ExecuteReader();
+                var append = !previousReader.Read() || previousReader.GetInt64(1) != count
+                    || !DateTimeOffset.TryParse(previousReader.GetString(0), CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal, out var previousAt)
+                    || checkedAt - previousAt >= TimeSpan.FromHours(6);
+                previousReader.Close();
+                if (!append) continue;
+                using var sampleInsert = connection.CreateCommand();
+                sampleInsert.Transaction = transaction;
+                sampleInsert.CommandText = """
+                    INSERT OR IGNORE INTO runtime_video_samples(channel_id,video_id,at,count)
+                    VALUES($channel,$video,$at,$count)
+                    """;
+                sampleInsert.Parameters.AddWithValue("$channel", channelId);
+                sampleInsert.Parameters.AddWithValue("$video", video.Id);
+                sampleInsert.Parameters.AddWithValue("$at", checkedAt.ToString("O", CultureInfo.InvariantCulture));
+                sampleInsert.Parameters.AddWithValue("$count", count);
+                sampleInsert.ExecuteNonQuery();
+            }
+            using var state = connection.CreateCommand();
+            state.Transaction = transaction;
+            state.CommandText = """
+                INSERT INTO runtime_video_stats_state(channel_id,checked_at) VALUES($id,$at)
+                ON CONFLICT(channel_id) DO UPDATE SET checked_at=excluded.checked_at
+                """;
+            state.Parameters.AddWithValue("$id", channelId);
+            state.Parameters.AddWithValue("$at", checkedAt.ToString("O", CultureInfo.InvariantCulture));
+            state.ExecuteNonQuery();
+        }
         transaction.Commit();
         return revision + 1;
+    }
+
+    public void AddChannel(ResolvedYouTubeChannel channel)
+    {
+        _ = YouTubeChannelInput.Normalize(channel.Id);
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var check = connection.CreateCommand();
+        check.Transaction = transaction;
+        check.CommandText = "SELECT 1 FROM channels WHERE id=$id UNION ALL SELECT 1 FROM runtime_channels WHERE id=$id";
+        check.Parameters.AddWithValue("$id", channel.Id);
+        var exists = check.ExecuteScalar() is not null;
+        using var removed = connection.CreateCommand();
+        removed.Transaction = transaction;
+        removed.CommandText = "DELETE FROM runtime_removed_channels WHERE id=$id";
+        removed.Parameters.AddWithValue("$id", channel.Id);
+        var wasRemoved = removed.ExecuteNonQuery() != 0;
+        if (exists && !wasRemoved) throw new InvalidOperationException("이미 등록된 채널입니다.");
+        if (!exists)
+        {
+            using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO runtime_channels(id,metadata_json) VALUES($id,$json)";
+            insert.Parameters.AddWithValue("$id", channel.Id);
+            insert.Parameters.AddWithValue("$json", JsonSerializer.Serialize(new
+            {
+                id = channel.Id, inputUrl = channel.Url, title = "채널 정보 불러오는 중",
+                avatarUrl = "", addedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+            }));
+            insert.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
+    public void RemoveChannel(string channelId)
+    {
+        _ = YouTubeChannelInput.Normalize(channelId);
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR IGNORE INTO runtime_removed_channels(id)
+            SELECT id FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels) WHERE id=$id
+            """;
+        command.Parameters.AddWithValue("$id", channelId);
+        if (command.ExecuteNonQuery() == 0)
+            throw new KeyNotFoundException("등록된 채널을 찾지 못했습니다.");
+    }
+
+    public void UpdateSettings(JsonElement partial)
+    {
+        if (partial.ValueKind != JsonValueKind.Object)
+            throw new InvalidDataException("설정 값이 올바르지 않습니다.");
+        using var connection = Open();
+        using var read = connection.CreateCommand();
+        read.CommandText = "SELECT value FROM meta WHERE key='settings'";
+        var settings = JsonNode.Parse(read.ExecuteScalar() as string
+            ?? throw new InvalidDataException("저장된 설정이 없습니다."))?.AsObject()
+            ?? throw new InvalidDataException("설정 구조가 올바르지 않습니다.");
+        foreach (var property in partial.EnumerateObject())
+        {
+            var value = property.Value;
+            switch (property.Name)
+            {
+                case "startAtLogin":
+                case "autoOpenLive":
+                case "autoOpenUpcoming":
+                case "notifyNewVideos":
+                case "notifyNewPosts":
+                    if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new InvalidDataException($"{property.Name} 설정이 올바르지 않습니다.");
+                    settings[property.Name] = value.GetBoolean();
+                    break;
+                case "pollIntervalSeconds":
+                    if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var seconds)
+                        || !double.IsFinite(seconds))
+                        throw new InvalidDataException("감시 간격이 올바르지 않습니다.");
+                    settings[property.Name] = (int)Math.Clamp(Math.Round(seconds), 15, 300);
+                    break;
+                case "subscriberChartMode":
+                    if (value.ValueKind != JsonValueKind.String || value.GetString() is not ("samples" or "daily"))
+                        throw new InvalidDataException("차트 표시 기준이 올바르지 않습니다.");
+                    settings[property.Name] = value.GetString();
+                    break;
+                case "apiKey":
+                    if (value.ValueKind != JsonValueKind.String || value.GetString() is not { Length: <= 256 })
+                        throw new InvalidDataException("API 키가 올바르지 않습니다.");
+                    settings[property.Name] = value.GetString()!.Trim();
+                    break;
+                case "cloudUrl":
+                    if (value.ValueKind != JsonValueKind.String) throw new InvalidDataException("클라우드 주소가 올바르지 않습니다.");
+                    var url = value.GetString()!.Trim();
+                    if (url.Length != 0 && !Regex.IsMatch(url, "^https://[a-z0-9-]+\\.fly\\.dev/?$", RegexOptions.IgnoreCase))
+                        throw new InvalidDataException("클라우드 주소는 Fly HTTPS 주소여야 합니다.");
+                    settings[property.Name] = url.TrimEnd('/');
+                    if (url.Length == 0) settings["cloudToken"] = "";
+                    break;
+                case "cloudToken":
+                    if (value.ValueKind != JsonValueKind.String) throw new InvalidDataException("클라우드 읽기 키가 올바르지 않습니다.");
+                    var token = value.GetString()!.Trim();
+                    if (token.Length != 0 && !Regex.IsMatch(token, "^[A-Za-z0-9_-]{32,256}$"))
+                        throw new InvalidDataException("클라우드 읽기 키가 올바르지 않습니다.");
+                    settings[property.Name] = token;
+                    break;
+                default:
+                    throw new InvalidDataException("지원하지 않는 설정 값입니다.");
+            }
+        }
+        if ((string?)settings["cloudUrl"] == "") settings["cloudToken"] = "";
+        using var update = connection.CreateCommand();
+        update.CommandText = "UPDATE meta SET value=$json WHERE key='settings'";
+        update.Parameters.AddWithValue("$json", settings.ToJsonString());
+        if (update.ExecuteNonQuery() != 1) throw new InvalidDataException("설정을 저장하지 못했습니다.");
+    }
+
+    public (int Added, int SkippedExisting) ImportSubscriberDays(string channelId,
+        IReadOnlyList<ImportedSubscriberDay> days)
+    {
+        _ = Load(channelId);
+        using var connection = Open();
+        var existing = new HashSet<DateOnly>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT at FROM samples WHERE source='local' AND kind='subscriber'
+                  AND video_id='' AND channel_id=$id
+                UNION ALL SELECT at FROM runtime_subscriber_samples WHERE channel_id=$id
+                """;
+            command.Parameters.AddWithValue("$id", channelId);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (!DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal, out var at))
+                    throw new InvalidDataException("기존 구독자 표본 시각이 올바르지 않습니다.");
+                existing.Add(DateOnly.FromDateTime(at.ToLocalTime().DateTime));
+            }
+        }
+        var added = 0;
+        var skipped = 0;
+        using var transaction = connection.BeginTransaction();
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT INTO runtime_subscriber_samples(channel_id,at,count) VALUES($id,$at,$count)";
+        insert.Parameters.AddWithValue("$id", channelId);
+        insert.Parameters.Add(new SqliteParameter("$at", ""));
+        insert.Parameters.Add(new SqliteParameter("$count", 0L));
+        foreach (var day in days)
+        {
+            if (day.Count < 0 || day.Count > 9_007_199_254_740_991)
+                throw new InvalidDataException("구독자 수가 올바르지 않습니다.");
+            if (!existing.Add(day.Date)) { skipped++; continue; }
+            var local = day.Date.ToDateTime(TimeOnly.MinValue);
+            var at = new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)).ToUniversalTime();
+            insert.Parameters["$at"].Value = at.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+            insert.Parameters["$count"].Value = day.Count;
+            insert.ExecuteNonQuery();
+            added++;
+        }
+        transaction.Commit();
+        return (added, skipped);
     }
 
     private SqliteConnection Open()
@@ -274,23 +549,21 @@ public sealed class NativeMonitorStore
 
     private static SubscriberObservation? ReadLastSubscriber(SqliteConnection connection, string channelId)
     {
-        foreach (var sql in new[]
-        {
-            "SELECT at,count FROM runtime_subscriber_samples WHERE channel_id=$id ORDER BY id DESC LIMIT 1",
-            "SELECT at,count FROM samples WHERE source='local' AND kind='subscriber' AND video_id='' AND channel_id=$id ORDER BY ordinal DESC LIMIT 1"
-        })
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = sql;
-            command.Parameters.AddWithValue("$id", channelId);
-            using var reader = command.ExecuteReader();
-            if (!reader.Read()) continue;
-            if (!DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
-                    DateTimeStyles.AssumeUniversal, out var at))
-                throw new InvalidDataException("구독자 표본 시각이 올바르지 않습니다.");
-            return new SubscriberObservation(at, reader.GetInt64(1));
-        }
-        return null;
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT at,count FROM (
+              SELECT at,count,ordinal AS sequence FROM samples
+                WHERE source='local' AND kind='subscriber' AND video_id='' AND channel_id=$id
+              UNION ALL SELECT at,count,id AS sequence FROM runtime_subscriber_samples WHERE channel_id=$id)
+            ORDER BY julianday(at) DESC,sequence DESC LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$id", channelId);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        if (!DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var at))
+            throw new InvalidDataException("구독자 표본 시각이 올바르지 않습니다.");
+        return new SubscriberObservation(at, reader.GetInt64(1));
     }
 
     private static HashSet<string> ReadImportedEventKeys(SqliteConnection connection, SqliteTransaction transaction)

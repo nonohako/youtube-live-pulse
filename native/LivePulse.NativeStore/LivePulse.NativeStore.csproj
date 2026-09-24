@@ -8,4 +8,7 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <ProjectReference Include="../LivePulse.Core/LivePulse.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="LivePulse.NativeStore.Tests" />
+  </ItemGroup>
 </Project>

@@ -29,9 +29,30 @@ public sealed class NativeMonitorRunner(NativeMonitorStore store, IYouTubeSnapsh
             cancellationToken.ThrowIfCancellationRequested();
             if (snapshot.SuccessfulSourceCount == 0)
                 throw new InvalidDataException("모든 공개 데이터 소스 확인에 실패해 감시 상태를 저장하지 않았습니다.");
+            IReadOnlyList<VideoCandidate>? videoStatistics = null;
+            DateTimeOffset? videoCheckedAt = null;
+            if (source is IVideoStatisticsSource statisticsSource
+                && store.NeedsVideoStatistics(channelId, snapshot.CheckedAt))
+            {
+                var ids = (snapshot.RegularVideos ?? snapshot.RecentVideos)
+                    .Where(video => !video.IsLive && !video.IsUpcoming)
+                    .Select(video => video.Id).Distinct(StringComparer.Ordinal).Take(8).ToArray();
+                if (ids.Length > 0)
+                {
+                    try
+                    {
+                        videoStatistics = await statisticsSource.FetchVideoStatisticsAsync(ids, cancellationToken);
+                        videoCheckedAt = snapshot.CheckedAt;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception error) when (error is not OutOfMemoryException)
+                    { videoStatistics = []; }
+                }
+            }
             var plan = MonitorChangePlanner.Plan(channelId, previous.Tracking,
                 previous.LastSubscriberSample, settings, snapshot);
-            var revision = store.Commit(channelId, previous.Revision, snapshot, plan);
+            var revision = store.Commit(channelId, previous.Revision, snapshot, plan,
+                videoStatistics, videoCheckedAt);
             checkpoint?.AfterCommit(plan.Notifications.Count != 0 || plan.UrlsToOpen.Count != 0);
 
             var errors = new List<string>();
