@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-24
 
+## Isolated native writer lease checkpoint
+
+The opt-in WPF monitor now acquires an exclusive per-DB `.native-lock` file before opening SQLite and holds it until the monitor task has stopped. The native store harness verifies duplicate acquisition fails in one process and while a separate process holds the lease, then succeeds after release. Native store and WPF Release builds passed without warnings or errors; `NATIVE_STORE_TESTS_PASSED`. A fresh ignored 192 MB copy completed one real public sweep for two channels in hidden mode with one backup, zero real effects and no window; after the process exited, an exclusive open of its lock file succeeded (`ISOLATED_LEASE_RELEASED_PASSED`). The disposable DB, backup and lock file were removed. The lock is an ignored sidecar and may remain after a clean exit; possession, not file existence, marks an active cooperative process.
+
+This protects only cooperating versions of the isolated native prototype. Older prototypes, manual tools and the installed Electron app do not take this lease. No startup recovery has been connected, and no restore may run while any writer is active. Production instance exclusion, installed-client compatibility and rollback remain open. Production Electron v1.12.1 and its updater are unchanged.
+
 ## Isolated native write checkpoint
 
 `NativeBackupCheckpoint` now connects the opt-in hidden tray monitor's committed SQLite writes to `NativeStoreRecovery.CreateBackup`. It makes a validated first-commit backup, rotates two generations after later writes at least five minutes apart, and forces a fresh backup before any planned notification or URL effect, regardless of interval. If backup fails, the primary commit may already exist, but the effect is suppressed and the scheduler faults with a visible error. The real Windows effect sink remains disconnected.

@@ -20,6 +20,7 @@ internal sealed class PrototypeApp : System.Windows.Application
     private YouTubeSnapshotClient? _snapshotClient;
     private NativeMonitorScheduler? _monitorScheduler;
     private NativeBackupCheckpoint? _monitorBackup;
+    private NativeStoreLease? _monitorLease;
     private readonly PrototypeEffectSink _monitorEffects = new();
 
     internal PrototypeApp(string[] args)
@@ -100,6 +101,8 @@ internal sealed class PrototypeApp : System.Windows.Application
             catch (Exception error) { Console.Error.WriteLine($"ISOLATED_MONITOR_STOP_FAILED {error.Message}"); }
         _snapshotClient?.Dispose();
         _monitorCancellation?.Dispose();
+        _monitorLease?.Dispose();
+        _monitorLease = null;
         if (_window is not null)
         {
             var window = _window;
@@ -149,6 +152,7 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (File.GetAttributes(database).HasFlag(FileAttributes.ReparsePoint))
             throw new InvalidDataException("연결된 DB 파일은 사용할 수 없습니다.");
 
+        _monitorLease = NativeStoreLease.Acquire(database);
         var store = new NativeMonitorStore(database);
         _snapshotClient = new YouTubeSnapshotClient();
         _monitorBackup = new NativeBackupCheckpoint(database);

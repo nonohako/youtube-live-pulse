@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using LivePulse.Core;
 using LivePulse.DataMigration;
 using LivePulse.NativeStore;
@@ -23,6 +25,14 @@ static long Count(SqliteConnection connection, string table)
     using var command = connection.CreateCommand();
     command.CommandText = $"SELECT COUNT(*) FROM {table}";
     return (long)command.ExecuteScalar()!;
+}
+
+if (args is ["--hold-lease", var leaseDatabase])
+{
+    using var lease = NativeStoreLease.Acquire(leaseDatabase);
+    Console.WriteLine("NATIVE_LEASE_HELD");
+    Console.ReadLine();
+    return;
 }
 
 if (args is ["--probe", var explicitDatabase])
@@ -228,6 +238,45 @@ Require(StoreImporter.Verify(source, runnerDb).Samples == 1,
 
 var checkpointDb = Path.Combine(folder, "checkpoint.sqlite");
 StoreImporter.Import(source, checkpointDb);
+using (var lease = NativeStoreLease.Acquire(checkpointDb))
+{
+    ExpectFailure(() => { using var duplicate = NativeStoreLease.Acquire(checkpointDb); },
+        "동일 격리 DB에 두 번째 네이티브 감시 잠금을 허용함");
+}
+using (var reacquired = NativeStoreLease.Acquire(checkpointDb))
+    Require(File.Exists(checkpointDb + ".native-lock"), "종료 후 격리 DB 잠금을 다시 얻지 못함");
+var executable = Environment.ProcessPath ?? throw new InvalidOperationException("테스트 실행 파일 경로가 없습니다.");
+var childStart = new ProcessStartInfo(executable)
+{
+    RedirectStandardInput = true,
+    RedirectStandardOutput = true,
+    UseShellExecute = false,
+    CreateNoWindow = true
+};
+if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+    childStart.ArgumentList.Add(Assembly.GetExecutingAssembly().Location);
+childStart.ArgumentList.Add("--hold-lease");
+childStart.ArgumentList.Add(checkpointDb);
+using (var child = Process.Start(childStart) ?? throw new InvalidOperationException("잠금 시험 프로세스를 시작하지 못함"))
+{
+    try
+    {
+        var ready = child.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10))
+            .GetAwaiter().GetResult();
+        Require(ready == "NATIVE_LEASE_HELD", "별도 프로세스가 격리 DB 잠금을 얻지 못함");
+        ExpectFailure(() => { using var duplicate = NativeStoreLease.Acquire(checkpointDb); },
+            "다른 프로세스가 보유한 격리 DB 잠금을 동시에 허용함");
+        child.StandardInput.WriteLine();
+        Require(child.WaitForExit(5000) && child.ExitCode == 0,
+            "잠금 시험 프로세스가 정상 종료하지 못함");
+    }
+    finally
+    {
+        if (!child.HasExited) child.Kill(entireProcessTree: true);
+    }
+}
+using (var reacquired = NativeStoreLease.Acquire(checkpointDb))
+    Require(File.Exists(checkpointDb + ".native-lock"), "별도 프로세스 종료 후 잠금을 다시 얻지 못함");
 var checkpointStore = new NativeMonitorStore(checkpointDb);
 var checkpointClock = checkedAt;
 var checkpoint = new NativeBackupCheckpoint(checkpointDb, () => checkpointClock);
