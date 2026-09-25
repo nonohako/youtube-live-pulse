@@ -163,9 +163,47 @@ public sealed class NativeStateReader
             video["videoId"] = videoId;
             video["title"] ??= videoId;
             video["url"] ??= "https://www.youtube.com/watch?v=" + videoId;
-            video["samples"] = Samples(connection, channelId, "video", videoId,
-                selected.Any(item => item.ChannelId == channelId && item.VideoId == videoId));
+            video["samples"] = selected.Any(item => item.ChannelId == channelId && item.VideoId == videoId)
+                ? Samples(connection, channelId, "video", videoId, full: true)
+                : VideoEndpoints(connection, channelId, videoId);
             output.Add(video);
+        }
+        return output;
+    }
+
+    private static JsonArray VideoEndpoints(SqliteConnection connection, string channelId, string videoId)
+    {
+        var candidates = new List<(string At, long Count, int Priority)>();
+        foreach (var (table, source, priority) in new[]
+        {
+            ("samples", "local", 2), ("samples", "cloud", 1),
+            ("runtime_cloud_samples", "", 1), ("runtime_video_samples", "", 3)
+        })
+        {
+            foreach (var direction in new[] { "ASC", "DESC" })
+            {
+                using var command = connection.CreateCommand();
+                command.CommandText = table == "samples"
+                    ? $"SELECT at,count FROM samples WHERE source=$source AND channel_id=$id AND kind='video' AND video_id=$video ORDER BY at {direction} LIMIT 1"
+                    : table == "runtime_cloud_samples"
+                    ? $"SELECT at,count FROM runtime_cloud_samples WHERE channel_id=$id AND kind='video' AND video_id=$video ORDER BY at {direction} LIMIT 1"
+                    : $"SELECT at,count FROM runtime_video_samples WHERE channel_id=$id AND video_id=$video ORDER BY at {direction} LIMIT 1";
+                if (table == "samples") command.Parameters.AddWithValue("$source", source);
+                command.Parameters.AddWithValue("$id", channelId);
+                command.Parameters.AddWithValue("$video", videoId);
+                using var reader = command.ExecuteReader();
+                if (reader.Read()) candidates.Add((reader.GetString(0), reader.GetInt64(1), priority));
+            }
+        }
+        var output = new JsonArray();
+        foreach (var at in candidates.Select(item => item.At).Distinct(StringComparer.Ordinal)
+            .OrderBy(at => at, StringComparer.Ordinal).Take(1)
+            .Concat(candidates.Select(item => item.At).Distinct(StringComparer.Ordinal)
+                .OrderByDescending(at => at, StringComparer.Ordinal).Take(1))
+            .Distinct(StringComparer.Ordinal))
+        {
+            var selected = candidates.Where(item => item.At == at).MaxBy(item => item.Priority);
+            output.Add(new JsonObject { ["at"] = at, ["count"] = selected.Count });
         }
         return output;
     }

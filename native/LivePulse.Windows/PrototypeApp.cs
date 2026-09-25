@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Threading;
 using LivePulse.Core;
 using LivePulse.NativeStore;
+using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 
 namespace LivePulse.Windows;
@@ -32,7 +33,14 @@ internal sealed class PrototypeApp : System.Windows.Application
     private NativeStoreLease? _monitorLease;
     private readonly PrototypeEffectSink _monitorEffects;
     private string? _lastNotificationUrl;
+    private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    private const string RunValueName = "라이브 펄스";
     internal bool IsPersonal => _args.Contains("--personal-db");
+    internal bool IsPersonalInstalled => IsPersonal && string.Equals(
+        Environment.ProcessPath,
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs", "LivePulseNative", "LivePulse.NativePrototype.exe"),
+        StringComparison.OrdinalIgnoreCase);
     internal string WebViewProfilePath => IsPersonal
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LivePulseNative", "WebView2")
         : Path.Combine(Path.GetTempPath(), "LivePulseNativePrototype", "WebView2");
@@ -65,7 +73,11 @@ internal sealed class PrototypeApp : System.Windows.Application
         // The timer refreshes a visible UI only. Monitor and cloud loops run independently.
         _heartbeat.Tick += (_, _) => _window?.SendState();
         _heartbeat.Start();
-        try { StartIsolatedMonitor(); }
+        try
+        {
+            StartIsolatedMonitor();
+            if (IsPersonalInstalled) ApplyPersonalLoginSetting();
+        }
         catch (Exception error)
         {
             Console.Error.WriteLine($"ISOLATED_MONITOR_START_FAILED {error.Message}");
@@ -109,6 +121,8 @@ internal sealed class PrototypeApp : System.Windows.Application
         var state = _stateReader.Read(subscriberId, selectedVideos);
         state["monitor"]!["running"] = _monitorTask is { IsCompleted: false };
         state["app"]!["nativePersonal"] = IsPersonal;
+        state["app"]!["loginSettingApplied"] = IsPersonalInstalled
+            && IsPersonalLoginSettingApplied(state["settings"]!["startAtLogin"]?.GetValue<bool>() == true);
         if (Volatile.Read(ref _lastCloudError) is { } error)
             state["cloud"]!["error"] = $"클라우드 동기화 실패: {error}";
         return state;
@@ -142,8 +156,48 @@ internal sealed class PrototypeApp : System.Windows.Application
             throw new InvalidOperationException("격리 감시가 시작되지 않았습니다.");
         _monitorStore.UpdateSettings(partial);
         _monitorBackup.AfterCommit(false);
+        if (IsPersonalInstalled) ApplyPersonalLoginSetting();
         _window?.SendState();
         return ReadState();
+    }
+
+    private void ApplyPersonalLoginSetting()
+    {
+        if (_stateReader is null || !IsPersonalInstalled) return;
+        var enabled = _stateReader.Read()["settings"]!["startAtLogin"]?.GetValue<bool>() == true;
+        using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
+            ?? throw new IOException("Windows 시작 항목을 열 수 없습니다.");
+        var current = key.GetValue(RunValueName) as string;
+        var oldExecutable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Programs", "youtube-live-pulse", "라이브 펄스.exe");
+        var oldCommand = $"\"{oldExecutable}\" --hidden";
+        var nativeCommand = PersonalRunCommand();
+        if (current is not null && !string.Equals(current, oldCommand, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(current, nativeCommand, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("다른 Windows 시작 항목을 덮어쓰지 않았습니다.");
+        if (string.Equals(current, oldCommand, StringComparison.OrdinalIgnoreCase))
+        {
+            var preserved = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "LivePulseNative", "electron-startup-command.txt");
+            if (!File.Exists(preserved)) File.WriteAllText(preserved, oldCommand);
+        }
+        if (enabled) key.SetValue(RunValueName, nativeCommand, RegistryValueKind.String);
+        else if (current is not null) key.DeleteValue(RunValueName, throwOnMissingValue: false);
+    }
+
+    private bool IsPersonalLoginSettingApplied(bool enabled)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
+        var current = key?.GetValue(RunValueName) as string;
+        return enabled ? string.Equals(current, PersonalRunCommand(), StringComparison.OrdinalIgnoreCase)
+            : current is null;
+    }
+
+    private string PersonalRunCommand()
+    {
+        var database = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LivePulseNative", "live-pulse.sqlite");
+        return $"\"{Environment.ProcessPath}\" --hidden --personal-db \"{database}\"";
     }
 
     internal object ImportCloudConnection()

@@ -1,6 +1,6 @@
 # Live Pulse native migration checkpoint
 
-`LivePulse.Windows` reuses the existing HTML/CSS/JS in WebView2 and keeps monitoring/cloud polling in C# while the window is closed. `--hidden` creates no WebView; closing the window disposes it. Isolated mode uses a disposable DB with notifications and Chrome opens suppressed. Explicit personal mode requires a verified private SQLite import and enables those effects. The installed Electron app and updater have not been replaced.
+`LivePulse.Windows` reuses the existing HTML/CSS/JS in WebView2 and keeps monitoring/cloud polling in C# while the window is closed. `--hidden` creates no WebView; closing the window disposes it. The personal app now runs from `%LOCALAPPDATA%/Programs/LivePulseNative` with a verified private SQLite DB, repeated authenticated Fly sync and a native Windows login entry. The old Electron executable and JSON remain available for manual return; no public native installer/update has been published.
 
 Build with the .NET 10 SDK and the pinned WebView2 package:
 
@@ -10,17 +10,22 @@ dotnet build native/LivePulse.Windows/LivePulse.Windows.csproj -c Release
 
 Run `LivePulse.NativePrototype.exe --lifecycle-smoke` from the build output for three open/close cycles, bridge fixture checks and browser-process exit checks. `--lifecycle-stress` also closes during initialization, reopens immediately and runs 20 cycles with tray memory samples after each browser exit. `--hidden` starts tray-only. The test uses a separate WebView2 profile under the Windows temp directory. The installed app and its Electron updater remain the production path.
 
-For a personal, self-contained build and data preparation after stopping Electron:
+The personal app is already prepared on this workstation. To restart it after quitting, first ensure Electron is closed, then run:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\LivePulseNative\LivePulse.NativePrototype.exe" --personal-db "$env:LOCALAPPDATA\LivePulseNative\live-pulse.sqlite"
+```
+
+For a fresh private setup on another workstation, stop Electron first, build with .NET 10, run the preparation script once and copy the published files to a stable personal folder. The prepared DB path cannot be overwritten by a second run:
 
 ```powershell
 $dotnet10 = Join-Path $env:TEMP 'livepulse-dotnet10/dotnet.exe'
 & $dotnet10 build native/LivePulse.NativeStore.Tests/LivePulse.NativeStore.Tests.csproj -c Release
 & $dotnet10 publish native/LivePulse.Windows/LivePulse.Windows.csproj -c Release -r win-x64 --self-contained true --output artifacts/native-personal-build
 .\native\prepare-personal.ps1 -SourceJson "$env:APPDATA\youtube-live-pulse\live-pulse.json"
-& .\artifacts\native-personal-build\LivePulse.NativePrototype.exe --hidden --personal-db "$env:LOCALAPPDATA\LivePulseNative\live-pulse.sqlite"
 ```
 
-The preparation command refuses a running Electron/native app and an existing target DB. It leaves the installed JSON unchanged, retains a SHA-checked source copy and creates a verified SQLite backup. Use the actual verified Electron `userData` path if it differs from the example. Do not run both runtimes together. The personal build still needs a live data/cloud/effect check and an equal-data tray observation before treating it as the daily app. The optional Data API enhancement, Windows login startup and automatic native updates are not connected. No native installer is published.
+The preparation command refuses a running Electron/native app and an existing target DB. It leaves the installed JSON unchanged, retains a SHA-checked source copy and creates a verified SQLite backup. On this workstation, the private DB imported 2 channels, 245 series and 661,305 samples; repeated Fly sync persisted new minute-spaced observations. An actual-data WebView smoke rendered both channel cards and disposed the browser on close. An interrupted temporary backup and journal were preserved under the private `forensic/` folder after primary and `.bak.1` verification. Do not force-stop during backup. Real live-event notification/Chrome behavior and a controlled long-running memory comparison remain unverified. The optional Data API enhancement and automatic native updates are not connected. No native installer is published.
 
 `LivePulse.DataMigration` is a separate **explicit-path import experiment**. It reads a JSON v3 source without changing it and writes a new SQLite file. Local and cloud histories remain separate; every sample keeps its original array order and raw JSON. A completion marker and source SHA-256 make a repeated import verify and reuse the same DB. The verification reopens the DB, runs SQLite integrity check, and compares each sample's sequence, timestamp, count and raw payload hash. Existing incomplete or mismatched output is rejected instead of overwritten.
 

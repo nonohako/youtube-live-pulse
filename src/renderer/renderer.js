@@ -1582,7 +1582,7 @@ async function handleUpdateCheck() {
 
 function openSettings() {
   const settings = appState.settings;
-  elements.settingStartup.disabled = Boolean(appState.app?.nativePersonal);
+  elements.settingStartup.disabled = Boolean(appState.app?.nativePersonal && !appState.app?.loginSettingApplied);
   elements.settingApiKey.disabled = Boolean(appState.app?.nativePersonal);
   elements.settingStartup.checked = settings.startAtLogin;
   elements.settingLive.checked = settings.autoOpenLive;
@@ -1607,7 +1607,9 @@ function openSettings() {
     ? 'API 키 저장됨 · 공식 채널·영상 통계를 사용합니다. 구독자 수는 공개 정책상 반올림됩니다.'
     : 'API 키 없음 · 공개 페이지로 영상 감지와 조회수 수집을 계속합니다.';
   elements.startupHelp.textContent = appState.app?.nativePersonal
-    ? '개인용 빌드에서는 Windows 시작 등록을 아직 적용하지 않습니다.'
+    ? (appState.app?.loginSettingApplied
+      ? 'Windows 시작 시 개인용 앱을 실행합니다.'
+      : '개인용 앱의 고정 실행 경로에서 시작 등록을 적용할 수 있습니다.')
     : appState.app?.isPackaged
     ? 'Windows 시작 앱 설정에 반영됩니다.'
     : '개발 실행 중에는 등록하지 않으며, 설치본에서 적용됩니다.';

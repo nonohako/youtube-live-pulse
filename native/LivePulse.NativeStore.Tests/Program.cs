@@ -264,10 +264,21 @@ var videoPlan2 = MonitorChangePlanner.Plan(channelId, videoNext.Tracking,
     videoNext.LastSubscriberSample, settings, snapshot with { CheckedAt = checkedAt.AddMinutes(5) });
 videoStore.Commit(channelId, videoNext.Revision, snapshot with { CheckedAt = checkedAt.AddMinutes(5) },
     videoPlan2, [recordedVideo with { ViewCount = 401 }], checkedAt.AddMinutes(5));
-Require(new NativeStateReader(videoStatsDb).Read(channelId, [(channelId, firstVideo.Id)])
-        ["channels"]![0]!["videoViewHistories"]![0]!["samples"]!.AsArray().Count == 2
+var videoThird = videoStore.Load(channelId);
+var thirdAt = checkedAt.AddMinutes(10);
+var videoPlan3 = MonitorChangePlanner.Plan(channelId, videoThird.Tracking,
+    videoThird.LastSubscriberSample, settings, snapshot with { CheckedAt = thirdAt });
+videoStore.Commit(channelId, videoThird.Revision, snapshot with { CheckedAt = thirdAt },
+    videoPlan3, [recordedVideo with { ViewCount = 402 }], thirdAt);
+var overviewVideoSamples = new NativeStateReader(videoStatsDb).Read()
+    ["channels"]![0]!["videoViewHistories"]![0]!["samples"]!.AsArray();
+Require(overviewVideoSamples.Count == 2
+    && overviewVideoSamples[0]!["count"]!.GetValue<long>() == 400
+    && overviewVideoSamples[1]!["count"]!.GetValue<long>() == 402
+    && new NativeStateReader(videoStatsDb).Read(channelId, [(channelId, firstVideo.Id)])
+        ["channels"]![0]!["videoViewHistories"]![0]!["samples"]!.AsArray().Count == 3
     && StoreImporter.Verify(source, videoStatsDb).Samples == 1,
-    "영상 조회수 변경 기록 또는 이전 원본 보존 오류");
+    "영상 요약 양끝점·상세 전체 기록 또는 이전 원본 보존 오류");
 
 var cloudSource = Path.Combine(folder, "cloud-source.json");
 var cloudDb = Path.Combine(folder, "cloud.sqlite");
