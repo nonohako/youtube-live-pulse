@@ -12,7 +12,7 @@ dotnet build native/LivePulse.Windows/LivePulse.Windows.csproj -c Release
 
 Run `LivePulse.NativePrototype.exe --lifecycle-smoke` from the build output for three open/close cycles, bridge fixture checks and browser-process exit checks. `--lifecycle-stress` also closes during initialization, reopens immediately and runs 20 cycles with tray memory samples after each browser exit. `--hidden` starts tray-only. The test uses a separate WebView2 profile under the Windows temp directory. The installed app and its Electron updater remain the production path.
 
-The personal app is already prepared on this workstation. To restart it after quitting, first ensure Electron is closed, then run:
+The personal app is prepared on this workstation. Close Electron, then double-click the desktop **라이브 펄스 (네이티브)** shortcut or the installed `LivePulse.NativePrototype.exe`. No arguments are needed at the fixed installation path; a repeated launch opens the existing window. Missing or invalid personal data shows an error instead of a fixture. The following explicit command also remains supported:
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\LivePulseNative\LivePulse.NativePrototype.exe" --personal-db "$env:LOCALAPPDATA\LivePulseNative\live-pulse.sqlite"

@@ -83,7 +83,7 @@ internal sealed class PrototypeApp : System.Windows.Application
             Console.Error.WriteLine($"ISOLATED_MONITOR_START_FAILED {error.Message}");
             Environment.ExitCode = 1;
             if (!_args.Contains("--monitor-smoke"))
-                System.Windows.MessageBox.Show($"격리 감시를 시작하지 못했습니다.\n{error.Message}", "라이브 펄스 시제품");
+                System.Windows.MessageBox.Show($"감시를 시작하지 못했습니다.\n{error.Message}", IsPersonal ? "라이브 펄스" : "라이브 펄스 시제품");
             Quit();
             return;
         }

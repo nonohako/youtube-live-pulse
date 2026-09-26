@@ -2,6 +2,12 @@
 
 Last updated: 2026-09-26
 
+## Normal personal launch completed (2026-09-26)
+
+The installed `%LOCALAPPDATA%/Programs/LivePulseNative/LivePulse.NativePrototype.exe` now automatically uses the existing prepared personal DB when launched with no arguments or only `--hidden`. Development/diagnostic modes keep their explicit isolation. Repeated installed personal launches signal the existing process to show/restore its window, with a per-user local mutex preventing a second tray/store; the DB lease is unchanged. The personal window uses the product icon and no longer displays the development banner. A desktop `라이브 펄스 (네이티브).lnk` points directly to the EXE with no arguments.
+
+Self-contained publish, `NATIVE_STARTUP_TESTS_PASSED` and the isolated real-WebView refresh/actions/close smoke passed. The actual installed no-argument run logged `NATIVE_MONITOR_STARTED personal=True windowCreated=False`, then opened a `라이브 펄스` window. A second launch exited 0 while the original PID 21912 and window handle remained the only native instance. Authenticated cloud sync then completed three pages with 30,685 observations and no logged error. It was left running for the user. The installed host/store hashes matched the tested build, and the previous executable tree is in ignored `artifacts/native-before-default-launch-20260926`. No data migration or Electron replacement was performed. Normal personal use now needs no PowerShell command. Public updater/installer work remains deferred; natural broadcast delivery and equal-data long-term memory are not claimed by this startup verification.
+
 ## Native review fixes applied (2026-09-26)
 
 All three findings below are fixed. `PrototypeWindow` retains a validated subscriber/video scope and uses it for broadcasts, getState, refresh, settings and update-check responses. Invalid scopes leave the prior selection intact; dialog release, channel removal and window disposal clear the relevant selection. Minimized/hidden windows skip background state projection and emit inactive; restore emits active and fresh scoped state, and opening from the tray restores a minimized window. `NativeMonitorScheduler` supplies channel-keyed failures to `NativeStateReader`, which displays failure/recovery and effect errors while preserving the stored successful snapshot/history. Failed-fetch projections suppress stale live/upcoming fields; effect errors do not imply automatic retries of deduplicated effects.

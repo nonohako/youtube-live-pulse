@@ -184,17 +184,16 @@ internal sealed class PrototypeWindow : Window
     {
         _app = app;
         Title = app.IsPersonal ? "라이브 펄스" : "라이브 펄스 · 마이그레이션 시제품";
+        Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(Path.Combine(AppContext.BaseDirectory, "assets", "pulse.ico")));
         Width = 1180;
         Height = 800;
         MinWidth = 900;
         MinHeight = 660;
         _layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _layout.RowDefinitions.Add(new RowDefinition());
-        _layout.Children.Add(new TextBlock
+        if (!app.IsPersonal) _layout.Children.Add(new TextBlock
         {
-            Text = app.IsPersonal
-                ? "개인용 네이티브 실행 · 창을 닫아도 감시와 동기화는 계속됩니다."
-                : app.HasRealState
+            Text = app.HasRealState
                 ? "격리 감시 데이터 표시 중 · 실제 알림과 Chrome 열기는 아직 연결되지 않았습니다."
                 : "마이그레이션 수명 시제품 · 실제 감시는 아직 연결되지 않았습니다.",
             Padding = new Thickness(12),
