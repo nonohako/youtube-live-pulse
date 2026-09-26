@@ -1,6 +1,11 @@
 # Agent Guide
 
-Last maintained: 2026-09-25 after the private personal-data run, actual Fly sync and fixed-path native startup. The public production release remains Electron v1.12.1.
+Last maintained: 2026-09-26 after the native migration source review and focused checks. The public production release remains Electron v1.12.1.
+
+## Native review checkpoint (2026-09-26)
+
+- Review found three unresolved UI integration issues: `watchAnalytics` does not retain the selected scope for subsequent broadcasts, scheduler channel failures are not projected into channel status/error, and minimized windows still receive state broadcasts without an inactive event. Fix these before treating personal UI parity as complete; preserve the selected full histories during refresh and clear scope on dialog/window close.
+- Core/store harnesses and the Windows Release build passed. The actual renderer state callback reproduced detailed histories being replaced by overview projections (150 subscriber points to 120, 8 video points to 2). This was an isolated callback reproduction, not a live WebView interaction. No personal DB, installed binary or startup setting changed during review. See the newest handoff checkpoint for limits.
 
 ## Current execution priority (2026-09-25)
 

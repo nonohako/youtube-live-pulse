@@ -1,6 +1,16 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
+
+## Native migration review (2026-09-26)
+
+Personal monitoring, sync, storage and WebView actions are connected, but the review found three remaining integration defects. No runtime fixes were made in this review:
+
+- P1: `PrototypeWindow.watchAnalytics` returns selected histories once without retaining the scope. `SendState` calls unscoped `ReadState` every 30 seconds and after cloud sync/actions. The real renderer `onState` callback replaces full detail histories with overview projections because `historiesUnchanged` is absent. An isolated Node VM invocation of that exact callback reproduced 150 subscriber points becoming 120 and 8 video points becoming 2. This changes open charts and their calculations, not stored records. Retain and validate the window's scope for broadcasts and reset it on release/disposal.
+- P2: Per-channel fetch failures are caught in `NativeMonitorScheduler.LastSweep.Errors`, but the host does not expose them during normal operation. `NativeStateReader` always clears channel errors and reports any saved snapshot as online. An old live snapshot can therefore remain displayed after subsequent complete fetch failures. Propagate current failure/recovery state without discarding the last successful snapshot; effect failures also currently have no user-visible path.
+- P2: `PrototypeWindow.SendState` does not check minimized/hidden state, and the host never emits the bridge's `active` event. Minimizing continues state projection/serialization and the renderer countdown. Wire window state changes to inactive/active events, skip inactive broadcasts, and send fresh state on restore.
+
+Verification: `CORE_TESTS_PASSED`, `NATIVE_STORE_TESTS_PASSED`, and Windows Release build with zero warnings/errors. The initial sandbox build could not read the Windows SDK directory; the identical build succeeded with normal Windows permissions. Existing store tests exercise channel failure isolation, but do not test its UI presentation or scope retention across broadcasts. No native process was found in the process snapshot. Live WebView interaction, real broadcast notification/Chrome activation, current personal DB health and equal-data long-running memory were not verified in this review. The personal DB, installed app and login setting were untouched. No version/tag/installer change is needed for this documentation checkpoint. Public updater/installer work remains deferred. A no-argument native launch still intentionally opens the fixture, so personal use requires the documented `--personal-db` command.
 
 ## Current personal migration state
 
