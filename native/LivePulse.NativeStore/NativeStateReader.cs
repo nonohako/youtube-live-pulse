@@ -18,7 +18,8 @@ public sealed class NativeStateReader
     }
 
     public JsonObject Read(string? subscriberId = null,
-        IReadOnlyList<(string ChannelId, string VideoId)>? selectedVideos = null)
+        IReadOnlyList<(string ChannelId, string VideoId)>? selectedVideos = null,
+        MonitorSweepResult? monitorSweep = null)
     {
         selectedVideos ??= [];
         if (selectedVideos.Count > 4) throw new InvalidDataException("분석 영상은 최대 네 개입니다.");
@@ -62,6 +63,31 @@ public sealed class NativeStateReader
             channel["snapshot"] = snapshot is null ? null : JsonNode.Parse(snapshot);
             channel["status"] = snapshot is null ? "waiting" : "online";
             channel["error"] = null;
+            if (monitorSweep?.ChannelErrors.TryGetValue(id, out var failure) == true)
+            {
+                channel["status"] = "error";
+                channel["error"] = failure;
+                // Preserve the saved snapshot, but never present stale broadcasts as current.
+                if (channel["snapshot"] is JsonObject stale)
+                {
+                    stale["live"] = null;
+                    stale["upcoming"] = new JsonArray();
+                    stale["warnings"] = new JsonArray(JsonValue.Create(failure));
+                }
+            }
+            else if (monitorSweep?.Completed.FirstOrDefault(item => item.ChannelId == id) is { EffectErrors.Count: > 0 } run)
+            {
+                channel["status"] = "degraded";
+                channel["error"] = string.Join(" · ", run.EffectErrors);
+                if (channel["snapshot"] is JsonObject current)
+                {
+                    // The renderer adds an automatic-retry promise to snapshot warnings.
+                    // Effects are deduplicated, so expose their errors without that promise.
+                    var warnings = (current["warnings"] as JsonArray)?.Select(item => item!.GetValue<string>()) ?? [];
+                    channel["error"] = string.Join(" · ", warnings.Concat(run.EffectErrors));
+                    current["warnings"] = new JsonArray();
+                }
+            }
             channel["subscriberHistory"] = Samples(connection, id, "subscriber", "", full: subscriberId == id);
             channel["videoViewHistories"] = Videos(connection, id, selectedVideos);
             channels.Add(channel);

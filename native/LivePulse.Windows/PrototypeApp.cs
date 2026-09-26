@@ -102,6 +102,8 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (_quitting) return;
         if (_window is not null)
         {
+            if (_window.WindowState == WindowState.Minimized) _window.WindowState = WindowState.Normal;
+            _window.Show();
             _window.Activate();
             return;
         }
@@ -118,7 +120,7 @@ internal sealed class PrototypeApp : System.Windows.Application
     {
         if (_stateReader is null)
             return JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixture-state.json")))!.AsObject();
-        var state = _stateReader.Read(subscriberId, selectedVideos);
+        var state = _stateReader.Read(subscriberId, selectedVideos, _monitorScheduler?.LastSweep);
         state["monitor"]!["running"] = _monitorTask is { IsCompleted: false };
         state["app"]!["nativePersonal"] = IsPersonal;
         state["app"]!["loginSettingApplied"] = IsPersonalInstalled
@@ -150,7 +152,7 @@ internal sealed class PrototypeApp : System.Windows.Application
         return new { ok = true };
     }
 
-    internal JsonObject UpdateSettings(JsonElement partial)
+    internal void UpdateSettings(JsonElement partial)
     {
         if (_monitorStore is null || _monitorBackup is null)
             throw new InvalidOperationException("격리 감시가 시작되지 않았습니다.");
@@ -158,7 +160,6 @@ internal sealed class PrototypeApp : System.Windows.Application
         _monitorBackup.AfterCommit(false);
         if (IsPersonalInstalled) ApplyPersonalLoginSetting();
         _window?.SendState();
-        return ReadState();
     }
 
     private void ApplyPersonalLoginSetting()
@@ -245,13 +246,12 @@ internal sealed class PrototypeApp : System.Windows.Application
             skippedInvalid = workbook.SkippedInvalid, skippedDuplicate = workbook.SkippedDuplicate };
     }
 
-    internal async Task<JsonObject> RefreshAsync()
+    internal async Task RefreshAsync()
     {
         if (_monitorScheduler is null || _monitorCancellation is null)
             throw new InvalidOperationException("격리 감시가 시작되지 않았습니다.");
         await _monitorScheduler.RunNowAsync(_monitorCancellation.Token);
         _window?.SendState();
-        return ReadState();
     }
 
     internal object OpenUrl(string address)
@@ -558,6 +558,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                 throw new InvalidOperationException("실제 상태 브리지 또는 채널 카드 표시 실패");
             if (_args.Contains("--ui-smoke-actions") && !await window.ProbeActionsAsync())
                 throw new InvalidOperationException("채널 추가·삭제 또는 설정 저장 실패");
+            if (_args.Contains("--ui-smoke-refresh")) await window.ProbeRefreshAsync();
             Console.WriteLine($"NATIVE_UI_SMOKE_PASSED channels={channelCount} browser={window.BrowserProcessId}");
             CloseToTray(window);
             var timer = System.Diagnostics.Stopwatch.StartNew();

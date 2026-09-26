@@ -4,6 +4,8 @@
 
 Build with the .NET 10 SDK and the pinned WebView2 package:
 
+2026-09-26: the personal build now preserves selected chart histories across timer/cloud refreshes, displays channel collection failures and recovery, and pauses state broadcasts/countdowns while minimized. The stopped fixed-path installation was backed up and updated; its next personal launch uses the fixes. To reproduce the regression smoke, use NativeStore.Tests `--ui-fixture ABSOLUTE_NEW_OUTPUT.probe.sqlite` under ignored `artifacts/migration-isolated-data`, then run the native executable with `--hidden --isolated-monitor-db ABSOLUTE_NEW_OUTPUT.probe.sqlite --ui-smoke --ui-smoke-refresh --ui-smoke-actions`. The fixture has more than 120 subscriber samples and a known multi-sample video. This verifies actual WebView interactions with suppressed Windows effects, not natural broadcast notification delivery.
+
 ```powershell
 dotnet build native/LivePulse.Windows/LivePulse.Windows.csproj -c Release
 ```

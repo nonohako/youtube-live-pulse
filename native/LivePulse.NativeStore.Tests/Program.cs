@@ -232,6 +232,13 @@ var firstRun = await runner.RunChannelOnceAsync(channelId, settings);
 Require(firstRun.SavedRevision == 1 && firstRun.EventsPlanned == 1 && firstRun.NotificationsPlanned == 1
     && firstRun.UrlsPlanned == 1 && firstRun.EffectErrors.Count == 1,
     "감시 실행의 저장·효과 계획 오류");
+var effectState = new NativeStateReader(runnerDb).Read(monitorSweep:
+    new MonitorSweepResult(checkedAt, [firstRun], []))["channels"]![0]!;
+Require(effectState["status"]!.GetValue<string>() == "degraded"
+    && effectState["error"]!.GetValue<string>().Contains("알림 실패")
+    && effectState["snapshot"]!["live"] is not null
+    && effectState["snapshot"]!["warnings"]!.AsArray().Count == 0,
+    "알림 실패를 숨기거나 정상 수집된 LIVE를 제거하거나 자동 재시도를 약속함");
 Require(fakeEffects.RevisionsObserved.SequenceEqual(new long[] { 1, 1 }) && fakeEffects.OpenedUrls.Count == 1,
     "SQLite 커밋 전에 알림 또는 URL 열기를 시도함");
 var secondRun = await runner.RunChannelOnceAsync(channelId, settings);
@@ -725,6 +732,24 @@ using (var cancellation = new CancellationTokenSource())
         && schedulerStore.Load(channelId).Revision == 3
         && schedulerStore.Load(secondChannelId).Revision == 1,
         "한 채널의 네트워크 오류가 다른 채널 확인을 막음");
+    var failedState = new NativeStateReader(schedulerDb).Read(monitorSweep: scheduler.LastSweep);
+    var failedChannel = failedState["channels"]!.AsArray().Single(item => (string?)item!["id"] == channelId)!;
+    Require(failedChannel["status"]!.GetValue<string>() == "error"
+        && failedChannel["error"]!.GetValue<string>().Contains("fixture network failure")
+        && failedChannel["snapshot"]!["live"] is null
+        && failedChannel["snapshot"]!["upcoming"]!.AsArray().Count == 0
+        && failedChannel["subscriberHistory"]!.AsArray().Count > 0
+        && failedState["channels"]!.AsArray().Single(item => (string?)item!["id"] == secondChannelId)!["error"] is null,
+        "채널 오류 표시, 오래된 방송 숨김 또는 정상 채널 격리 실패");
+    Require(new NativeStateReader(schedulerDb).Read()["channels"]![0]!["snapshot"]!["live"] is not null,
+        "오류 투영이 저장된 성공 스냅샷을 변경함");
+    var recovered = new NativeMonitorScheduler(schedulerStore,
+        new NativeMonitorRunner(schedulerStore, new FixtureSnapshotSource(snapshot), schedulerEffects));
+    await recovered.RunNowAsync();
+    var recoveredChannel = new NativeStateReader(schedulerDb).Read(monitorSweep: recovered.LastSweep)["channels"]![0]!;
+    Require(recoveredChannel["status"]!.GetValue<string>() == "online" && recoveredChannel["error"] is null
+        && recoveredChannel["snapshot"]!["live"] is not null,
+        "수집 성공 후 오류 또는 오래된 방송 숨김이 남음");
 }
 using (var cancellation = new CancellationTokenSource())
 {
@@ -785,6 +810,13 @@ var tempRoot = Path.GetFullPath(Path.GetTempPath());
 if (!Path.GetFullPath(folder).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException("테스트 임시 경로가 안전하지 않습니다.");
 SqliteConnection.ClearAllPools();
+if (args is ["--ui-fixture", var fixtureOutput])
+{
+    videoStore.ImportSubscriberDays(channelId, Enumerable.Range(0, 150)
+        .Select(index => new ImportedSubscriberDay(new DateOnly(2025, 1, 1).AddDays(index), 100 + index)).ToArray());
+    File.Copy(videoStatsDb, Path.GetFullPath(fixtureOutput), overwrite: false);
+    Console.WriteLine("NATIVE_UI_FIXTURE_CREATED");
+}
 Directory.Delete(folder, recursive: true);
 Console.WriteLine("NATIVE_STORE_TESTS_PASSED");
 

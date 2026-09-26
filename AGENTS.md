@@ -1,11 +1,13 @@
 # Agent Guide
 
-Last maintained: 2026-09-26 after the native migration source review and focused checks. The public production release remains Electron v1.12.1.
+Last maintained: 2026-09-26 after fixing and verifying native chart refresh, monitor error presentation and minimized-window updates. The public production release remains Electron v1.12.1.
 
 ## Native review checkpoint (2026-09-26)
 
-- Review found three unresolved UI integration issues: `watchAnalytics` does not retain the selected scope for subsequent broadcasts, scheduler channel failures are not projected into channel status/error, and minimized windows still receive state broadcasts without an inactive event. Fix these before treating personal UI parity as complete; preserve the selected full histories during refresh and clear scope on dialog/window close.
-- Core/store harnesses and the Windows Release build passed. The actual renderer state callback reproduced detailed histories being replaced by overview projections (150 subscriber points to 120, 8 video points to 2). This was an isolated callback reproduction, not a live WebView interaction. No personal DB, installed binary or startup setting changed during review. See the newest handoff checkpoint for limits.
+- The three reviewed issues are fixed. Keep the validated analytics scope per WebView session for broadcasts and state-returning actions; rejected requests must preserve it, and dialog release, channel removal and window disposal must release the relevant scope. Never replace open-chart histories with overview endpoints on a timer/cloud refresh.
+- Project the latest scheduler channel failure/recovery into UI state. Keep saved snapshots/history intact, hide stale live/upcoming indications after a failed sweep, and expose effect failures without promising automatic retries of deduplicated notifications.
+- Minimized/hidden windows skip background projection/broadcast and receive an inactive event to stop countdowns. Restore sends active plus fresh scoped state; tray-open restores a minimized window. Closing still disposes WebView while monitoring/cloud loops continue.
+- Core/store harnesses and the self-contained EXE WebView smoke passed. `--ui-smoke-refresh` covers full subscriber/video histories across broadcasts, rejected scopes, dialog release, minimized suppression/countdown pause and restore. Its fixture is generated with NativeStore.Tests `--ui-fixture ABSOLUTE_OUTPUT` and must identify its multi-sample video by ID, not mutable library ordering. The fixed-path personal binaries were backed up and replaced; DB and login settings were untouched. See handoff for remaining live-event/memory limits.
 
 ## Current execution priority (2026-09-25)
 

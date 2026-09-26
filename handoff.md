@@ -2,6 +2,14 @@
 
 Last updated: 2026-09-26
 
+## Native review fixes applied (2026-09-26)
+
+All three findings below are fixed. `PrototypeWindow` retains a validated subscriber/video scope and uses it for broadcasts, getState, refresh, settings and update-check responses. Invalid scopes leave the prior selection intact; dialog release, channel removal and window disposal clear the relevant selection. Minimized/hidden windows skip background state projection and emit inactive; restore emits active and fresh scoped state, and opening from the tray restores a minimized window. `NativeMonitorScheduler` supplies channel-keyed failures to `NativeStateReader`, which displays failure/recovery and effect errors while preserving the stored successful snapshot/history. Failed-fetch projections suppress stale live/upcoming fields; effect errors do not imply automatic retries of deduplicated effects.
+
+Verification: Core and NativeStore harnesses passed, including failure/recovery, successful-channel isolation, saved-snapshot preservation and effect-error presentation. Windows Release build and self-contained publish passed. Both the framework-dependent run and final self-contained EXE passed real WebView `--ui-smoke --ui-smoke-refresh --ui-smoke-actions`: subscriber/video detail retention, invalid-scope preservation, dialog release, minimize/countdown pause/no broadcasts, restore, add/remove/settings and browser exit on close. The first self-contained rerun exposed a test-only assumption that the first library video was the fixture; the probe now selects its fixed video ID and passed with real public monitoring active. The synthetic DB has no cloud token and isolated mode suppresses Windows effects. No shared renderer changes or Electron release were needed.
+
+The stopped fixed-path personal installation at `%LOCALAPPDATA%/Programs/LivePulseNative` was updated from `artifacts/native-personal-review-fixes`; the executable, host/store/core DLLs and bridge hashes match the tested build. The prior binary tree is preserved under ignored `artifacts/native-before-review-fixes-20260926`. Personal SQLite/JSON data and login settings were not changed, and the personal app was not started during this task; the next normal personal launch uses the fixes. Public Electron v1.12.1/update feed remains unchanged. Real broadcast notification/Chrome activation, personal DB health and equal-data long-term memory remain outside this fixture verification.
+
 ## Native migration review (2026-09-26)
 
 Personal monitoring, sync, storage and WebView actions are connected, but the review found three remaining integration defects. No runtime fixes were made in this review:

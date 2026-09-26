@@ -6,7 +6,10 @@ public sealed record MonitorPollConfiguration(TimeSpan Interval, IReadOnlyList<s
     MonitorSettings Settings);
 
 public sealed record MonitorSweepResult(DateTimeOffset FinishedAt, IReadOnlyList<MonitorRunResult> Completed,
-    IReadOnlyList<string> Errors);
+    IReadOnlyList<string> Errors)
+{
+    public IReadOnlyDictionary<string, string> ChannelErrors { get; init; } = new Dictionary<string, string>();
+}
 
 // Explicit-path polling proof. The host owns cancellation; no installed-app startup is connected.
 public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonitorRunner runner,
@@ -55,6 +58,7 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
             }
             var completed = new List<MonitorRunResult>();
             var errors = new List<string>();
+            var channelErrors = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var channelId in configuration.ChannelIds)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -67,9 +71,14 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
                     throw;
                 }
                 catch (Exception error) when (error is not OutOfMemoryException)
-                { errors.Add($"채널 {channelId} 확인 실패: {error.Message}"); }
+                {
+                    var message = $"채널 {channelId} 확인 실패: {error.Message}";
+                    errors.Add(message);
+                    channelErrors[channelId] = message;
+                }
             }
-            var result = new MonitorSweepResult(DateTimeOffset.UtcNow, completed, errors);
+            var result = new MonitorSweepResult(DateTimeOffset.UtcNow, completed, errors)
+            { ChannelErrors = channelErrors };
             Volatile.Write(ref lastSweep, result);
             return (result, configuration.Interval);
         }
