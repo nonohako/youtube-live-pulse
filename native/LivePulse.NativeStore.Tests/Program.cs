@@ -534,32 +534,38 @@ Require((await checkpointRunner.RunChannelOnceAsync(channelId, settings)).SavedR
 checkpointClock = checkedAt.AddMinutes(1);
 Require((await checkpointRunner.RunChannelOnceAsync(channelId, settings)).SavedRevision == 2
     && checkpoint.BackupCount == 1 && !File.Exists(checkpointDb + ".bak.2"),
-    "5분 전 저장에서 불필요한 백업을 생성함");
-checkpointClock = checkedAt.AddMinutes(5);
+    "백업 간격 전 저장에서 불필요한 백업을 생성함");
+checkpointClock = checkedAt + NativeBackupCheckpoint.BackupInterval;
 Require((await checkpointRunner.RunChannelOnceAsync(channelId, settings)).SavedRevision == 3
     && checkpoint.BackupCount == 2
     && new NativeMonitorStore(checkpointDb + ".bak.1").Load(channelId).Revision == 3
     && new NativeMonitorStore(checkpointDb + ".bak.2").Load(channelId).Revision == 1,
-    "5분 후 두 세대 백업 회전이 실패함");
+    "백업 간격 후 두 세대 백업 회전이 실패함");
 
 var secondLive = live with { Id = "secondlive1", Url = "https://www.youtube.com/watch?v=secondlive1" };
 var changedLiveSnapshot = snapshot with { Live = secondLive, CheckedAt = checkedAt.AddMinutes(11) };
-File.WriteAllBytes(checkpointDb + ".backup.tmp", [1, 2, 3]);
-checkpointClock = checkedAt.AddMinutes(11);
+// A directory at the temporary path makes the SQLite backup itself fail.
+Directory.CreateDirectory(checkpointDb + ".backup.tmp");
+checkpointClock = checkpointClock.AddMinutes(1);
 var failingCheckpointRunner = new NativeMonitorRunner(checkpointStore,
     new FixtureSnapshotSource(changedLiveSnapshot), checkpointEffects, checkpoint);
-ExpectFailure(() => failingCheckpointRunner.RunChannelOnceAsync(channelId, settings).GetAwaiter().GetResult(),
-    "백업 실패 후 알림 또는 URL 효과를 계속 실행함");
-Require(checkpointStore.Load(channelId).Revision == 4 && checkpoint.BackupCount == 2
-    && checkpointEffects.OpenedUrls.Count == 1,
-    "백업 실패 뒤 커밋 상태 또는 효과 차단이 올바르지 않음");
-var fatalScheduler = new NativeMonitorScheduler(checkpointStore, failingCheckpointRunner,
+var failedBackupRun = await failingCheckpointRunner.RunChannelOnceAsync(channelId, settings);
+Require(failedBackupRun.SavedRevision == 4 && checkpoint.BackupCount == 2
+    && checkpoint.LastError is not null && checkpointEffects.OpenedUrls.Count == 2
+    && checkpointStore.Load(channelId).Tracking.OpenedBroadcastIds.Contains("live:secondlive1"),
+    "백업 실패가 이미 저장된 새 방송 효과를 막거나 오류를 기록하지 않음");
+var continuingScheduler = new NativeMonitorScheduler(checkpointStore, failingCheckpointRunner,
     (_, _) => Task.CompletedTask);
-ExpectFailure(() => fatalScheduler.RunAsync(CancellationToken.None).GetAwaiter().GetResult(),
-    "백업 실패 후 주기 감시가 계속됨");
-Require(fatalScheduler.LastSweep is { Completed.Count: 0, Errors.Count: 1 }
-    && checkpointStore.Load(channelId).Revision == 5 && checkpointEffects.OpenedUrls.Count == 1,
-    "백업 실패를 감시 오류로 기록하지 않거나 효과를 반복함");
+Require((await continuingScheduler.RunNowAsync()).Errors.Count == 0
+    && checkpointStore.Load(channelId).Revision == 5 && checkpointEffects.OpenedUrls.Count == 2
+    && checkpoint.BackupCount == 2,
+    "백업 실패 뒤 감시가 멈추거나 재시도 간격 전에 백업을 반복하거나 방송을 다시 엶");
+Directory.Delete(checkpointDb + ".backup.tmp");
+checkpointClock = checkpointClock + NativeBackupCheckpoint.RetryInterval;
+await continuingScheduler.RunNowAsync();
+Require(checkpoint.BackupCount == 3 && checkpoint.LastError is null
+    && new NativeMonitorStore(checkpointDb + ".bak.1").Load(channelId).Revision == 6,
+    "재시도 간격 후 백업을 복구하지 못함");
 Require(StoreImporter.Verify(source, checkpointDb).Samples == 1,
     "백업 실패 뒤 이전 원본 표본이 바뀜");
 
@@ -589,16 +595,26 @@ forcedClock = checkedAt.AddMinutes(2);
 await secondForcedRunner.RunChannelOnceAsync(channelId, settings);
 Require(forcedCheckpoint.BackupCount == 2 && forcedEffects.OpenedUrls.Count == 2,
     "같은 방송을 다시 열거나 불필요한 백업을 만듦");
+// Residue from a backup interrupted by shutdown: a partial snapshot and its hot journal.
 File.WriteAllBytes(forcedDb + ".backup.tmp", [1]);
+File.WriteAllBytes(forcedDb + ".backup.tmp-journal", [2]);
 forcedClock = checkedAt.AddMinutes(3);
 var thirdLive = live with { Id = "thirdlive11", Url = "https://www.youtube.com/watch?v=thirdlive11" };
 var thirdForcedRunner = new NativeMonitorRunner(forcedStore,
     new FixtureSnapshotSource(snapshot with { Live = thirdLive, CheckedAt = forcedClock }),
     forcedEffects, forcedCheckpoint);
-ExpectFailure(() => thirdForcedRunner.RunChannelOnceAsync(channelId, settings).GetAwaiter().GetResult(),
-    "새 방송의 긴급 백업 실패 후 URL을 열었음");
-Require(forcedStore.Load(channelId).Revision == 4 && forcedEffects.OpenedUrls.Count == 2,
-    "긴급 백업 실패에서 이미 저장한 키 또는 효과 차단이 깨짐");
+await thirdForcedRunner.RunChannelOnceAsync(channelId, settings);
+Require(forcedStore.Load(channelId).Revision == 4 && forcedEffects.OpenedUrls.Count == 3
+    && forcedCheckpoint.BackupCount == 3 && forcedCheckpoint.LastError is null
+    && !File.Exists(forcedDb + ".backup.tmp") && !File.Exists(forcedDb + ".backup.tmp-journal")
+    && new NativeMonitorStore(forcedDb + ".bak.1").Load(channelId).Tracking.OpenedBroadcastIds
+        .Contains("live:thirdlive11"),
+    "중단된 백업 잔여 파일을 정리하지 못하거나 새 방송 키를 백업하지 못함");
+File.WriteAllBytes(forcedDb + ".backup.tmp", [1]);
+File.WriteAllBytes(forcedDb + ".bak.2", [9]);
+ExpectFailure(() => NativeStoreRecovery.CreateBackup(forcedDb),
+    "손상된 백업 세대가 있는데 중단된 임시 백업을 지움");
+Require(File.Exists(forcedDb + ".backup.tmp"), "검증 실패 후 임시 백업을 지움");
 
 var schedulerDb = Path.Combine(folder, "scheduler.sqlite");
 StoreImporter.Import(source, schedulerDb);
@@ -793,7 +809,6 @@ Require(fallback.Source == runnerDb + ".bak.2"
     "최신 백업 손상 시 이전 세대로 복구하지 못함");
 
 File.Copy(runnerDb, runnerDb + ".backup.tmp");
-ExpectFailure(() => NativeStoreRecovery.CreateBackup(runnerDb), "미처리 임시 백업을 덮어씀");
 File.WriteAllBytes(runnerDb, [6, 6, 6]);
 var interrupted = NativeStoreRecovery.Recover(runnerDb);
 Require(interrupted.Source == runnerDb + ".backup.tmp"
@@ -806,6 +821,37 @@ Require(File.ReadAllBytes(runnerDb).SequenceEqual(new byte[] { 6, 6, 6 }),
     "저널이 있을 때 손상 원본을 바꿈");
 File.Delete(runnerDb + "-wal");
 ExpectFailure(() => NativeStoreRecovery.Recover(invalidDb), "검증된 백업 없이 복구함");
+
+// A process killed mid-commit leaves a hot rollback journal beside a valid primary.
+var startupDb = Path.Combine(folder, "startup.sqlite");
+var crashedDb = Path.Combine(folder, "crashed.sqlite");
+File.Copy(forcedDb, startupDb);
+Require(!NativeStoreRecovery.OpenForStartup(startupDb).Restored, "정상 DB를 시작 시 복구함");
+using (var writer = new SqliteConnection(new SqliteConnectionStringBuilder
+       { DataSource = startupDb, Pooling = false }.ToString()))
+{
+    writer.Open();
+    using var begin = writer.CreateCommand();
+    // A tiny cache forces SQLite to write changed pages into the DB file before commit.
+    begin.CommandText = """
+        PRAGMA cache_size=1; BEGIN IMMEDIATE;
+        UPDATE samples SET payload_json=payload_json||' ';
+        CREATE TABLE filler(x);
+        WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i<200)
+        INSERT INTO filler SELECT randomblob(4000) FROM c;
+        """;
+    begin.ExecuteNonQuery();
+    Require(File.Exists(startupDb + "-journal"), "시험용 저널을 만들지 못함");
+    File.Copy(startupDb, crashedDb);
+    File.Copy(startupDb + "-journal", crashedDb + "-journal");
+    begin.CommandText = "ROLLBACK";
+    begin.ExecuteNonQuery();
+}
+ExpectFailure(() => NativeStoreRecovery.Validate(crashedDb), "읽기 전용 검증이 hot journal DB를 통과함");
+var crashed = NativeStoreRecovery.OpenForStartup(crashedDb);
+Require(!crashed.Restored && !File.Exists(crashedDb + "-journal")
+    && StoreImporter.Verify(source, crashedDb).Samples == 1,
+    "강제 종료 저널이 남은 정상 DB를 시작하지 못하거나 원본 표본이 바뀜");
 var tempRoot = Path.GetFullPath(Path.GetTempPath());
 if (!Path.GetFullPath(folder).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException("테스트 임시 경로가 안전하지 않습니다.");

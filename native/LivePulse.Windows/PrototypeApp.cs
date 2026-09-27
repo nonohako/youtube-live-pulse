@@ -18,7 +18,10 @@ internal sealed class PrototypeApp : System.Windows.Application
     private Forms.NotifyIcon? _tray;
     private PrototypeWindow? _window;
     private bool _quitting;
-    private readonly DispatcherTimer _heartbeat = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly DispatcherTimer _heartbeat = new() { Interval = TimeSpan.FromSeconds(1) };
+    private bool _lastSweeping;
+    private MonitorSweepResult? _lastSweepSent;
+    private int _ticksSinceState;
     private CancellationTokenSource? _monitorCancellation;
     private Task? _monitorTask;
     private Task? _cloudTask;
@@ -35,19 +38,19 @@ internal sealed class PrototypeApp : System.Windows.Application
     private string? _lastNotificationUrl;
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "라이브 펄스";
-    internal bool IsPersonal => _args.Contains("--personal-db");
-    internal bool IsPersonalInstalled => IsPersonal && string.Equals(
-        Environment.ProcessPath,
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs", "LivePulseNative", "LivePulse.NativePrototype.exe"),
-        StringComparison.OrdinalIgnoreCase);
-    internal string WebViewProfilePath => IsPersonal
-        ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LivePulseNative", "WebView2")
-        : Path.Combine(Path.GetTempPath(), "LivePulseNativePrototype", "WebView2");
+    private const string DesktopShortcutName = "라이브 펄스 (네이티브).lnk";
+    private readonly PortableLayout? _personal;
+    internal bool IsPersonal => _personal is not null;
+    internal string WebViewProfilePath => _personal?.WebViewProfile
+        ?? Path.Combine(Path.GetTempPath(), "LivePulseNativePrototype", "WebView2");
+    // Logs stay with the data so rebuilding app/ never discards them.
+    private string LogDirectory => _personal is { } layout && Directory.Exists(layout.DataDirectory)
+        ? layout.DataDirectory : AppContext.BaseDirectory;
 
-    internal PrototypeApp(string[] args)
+    internal PrototypeApp(string[] args, PortableLayout? personal = null)
     {
         _args = args;
+        _personal = personal;
         _monitorEffects = new PrototypeEffectSink(this, IsPersonal);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
     }
@@ -71,19 +74,42 @@ internal sealed class PrototypeApp : System.Windows.Application
             if (_lastNotificationUrl is { } url) OpenUrl(url);
         };
         // The timer refreshes a visible UI only. Monitor and cloud loops run independently.
-        _heartbeat.Tick += (_, _) => _window?.SendState();
+        // Sweep start/finish is pushed promptly; otherwise the full state refreshes every 30 s.
+        _heartbeat.Tick += (_, _) =>
+        {
+            if (_window is null) return;
+            var sweeping = _monitorScheduler?.IsSweeping == true;
+            var last = _monitorScheduler?.LastSweep;
+            if (sweeping == _lastSweeping && ReferenceEquals(last, _lastSweepSent) && ++_ticksSinceState < 30) return;
+            _lastSweeping = sweeping;
+            _lastSweepSent = last;
+            _ticksSinceState = 0;
+            _window.SendState();
+        };
         _heartbeat.Start();
         try
         {
             StartIsolatedMonitor();
-            if (IsPersonalInstalled) ApplyPersonalLoginSetting();
+            if (IsPersonal) RepairPersonalShellEntries();
         }
         catch (Exception error)
         {
             Console.Error.WriteLine($"ISOLATED_MONITOR_START_FAILED {error.Message}");
             Environment.ExitCode = 1;
+            var diagnostic = "";
+            if (IsPersonal)
+            {
+                try
+                {
+                    var path = Path.Combine(LogDirectory, "startup-error.log");
+                    File.AppendAllText(path, $"{DateTimeOffset.Now:O}\nExecutable: {Environment.ProcessPath}\n"
+                        + $"Database: {_personal!.Database}\n{error}\n\n");
+                    diagnostic = $"\n\n진단 기록: {path}";
+                }
+                catch (Exception) { /* Logging must not hide the original startup failure. */ }
+            }
             if (!_args.Contains("--monitor-smoke"))
-                System.Windows.MessageBox.Show($"감시를 시작하지 못했습니다.\n{error.Message}", IsPersonal ? "라이브 펄스" : "라이브 펄스 시제품");
+                System.Windows.MessageBox.Show($"감시를 시작하지 못했습니다.\n{error.Message}{diagnostic}", IsPersonal ? "라이브 펄스" : "라이브 펄스 시제품");
             Quit();
             return;
         }
@@ -121,9 +147,13 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (_stateReader is null)
             return JsonNode.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "fixture-state.json")))!.AsObject();
         var state = _stateReader.Read(subscriberId, selectedVideos, _monitorScheduler?.LastSweep);
-        state["monitor"]!["running"] = _monitorTask is { IsCompleted: false };
+        // Electron semantics: running means a sweep is in progress, not that the loop exists.
+        state["monitor"]!["running"] = _monitorScheduler?.IsSweeping == true;
+        state["monitor"]!["nextCheckAt"] = _monitorScheduler?.NextSweepAt?.ToString("O");
+        state["monitor"]!["warning"] = _monitorTask is { IsCompleted: true } ? "감시가 중단됐습니다. 앱을 다시 시작하세요."
+            : _monitorBackup?.LastError;
         state["app"]!["nativePersonal"] = IsPersonal;
-        state["app"]!["loginSettingApplied"] = IsPersonalInstalled
+        state["app"]!["loginSettingApplied"] = IsPersonal
             && IsPersonalLoginSettingApplied(state["settings"]!["startAtLogin"]?.GetValue<bool>() == true);
         if (Volatile.Read(ref _lastCloudError) is { } error)
             state["cloud"]!["error"] = $"클라우드 동기화 실패: {error}";
@@ -158,47 +188,90 @@ internal sealed class PrototypeApp : System.Windows.Application
             throw new InvalidOperationException("격리 감시가 시작되지 않았습니다.");
         _monitorStore.UpdateSettings(partial);
         _monitorBackup.AfterCommit(false);
-        if (IsPersonalInstalled) ApplyPersonalLoginSetting();
+        if (IsPersonal) ApplyPersonalLoginSetting();
         _window?.SendState();
+    }
+
+    private void RepairPersonalShellEntries()
+    {
+        // A moved folder (for example to another drive) repairs its own entries on the next launch.
+        try { ApplyPersonalLoginSetting(); }
+        catch (Exception error) { Console.Error.WriteLine($"NATIVE_LOGIN_ENTRY_FAILED {error.Message}"); }
+        try { RepairDesktopShortcut(); }
+        catch (Exception error) { Console.Error.WriteLine($"NATIVE_SHORTCUT_REPAIR_FAILED {error.Message}"); }
     }
 
     private void ApplyPersonalLoginSetting()
     {
-        if (_stateReader is null || !IsPersonalInstalled) return;
+        if (_stateReader is null || _personal is null) return;
         var enabled = _stateReader.Read()["settings"]!["startAtLogin"]?.GetValue<bool>() == true;
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
             ?? throw new IOException("Windows 시작 항목을 열 수 없습니다.");
         var current = key.GetValue(RunValueName) as string;
-        var oldExecutable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs", "youtube-live-pulse", "라이브 펄스.exe");
-        var oldCommand = $"\"{oldExecutable}\" --hidden";
-        var nativeCommand = PersonalRunCommand();
-        if (current is not null && !string.Equals(current, oldCommand, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(current, nativeCommand, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("다른 Windows 시작 항목을 덮어쓰지 않았습니다.");
-        if (string.Equals(current, oldCommand, StringComparison.OrdinalIgnoreCase))
+        // Never overwrite an unrelated entry that happens to use the product name.
+        if (current is not null && !IsOwnRunCommand(current)) return;
+        if (current is not null && IsElectronRunCommand(current))
         {
-            var preserved = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LivePulseNative", "electron-startup-command.txt");
-            if (!File.Exists(preserved)) File.WriteAllText(preserved, oldCommand);
+            var preserved = Path.Combine(_personal.DataDirectory, "electron-startup-command.txt");
+            if (!File.Exists(preserved)) File.WriteAllText(preserved, current);
         }
-        if (enabled) key.SetValue(RunValueName, nativeCommand, RegistryValueKind.String);
+        var nativeCommand = RunCommand(Environment.ProcessPath!);
+        if (enabled)
+        {
+            if (!string.Equals(current, nativeCommand, StringComparison.OrdinalIgnoreCase))
+                key.SetValue(RunValueName, nativeCommand, RegistryValueKind.String);
+        }
         else if (current is not null) key.DeleteValue(RunValueName, throwOnMissingValue: false);
     }
 
-    private bool IsPersonalLoginSettingApplied(bool enabled)
+    private static bool IsPersonalLoginSettingApplied(bool enabled)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath);
         var current = key?.GetValue(RunValueName) as string;
-        return enabled ? string.Equals(current, PersonalRunCommand(), StringComparison.OrdinalIgnoreCase)
+        return enabled ? string.Equals(current, RunCommand(Environment.ProcessPath!), StringComparison.OrdinalIgnoreCase)
             : current is null;
     }
 
-    private string PersonalRunCommand()
+    internal static string RunCommand(string executable) => $"\"{executable}\" --hidden";
+
+    private static string? QuotedExecutable(string command)
     {
-        var database = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LivePulseNative", "live-pulse.sqlite");
-        return $"\"{Environment.ProcessPath}\" --hidden --personal-db \"{database}\"";
+        if (!command.StartsWith('"')) return null;
+        var end = command.IndexOf('"', 1);
+        return end > 1 ? command[1..end] : null;
+    }
+
+    private static bool IsElectronRunCommand(string command)
+        => Path.GetFileName(QuotedExecutable(command) ?? "") == "라이브 펄스.exe";
+
+    // Native builds (the earlier fixed-path prototype or this portable app at any location)
+    // and the replaced Electron app own the "라이브 펄스" login entry.
+    internal static bool IsOwnRunCommand(string command)
+        => QuotedExecutable(command) is { } executable
+            && (IsElectronRunCommand(command)
+                || Path.GetFileName(executable) is "LivePulse.exe" or "LivePulse.NativePrototype.exe");
+
+    private static void RepairDesktopShortcut()
+    {
+        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), DesktopShortcutName);
+        if (!File.Exists(path)) return;
+        var shellType = Type.GetTypeFromProgID("WScript.Shell") ?? throw new IOException("WScript.Shell을 사용할 수 없습니다.");
+        dynamic shell = Activator.CreateInstance(shellType)!;
+        try
+        {
+            dynamic shortcut = shell.CreateShortcut(path);
+            string target = shortcut.TargetPath;
+            var executable = Environment.ProcessPath!;
+            if (string.Equals(target, executable, StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileName(target) is not ("LivePulse.exe" or "LivePulse.NativePrototype.exe"))
+                return;
+            shortcut.TargetPath = executable;
+            shortcut.Arguments = "";
+            shortcut.WorkingDirectory = Path.GetDirectoryName(executable);
+            shortcut.IconLocation = executable + ",0";
+            shortcut.Save();
+        }
+        finally { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell); }
     }
 
     internal object ImportCloudConnection()
@@ -338,37 +411,22 @@ internal sealed class PrototypeApp : System.Windows.Application
     private void StartIsolatedMonitor()
     {
         var optionIndex = Array.IndexOf(_args, "--isolated-monitor-db");
-        var personalIndex = Array.IndexOf(_args, "--personal-db");
-        if (optionIndex >= 0 && personalIndex >= 0)
-            throw new ArgumentException("격리 DB와 개인용 DB를 동시에 지정할 수 없습니다.");
-        if (optionIndex < 0 && personalIndex < 0)
+        if (_personal is { } layout)
+        {
+            if (!Directory.Exists(layout.DataDirectory))
+                throw new DirectoryNotFoundException($"개인 데이터 폴더가 없습니다.\n폴더: {layout.DataDirectory}\n"
+                    + "app 폴더와 data 폴더를 같은 상위 폴더에 함께 두세요.");
+            if (File.GetAttributes(layout.DataDirectory).HasFlag(FileAttributes.ReparsePoint))
+                throw new InvalidDataException("연결된 개인용 데이터 폴더는 사용할 수 없습니다.");
+            if (Process.GetProcessesByName("라이브 펄스").Length != 0)
+                throw new InvalidOperationException("기존 Electron 앱을 종료한 뒤 네이티브 앱을 시작하세요.");
+            StartMonitorForDatabase(layout.Database, personal: true);
+            return;
+        }
+        if (optionIndex < 0)
         {
             if (_args.Contains("--monitor-smoke") || _args.Contains("--monitor-smoke-twice") || _args.Contains("--ui-smoke"))
                 throw new ArgumentException("감시 스모크에는 --isolated-monitor-db 경로가 필요합니다.");
-            return;
-        }
-        if (personalIndex >= 0)
-        {
-            if (personalIndex + 1 >= _args.Length || _args.Contains("--monitor-smoke")
-                || _args.Contains("--ui-smoke") || _args.Contains("--lifecycle-smoke")
-                || _args.Contains("--lifecycle-stress"))
-                throw new ArgumentException("개인용 실행에는 준비된 DB의 절대 경로가 필요합니다.");
-            var personalDatabase = _args[personalIndex + 1];
-            if (!Path.IsPathFullyQualified(personalDatabase))
-                throw new ArgumentException("개인용 DB에는 절대 경로가 필요합니다.");
-            personalDatabase = Path.GetFullPath(personalDatabase);
-            var expected = Path.GetFullPath(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "LivePulseNative", "live-pulse.sqlite"));
-            if (!string.Equals(personalDatabase, expected, StringComparison.OrdinalIgnoreCase)
-                || !File.Exists(personalDatabase) || !File.Exists(personalDatabase + ".bak.1"))
-                throw new InvalidDataException("개인용 DB와 첫 백업을 지정된 로컬 앱 데이터 폴더에 준비하세요.");
-            if (File.GetAttributes(personalDatabase).HasFlag(FileAttributes.ReparsePoint)
-                || new DirectoryInfo(Path.GetDirectoryName(personalDatabase)!).Attributes.HasFlag(FileAttributes.ReparsePoint))
-                throw new InvalidDataException("연결된 개인용 데이터 경로는 사용할 수 없습니다.");
-            if (Process.GetProcessesByName("라이브 펄스").Length != 0)
-                throw new InvalidOperationException("기존 Electron 앱을 종료한 뒤 개인용 네이티브 앱을 시작하세요.");
-            StartMonitorForDatabase(personalDatabase, requireBackup: true);
             return;
         }
         if (_args.Contains("--monitor-smoke-twice") && !_args.Contains("--monitor-smoke"))
@@ -395,16 +453,20 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (File.GetAttributes(database).HasFlag(FileAttributes.ReparsePoint))
             throw new InvalidDataException("연결된 DB 파일은 사용할 수 없습니다.");
 
-        StartMonitorForDatabase(database, requireBackup: false);
+        StartMonitorForDatabase(database, personal: false);
     }
 
-    private void StartMonitorForDatabase(string database, bool requireBackup)
+    private void StartMonitorForDatabase(string database, bool personal)
     {
         _monitorLease = NativeStoreLease.Acquire(database);
-        if (requireBackup)
+        if (personal)
         {
-            NativeStoreRecovery.Validate(database);
-            NativeStoreRecovery.Validate(database + ".bak.1");
+            // Under the lease: roll back a crash journal, or restore the newest valid backup
+            // (preserving a corrupt primary). No valid copy stops startup visibly.
+            var recovery = NativeStoreRecovery.OpenForStartup(database);
+            if (recovery.Restored)
+                File.AppendAllText(Path.Combine(LogDirectory, "runtime-error.log"),
+                    $"{DateTimeOffset.Now:O}\nRESTORED from {recovery.Source}; preserved {recovery.PreservedPrimary ?? "(none)"}\n\n");
         }
         var store = new NativeMonitorStore(database);
         _monitorStore = store;
@@ -419,7 +481,7 @@ internal sealed class PrototypeApp : System.Windows.Application
         _stateReader = new NativeStateReader(database);
         _cloudTask = Task.Run(() => RunCloudLoopAsync(_monitorCancellation.Token));
         _ = ObserveCloudAsync(_cloudTask);
-        Console.WriteLine($"NATIVE_MONITOR_STARTED personal={requireBackup} windowCreated={_window is not null}");
+        Console.WriteLine($"NATIVE_MONITOR_STARTED personal={personal} windowCreated={_window is not null}");
     }
 
     private async Task RunCloudLoopAsync(CancellationToken cancellationToken)
@@ -441,7 +503,6 @@ internal sealed class PrototypeApp : System.Windows.Application
                     + $"observations={result.Observations}");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-            catch (NativeBackupException) { throw; }
             catch (Exception error) when (error is not OutOfMemoryException)
             {
                 Volatile.Write(ref _lastCloudError, error.Message);
@@ -463,12 +524,14 @@ internal sealed class PrototypeApp : System.Windows.Application
         catch (Exception error)
         {
             Console.Error.WriteLine($"ISOLATED_CLOUD_FATAL {error.Message}");
+            var details = RecordRuntimeFailure(error);
+            _monitorCancellation?.Cancel();
             Environment.ExitCode = 1;
             if (!_quitting)
                 _ = Dispatcher.BeginInvoke((Action)(() =>
                 {
                     if (!_args.Contains("--monitor-smoke"))
-                        System.Windows.MessageBox.Show($"격리 클라우드 동기화가 중단됐습니다.\n{error.Message}", "라이브 펄스 시제품");
+                        System.Windows.MessageBox.Show($"클라우드 동기화가 중단됐습니다.\n{details}", "라이브 펄스");
                     Quit();
                 }));
         }
@@ -489,15 +552,29 @@ internal sealed class PrototypeApp : System.Windows.Application
         catch (Exception error)
         {
             Console.Error.WriteLine($"ISOLATED_MONITOR_FAILED {error.Message}");
+            var details = RecordRuntimeFailure(error);
+            _monitorCancellation?.Cancel();
             Environment.ExitCode = 1;
             if (!_quitting)
                 _ = Dispatcher.BeginInvoke((Action)(() =>
                 {
                     if (!_args.Contains("--monitor-smoke"))
-                        System.Windows.MessageBox.Show($"격리 감시가 중단됐습니다.\n{error.Message}", "라이브 펄스 시제품");
+                        System.Windows.MessageBox.Show($"감시가 중단됐습니다.\n{details}", "라이브 펄스");
                     Quit();
                 }));
         }
+    }
+
+    private string RecordRuntimeFailure(Exception error)
+    {
+        var details = error.Message + "\n원인: " + error.GetBaseException().Message;
+        try
+        {
+            var path = Path.Combine(LogDirectory, "runtime-error.log");
+            File.AppendAllText(path, $"{DateTimeOffset.Now:O}\n{error}\n\n");
+            return details + "\n진단 기록: " + path;
+        }
+        catch (Exception) { return details; }
     }
 
     private async Task RunMonitorSmokeAsync()

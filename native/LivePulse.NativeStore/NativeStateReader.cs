@@ -134,7 +134,7 @@ public sealed class NativeStateReader
             ["app"] = new JsonObject { ["windowActive"] = true, ["isPackaged"] = false,
                 ["loginSettingApplied"] = false, ["version"] = "prototype",
                 ["update"] = new JsonObject { ["status"] = "development", ["currentVersion"] = "prototype",
-                    ["message"] = "개인용 시제품에서는 업데이트를 확인하지 않습니다." } }
+                    ["message"] = "포터블 빌드는 native/publish-portable.ps1로 다시 빌드해 업데이트합니다." } }
         };
     }
 

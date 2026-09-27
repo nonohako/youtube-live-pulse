@@ -1,6 +1,28 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
+
+## Portable personal app and backup-stop fix (2026-09-27)
+
+User report: launching the personal native app showed "감시 기록을 저장했지만 SQLite 백업에 실패해 감시를 중단했습니다." Cause: the first backup after the 2026-09-26 19:52 desktop launch was interrupted, leaving `live-pulse.sqlite.backup.tmp` (273 MB) and a 1 KB hot journal. Every later launch refused to overwrite that residue at its first backup and faulted monitoring. The residue could not even be opened read-only (hot journal).
+
+Fixes: under the writer lease `CreateBackup` validates primary and existing generations, then discards the residue. Backup failure is now a UI warning (`monitor.warning`) retried after 5 minutes instead of a fatal stop; effects of a durable commit still run. Routine backups: first commit, then hourly (was 5 minutes; each copies ~280 MB). Personal startup uses `NativeStoreRecovery.OpenForStartup` (read-write open to roll back a crash journal, then validate or restore the newest valid backup) and no longer requires `.bak.1`. Also fixed `monitor.running`, which was true for the whole loop lifetime and kept the UI on "지금 확인 중" with refresh disabled; it now reflects an active sweep, `nextCheckAt` comes from the scheduler, and sweep start/finish pushes state.
+
+Portable layout (user request, may move to D:): `native/publish-portable.ps1` publishes to `<repo>/app/LivePulse.exe` with a `LivePulse.portable` marker; data lives in `<repo>/data`. It replaced `prepare-personal.ps1` (first setup from Electron JSON is `-FromJson`). The MSIX cache-copy code, `--personal-db` and fixed-path install logic were removed. On launch the app rewrites its own Run value and the `라이브 펄스 (네이티브).lnk` desktop shortcut to its current location.
+
+Migration done on this workstation: the stuck old prototype (PID 16692, modal error, monitor already stopped) was force-stopped; primary, `.bak.1`, `.bak.2`, WebView2 profile and preserved Electron command were copied from `%LOCALAPPDATA%/LivePulseNative` with SHA-256 checks (residue excluded). The old folder and `%LOCALAPPDATA%/Programs/LivePulseNative` are untouched fallbacks — do not run them alongside. The portable app was launched from the desktop shortcut and left running: first backup rotated in 4 s after start, Run value now `"<repo>pp\LivePulse.exe" --hidden`, both channels swept every 30 s, cloud sync current with no error, about 160 MiB private memory.
+
+Verification: NATIVE_STORE_TESTS_PASSED (new cases: stale residue discard, refusal when a generation is corrupt, non-fatal failure with retry, crash hot-journal startup that read-only validation rejects), NATIVE_STARTUP_TESTS_PASSED (marker layout, Run ownership), isolated WebView smoke with refresh/actions passed, Release build 0 warnings. Remaining: natural live-event Chrome/balloon delivery on the portable app is still unobserved; optional Data API enrichment is not ported (no API key is configured).
+
+## Desktop startup MSIX root cause and correction (2026-09-26)
+
+Root cause confirmed: GetFinalPathNameByHandle on the supposedly normal data DB returned `C:/Users/mqpow/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/LivePulseNative/live-pulse.sqlite`. Codex MSIX virtualized preparation and tool-launched monitoring, while the user desktop process correctly reported the ordinary data directory missing. DirectoryInfo.Attributes=-1 also made the first diagnostic build mislabel the missing folder as a reparse point; File.GetAttributes now reports the real failure.
+
+Installed fix copies the known prepared cache primary and backup generations to the missing normal user data directory during an ordinary desktop launch. It holds the source lease, rejects WAL/journal/incomplete-backup and destination conflicts, validates all SQLite files, compares copied SHA-256, publishes primary last and preserves the cache source. Existing user DBs are never overwritten. A synthetic-copy regression passed preservation, replay and incomplete-WAL refusal; self-contained publish passed. User confirmation of the actual desktop launch is pending. Do not start personal monitoring from a Codex tool after the desktop copy is established, because the packaged environment can resolve the old cache copy instead.
+
+Earlier observations: the user supplied a screenshot of the personal DB/first-backup startup error after clicking the desktop shortcut. The installed primary and both backups exist, ACLs grant the actual user access, and the desktop native shortcut targets the correct EXE with empty arguments. Both direct and Windows-shell launches from tools succeed, but this does not reproduce the user failure. Do not treat the earlier tool-only startup verification as proof that their double-click works.
+
+Installed a focused diagnostic build after the user exited via the tray: startup failures now identify the mismatched path or the exact primary/backup file and cause, and write startup-error.log beside the installed executable. Primary/backup checks now occur after the native writer lease instead of testing backup existence before excluding a writer. No DB contents were changed by the patch. Self-contained publish, startup argument tests and the missing-backup diagnostic regression passed; installed host hash matches. Previous binaries are preserved in ignored artifacts/native-before-startup-diagnostics. The cause and follow-up copy fix are described above.
 
 ## Normal personal launch completed (2026-09-26)
 

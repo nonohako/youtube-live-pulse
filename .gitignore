@@ -9,3 +9,6 @@ native/**/obj/
 .DS_Store
 .env*
 !.env.example
+/app/
+/app.publish-tmp/
+/data/

@@ -350,18 +350,22 @@ function renderMonitorStatus() {
   const channels = appState.channels || [];
   const liveChannels = channels.filter((channel) => channel.snapshot?.live);
   const hasError = channels.some((channel) => channel.status === 'error');
+  const warning = monitor.warning || '';
 
   elements.globalLivePill.classList.toggle('live', liveChannels.length > 0);
   elements.globalLivePill.innerHTML = liveChannels.length
     ? `<span class="status-dot"></span><span>${liveChannels.length}개 채널 LIVE</span>`
     : '<span class="status-dot"></span><span>라이브 없음</span>';
 
-  elements.sidebarDot.className = `status-dot ${hasError ? 'warning' : 'pulse'}`;
+  elements.sidebarDot.className = `status-dot ${hasError || warning ? 'warning' : 'pulse'}`;
   elements.sidebarStatusText.textContent = monitor.running
     ? '지금 확인 중'
-    : hasError ? '일부 확인 실패' : '백그라운드 감시 중';
+    : hasError ? '일부 확인 실패' : warning ? '확인 필요' : '백그라운드 감시 중';
+  elements.sidebarStatusText.title = warning;
 
-  if (monitor.running) {
+  if (warning && !monitor.running) {
+    elements.sidebarNextCheck.textContent = warning;
+  } else if (monitor.running) {
     elements.sidebarNextCheck.textContent = 'YouTube 응답 기다리는 중';
   } else if (monitor.nextCheckAt) {
     const seconds = Math.max(0, Math.ceil((new Date(monitor.nextCheckAt).getTime() - Date.now()) / 1000));
@@ -1582,7 +1586,6 @@ async function handleUpdateCheck() {
 
 function openSettings() {
   const settings = appState.settings;
-  elements.settingStartup.disabled = Boolean(appState.app?.nativePersonal && !appState.app?.loginSettingApplied);
   elements.settingApiKey.disabled = Boolean(appState.app?.nativePersonal);
   elements.settingStartup.checked = settings.startAtLogin;
   elements.settingLive.checked = settings.autoOpenLive;
@@ -1609,7 +1612,7 @@ function openSettings() {
   elements.startupHelp.textContent = appState.app?.nativePersonal
     ? (appState.app?.loginSettingApplied
       ? 'Windows 시작 시 개인용 앱을 실행합니다.'
-      : '개인용 앱의 고정 실행 경로에서 시작 등록을 적용할 수 있습니다.')
+      : '저장하면 Windows 시작 항목을 현재 앱 위치로 맞춥니다.')
     : appState.app?.isPackaged
     ? 'Windows 시작 앱 설정에 반영됩니다.'
     : '개발 실행 중에는 등록하지 않으며, 설치본에서 적용됩니다.';

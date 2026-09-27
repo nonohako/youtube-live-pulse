@@ -1,6 +1,6 @@
 # Live Pulse native migration checkpoint
 
-`LivePulse.Windows` reuses the existing HTML/CSS/JS in WebView2 and keeps monitoring/cloud polling in C# while the window is closed. `--hidden` creates no WebView; closing the window disposes it. The personal app now runs from `%LOCALAPPDATA%/Programs/LivePulseNative` with a verified private SQLite DB, repeated authenticated Fly sync and a native Windows login entry. The old Electron executable and JSON remain available for manual return; no public native installer/update has been published.
+`LivePulse.Windows` reuses the existing HTML/CSS/JS in WebView2 and keeps monitoring/cloud polling in C# while the window is closed. `--hidden` creates no WebView; closing the window disposes it. The personal app now runs portably from `<repo>/app` with its verified SQLite DB in `<repo>/data`, repeated authenticated Fly sync and a native Windows login entry. The old Electron executable and JSON remain available for manual return; no public native installer/update has been published.
 
 Build with the .NET 10 SDK and the pinned WebView2 package:
 
@@ -10,24 +10,27 @@ Build with the .NET 10 SDK and the pinned WebView2 package:
 dotnet build native/LivePulse.Windows/LivePulse.Windows.csproj -c Release
 ```
 
-Run `LivePulse.NativePrototype.exe --lifecycle-smoke` from the build output for three open/close cycles, bridge fixture checks and browser-process exit checks. `--lifecycle-stress` also closes during initialization, reopens immediately and runs 20 cycles with tray memory samples after each browser exit. `--hidden` starts tray-only. The test uses a separate WebView2 profile under the Windows temp directory. The installed app and its Electron updater remain the production path.
+Run `LivePulse.exe --lifecycle-smoke` from the build output for three open/close cycles, bridge fixture checks and browser-process exit checks. `--lifecycle-stress` also closes during initialization, reopens immediately and runs 20 cycles with tray memory samples after each browser exit. `--hidden` starts tray-only. The test uses a separate WebView2 profile under the Windows temp directory. The installed app and its Electron updater remain the production path.
 
-The personal app is prepared on this workstation. Close Electron, then double-click the desktop **라이브 펄스 (네이티브)** shortcut or the installed `LivePulse.NativePrototype.exe`. No arguments are needed at the fixed installation path; a repeated launch opens the existing window. Missing or invalid personal data shows an error instead of a fixture. The following explicit command also remains supported:
+## Portable personal app
 
-```powershell
-& "$env:LOCALAPPDATA\Programs\LivePulseNative\LivePulse.NativePrototype.exe" --personal-db "$env:LOCALAPPDATA\LivePulseNative\live-pulse.sqlite"
+The personal app lives entirely inside the repository folder and can be moved (for example to another drive):
+
+```
+<repo>/app/LivePulse.exe   self-contained build + LivePulse.portable marker (rebuilt freely)
+<repo>/data/               live-pulse.sqlite, .bak.1/.bak.2, WebView2 profile, logs (never overwritten)
 ```
 
-For a fresh private setup on another workstation, stop Electron first, build with .NET 10, run the preparation script once and copy the published files to a stable personal folder. The prepared DB path cannot be overwritten by a second run:
+Build or update it after quitting the app from the tray (Windows PowerShell):
 
 ```powershell
-$dotnet10 = Join-Path $env:TEMP 'livepulse-dotnet10/dotnet.exe'
-& $dotnet10 build native/LivePulse.NativeStore.Tests/LivePulse.NativeStore.Tests.csproj -c Release
-& $dotnet10 publish native/LivePulse.Windows/LivePulse.Windows.csproj -c Release -r win-x64 --self-contained true --output artifacts/native-personal-build
-.\native\prepare-personal.ps1 -SourceJson "$env:APPDATA\youtube-live-pulse\live-pulse.json"
+.
+ative\publish-portable.ps1
+.
+ative\publish-portable.ps1 -FromJson "$env:APPDATA\youtube-live-pulse\live-pulse.json"   # first setup from Electron
 ```
 
-The preparation command refuses a running Electron/native app and an existing target DB. It leaves the installed JSON unchanged, retains a SHA-checked source copy and creates a verified SQLite backup. On this workstation, the private DB imported 2 channels, 245 series and 661,305 samples; repeated Fly sync persisted new minute-spaced observations. An actual-data WebView smoke rendered both channel cards and disposed the browser on close. An interrupted temporary backup and journal were preserved under the private `forensic/` folder after primary and `.bak.1` verification. Do not force-stop during backup. Real live-event notification/Chrome behavior and a controlled long-running memory comparison remain unverified. The optional Data API enhancement and automatic native updates are not connected. No native installer is published.
+Without `-FromJson`, a missing `data/` is copied once from the earlier `%LOCALAPPDATA%\LivePulseNative` prototype, which stays unchanged. The script also creates the desktop shortcut **라이브 펄스 (네이티브)**. Double-clicking `app\LivePulse.exe` opens the existing window if the app is already running. After moving the folder, launch it once from the new place: it updates its Windows login entry and the desktop shortcut. Startup rolls back a crash journal and restores the newest valid backup if the DB is damaged; a failed backup is shown as a warning and retried instead of stopping monitoring. Unmarked development builds never open personal data.
 
 `LivePulse.DataMigration` is a separate **explicit-path import experiment**. It reads a JSON v3 source without changing it and writes a new SQLite file. Local and cloud histories remain separate; every sample keeps its original array order and raw JSON. A completion marker and source SHA-256 make a repeated import verify and reuse the same DB. The verification reopens the DB, runs SQLite integrity check, and compares each sample's sequence, timestamp, count and raw payload hash. Existing incomplete or mismatched output is rejected instead of overwritten.
 
@@ -73,6 +76,6 @@ The tests include an imported DB, restart/replay, stale-revision, backup and eff
 
 `NativeMonitorScheduler` adds a cancellation-controlled polling loop around the isolated runner. It reads channel IDs and validated monitor settings from SQLite for each sweep, begins after 250 ms, serializes channels, records per-channel failures and stops with a recorded error and faulted task when settings cannot be read. The harness uses a controlled delay to test changed intervals, explicit restart after fixing invalid settings, channel failure isolation, replay suppression and double-start rejection. The new configuration reader also read two channels and a 30-second interval from an ignored copy of the actual-data import; that probe copy was removed. Only the explicit WPF opt-in below starts the loop; no production database, cloud sync or Windows effect sink is connected. The controlled clock is not evidence of long-running public monitoring or tray memory use.
 
-The WPF app starts its monitor and cloud loops with either `--hidden --isolated-monitor-db ABSOLUTE_PATH` or explicit `--personal-db ABSOLUTE_PATH`. Isolated mode requires an existing disposable `artifacts/migration-isolated-data/*.probe.sqlite` and suppresses Windows effects. Add `--monitor-smoke` for one sweep or `--ui-smoke --ui-smoke-actions` for a rendered card, bridge actions and close-to-tray check. The published self-contained executable passed the latter with one channel; personal mode and installed data have not yet been run together. No native release installer exists.
+The WPF app starts its monitor and cloud loops with either `--hidden --isolated-monitor-db ABSOLUTE_PATH` or as the marked portable build without arguments. Isolated mode requires an existing disposable `artifacts/migration-isolated-data/*.probe.sqlite` and suppresses Windows effects. Add `--monitor-smoke` for one sweep or `--ui-smoke --ui-smoke-actions` for a rendered card, bridge actions and close-to-tray check. The published self-contained executable passed the latter with one channel; personal mode and installed data have not yet been run together. No native release installer exists.
 
 If a moved Windows environment leaves `obj/project.assets.json` pointing to a missing NuGet fallback folder, restore the affected native project with `dotnet restore PROJECT.csproj --ignore-failed-sources -p:RestoreFallbackFolders=''` before using `--no-restore` builds. This regenerates ignored build metadata; it does not change source or user data.

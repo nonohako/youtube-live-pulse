@@ -7,27 +7,57 @@ public static class NativeStoreRecovery
 {
     public sealed record RecoveryResult(bool Restored, string? Source, string? PreservedPrimary);
 
+    // The caller must hold the DB writer lease, so a leftover temporary snapshot can only be
+    // residue from an interrupted run (for example a shutdown during a large backup).
     public static void CreateBackup(string databasePath)
     {
         var primary = Path.GetFullPath(databasePath);
-        Validate(primary);
         var temporary = primary + ".backup.tmp";
         var newest = primary + ".bak.1";
         var older = primary + ".bak.2";
-        if (File.Exists(temporary))
-            throw new IOException("미처리 임시 백업이 있어 덮어쓸 수 없습니다.");
-        if (File.Exists(newest)) Validate(newest);
-        if (File.Exists(older)) Validate(older);
+        if (File.Exists(temporary) || File.Exists(temporary + "-journal"))
+            DiscardInterruptedBackup(primary);
 
         using (var source = Open(primary, SqliteOpenMode.ReadOnly))
         using (var destination = Open(temporary, SqliteOpenMode.ReadWriteCreate))
             source.BackupDatabase(destination);
         FlushFile(temporary);
+        // A corrupt primary produces a snapshot that fails here, before any generation rotates.
         Validate(temporary);
 
         // Same-directory renames leave the validated temporary snapshot available after a failed rotation.
         if (File.Exists(newest)) File.Move(newest, older, overwrite: true);
         File.Move(temporary, newest);
+    }
+
+    // Removes interrupted-backup residue only after the primary and every existing generation
+    // validate, so the discarded file can never be the last good copy.
+    private static void DiscardInterruptedBackup(string primary)
+    {
+        Validate(primary);
+        foreach (var generation in new[] { primary + ".bak.1", primary + ".bak.2" })
+            if (File.Exists(generation)) Validate(generation);
+        File.Delete(primary + ".backup.tmp-journal");
+        File.Delete(primary + ".backup.tmp");
+    }
+
+    // Startup check under the writer lease. A read-write open lets SQLite roll back a hot
+    // journal left by a killed process; read-only validation would reject that valid DB.
+    public static RecoveryResult OpenForStartup(string databasePath)
+    {
+        var primary = Path.GetFullPath(databasePath);
+        if (File.Exists(primary))
+        {
+            try
+            {
+                using var connection = Open(primary, SqliteOpenMode.ReadWrite);
+                using var touch = connection.CreateCommand();
+                touch.CommandText = "SELECT count(*) FROM sqlite_master";
+                touch.ExecuteScalar();
+            }
+            catch (SqliteException) { /* Validation below decides whether recovery is needed. */ }
+        }
+        return Recover(primary);
     }
 
     public static RecoveryResult Recover(string databasePath)
