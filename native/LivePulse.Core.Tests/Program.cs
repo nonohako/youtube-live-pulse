@@ -237,6 +237,65 @@ var heartbeat = MonitorChangePlanner.Plan(channelId, broadcastPlan.NextTrackingS
     baseline.SubscriberSampleToAppend, broadcastSettings, broadcastSnapshot with
     { CheckedAt = plannerSnapshot.CheckedAt.AddHours(6) });
 Require(heartbeat.SubscriberSampleToAppend is { Count: 1210000 }, "6시간 구독자 heartbeat 누락");
+
+// Optional YouTube Data API enrichment (Electron parity). The key must never reach messages.
+const string apiKey = "TEST-API-KEY-0123456789";
+var apiRequests = new List<string>();
+var apiFails = false;
+using var apiHandler = new FixtureHandler(request =>
+{
+    var uri = request.RequestUri!;
+    if (uri.Host == "www.googleapis.com")
+    {
+        apiRequests.Add(uri.AbsolutePath + uri.Query);
+        if (apiFails) return new HttpResponseMessage(HttpStatusCode.Forbidden)
+        { Content = new StringContent("{\"error\":{\"message\":\"quota exceeded\"}}") };
+        var json = uri.AbsolutePath.EndsWith("/channels") && uri.Query.Contains("forHandle")
+            ? $"{{\"items\":[{{\"id\":\"{channelId}\"}}]}}"
+            : uri.AbsolutePath.EndsWith("/channels")
+            ? "{\"items\":[{\"snippet\":{\"title\":\"공식 채널\",\"thumbnails\":{\"high\":{\"url\":\"https://img/api.jpg\",\"width\":800}}},\"statistics\":{\"subscriberCount\":\"1220000\"}}]}"
+            : "{\"items\":[{\"id\":\"12345678901\",\"snippet\":{\"title\":\"API 영상\",\"publishedAt\":\"2026-09-01T00:00:00Z\"},\"statistics\":{\"viewCount\":\"4321\"}}]}";
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
+    }
+    if (uri.AbsolutePath == "/watch")
+    {
+        var id = uri.Query[3..];
+        var player = new { playabilityStatus = new { status = "OK" }, videoDetails = new { videoId = id, title = "페이지 영상", viewCount = "77" } };
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new StringContent($"var ytInitialPlayerResponse = {JsonSerializer.Serialize(player)};") };
+    }
+    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") };
+});
+using var apiHttp = new HttpClient(apiHandler);
+using var apiClient = new YouTubeSnapshotClient(apiHttp) { ApiKey = apiKey };
+Require((await apiClient.ResolveChannelInputAsync("@api.handle")).Id == channelId && apiRequests.Count == 1,
+    "API 핸들 해석 오류");
+var apiSnapshot = await apiClient.FetchChannelSnapshotAsync(channelId);
+Require(apiSnapshot.Metadata is { Title: "공식 채널", SubscriberCount: 1220000, SubscriberText: "122만", Source: "api",
+    AvatarUrl: "https://img/api.jpg" }, "공식 채널 통계 병합 오류");
+var cachedRequests = apiRequests.Count;
+Require((await apiClient.FetchChannelSnapshotAsync(channelId)).Metadata.Source == "api" && apiRequests.Count == cachedRequests,
+    "10분 안에 공식 채널 통계를 다시 요청하거나 캐시를 버림");
+apiClient.ExpireOfficialMetadata();
+await apiClient.FetchChannelSnapshotAsync(channelId);
+Require(apiRequests.Count == cachedRequests + 1, "수동 새로고침이 공식 통계를 다시 요청하지 않음");
+var apiVideos = await apiClient.FetchVideoStatisticsAsync(["12345678901", "abcdefghijk"]);
+Require(apiVideos.Count == 2 && apiVideos.Single(item => item.Id == "12345678901") is { ViewCount: 4321, Source: "api" }
+    && apiVideos.Single(item => item.Id == "abcdefghijk") is { ViewCount: 77, Source: "page" },
+    "공식 영상 통계 또는 누락 영상의 공개 페이지 대체 오류");
+apiFails = true;
+apiClient.ExpireOfficialMetadata();
+var degraded = await apiClient.FetchChannelSnapshotAsync(channelId);
+Require(degraded.Warnings.Any(item => item.Contains("quota exceeded")) && degraded.Metadata.Title == "공식 채널"
+    && degraded.Warnings.All(item => !item.Contains(apiKey)), "API 실패 경고 또는 이전 공식 정보 유지 오류");
+Require((await apiClient.FetchVideoStatisticsAsync(["12345678901"])) is [{ ViewCount: 77, Source: "page" }],
+    "API 실패 시 공개 페이지 조회수로 대체하지 않음");
+apiClient.ApiKey = "";
+var withoutKey = apiRequests.Count;
+Require((await apiClient.FetchChannelSnapshotAsync(channelId)).Metadata.Source == "page" && apiRequests.Count == withoutKey,
+    "API 키 삭제 후에도 API를 사용함");
+Require(YouTubeDataApi.FormatCompact(999) == "999" && YouTubeDataApi.FormatCompact(1234) == "1.23천"
+    && YouTubeDataApi.FormatCompact(123456789) == "1.23억", "한국어 축약 숫자 오류");
 Console.WriteLine("CORE_TESTS_PASSED");
 
 sealed class FixtureHandler(Func<HttpRequestMessage, HttpResponseMessage> handle) : HttpMessageHandler

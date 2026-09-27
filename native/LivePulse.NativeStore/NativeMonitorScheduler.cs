@@ -20,10 +20,21 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
     private int running;
     private int sweeping;
     private long nextSweepTicks;
+    private string? currentChannelId;
+    private CancellationTokenSource? pendingWait;
     private readonly SemaphoreSlim sweepGate = new(1, 1);
 
     public MonitorSweepResult? LastSweep => Volatile.Read(ref lastSweep);
     public bool IsSweeping => Volatile.Read(ref sweeping) != 0;
+    public string? CurrentChannelId => Volatile.Read(ref currentChannelId);
+
+    // Ends the current wait so the next sweep starts now and later waits use fresh settings
+    // (Electron restarted its timer after a channel, interval or API key change).
+    public void Wake()
+    {
+        try { Volatile.Read(ref pendingWait)?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
     public DateTimeOffset? NextSweepAt => Interlocked.Read(ref nextSweepTicks) is var ticks and > 0
         ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
 
@@ -40,7 +51,13 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
             while (!cancellationToken.IsCancellationRequested)
             {
                 Interlocked.Exchange(ref nextSweepTicks, DateTimeOffset.UtcNow.Add(nextDelay).UtcTicks);
-                await delay(nextDelay, cancellationToken);
+                using (var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                {
+                    Volatile.Write(ref pendingWait, wait);
+                    try { await delay(nextDelay, wait.Token); }
+                    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+                    finally { Volatile.Write(ref pendingWait, null); }
+                }
                 var sweep = await SweepAsync(cancellationToken);
                 nextDelay = sweep.Interval;
             }
@@ -73,6 +90,7 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
             foreach (var channelId in configuration.ChannelIds)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                Volatile.Write(ref currentChannelId, channelId);
                 try { completed.Add(await runner.RunChannelOnceAsync(channelId, configuration.Settings, cancellationToken)); }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception error) when (error is not OutOfMemoryException)
@@ -80,7 +98,10 @@ public sealed class NativeMonitorScheduler(NativeMonitorStore store, NativeMonit
                     var message = $"채널 {channelId} 확인 실패: {error.Message}";
                     errors.Add(message);
                     channelErrors[channelId] = message;
+                    try { store.RecordChannelFailure(channelId, error.Message, DateTimeOffset.UtcNow); }
+                    catch (Exception recordError) when (recordError is not OutOfMemoryException) { }
                 }
+                finally { Volatile.Write(ref currentChannelId, null); }
             }
             var result = new MonitorSweepResult(DateTimeOffset.UtcNow, completed, errors)
             { ChannelErrors = channelErrors };

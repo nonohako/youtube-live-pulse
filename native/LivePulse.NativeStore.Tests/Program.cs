@@ -448,7 +448,7 @@ using (var update = JsonDocument.Parse("""
 Require(settingsStore.ReadPollConfiguration() is { Interval.TotalSeconds: 45, Settings.AutoOpenLive: false }
     && new NativeStateReader(settingsDb).Read()["settings"]!["apiKey"] is null
     && new NativeStateReader(settingsDb).Read()["settings"]!["hasApiKey"]!.GetValue<bool>()
-    && StoreImporter.Verify(source, settingsDb).Samples == 1,
+    && StoreImporter.Verify(source, settingsDb).Samples == 1 && settingsStore.ReadApiKey() == "private-key",
     "설정 저장·비밀값 제거 또는 이전 기록 보존 오류");
 using (var invalidUpdate = JsonDocument.Parse("""{"autoOpenLive":"false"}"""))
     ExpectInvalidData(() => settingsStore.UpdateSettings(invalidUpdate.RootElement),
@@ -766,6 +766,18 @@ using (var cancellation = new CancellationTokenSource())
     Require(recoveredChannel["status"]!.GetValue<string>() == "online" && recoveredChannel["error"] is null
         && recoveredChannel["snapshot"]!["live"] is not null,
         "수집 성공 후 오류 또는 오래된 방송 숨김이 남음");
+    var eventList = new NativeStateReader(schedulerDb).Read()["events"]!.AsArray();
+    Require(eventList.Count(item => (string?)item!["type"] == "error") == 1
+        && (string?)eventList[0]!["type"] == "error" && (string?)eventList[0]!["channelId"] == channelId
+        && eventList[0]!["detail"]!.GetValue<string>().Contains("fixture network failure")
+        && eventList.All(item => DateTimeOffset.TryParse((string?)item!["at"], out _)),
+        "채널 확인 실패를 최근 알림에 한 번 기록하지 않거나 최신순·시간 정보가 없음");
+    schedulerStore.RecordChannelFailure(channelId, "fixture network failure", DateTimeOffset.UtcNow);
+    Require(new NativeStateReader(schedulerDb).Read()["events"]!.AsArray()
+        .Count(item => (string?)item!["type"] == "error") == 1, "같은 오류 알림을 반복 기록함");
+    schedulerStore.RemoveChannel(channelId);
+    Require(new NativeStateReader(schedulerDb).Read()["events"]!.AsArray()
+        .All(item => (string?)item!["channelId"] != channelId), "삭제한 채널의 알림이 남음");
 }
 using (var cancellation = new CancellationTokenSource())
 {

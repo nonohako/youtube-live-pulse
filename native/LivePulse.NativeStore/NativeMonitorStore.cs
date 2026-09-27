@@ -121,6 +121,54 @@ public sealed class NativeMonitorStore
         return new StoredTracking(revision, tracking, ReadLastSubscriber(connection, channelId));
     }
 
+    // Same shape as Electron events so the renderer can show and order them.
+    private static string EventPayload(string channelId, string type, string sourceId, string title,
+        string detail, string url, DateTimeOffset at)
+        => JsonSerializer.Serialize(new
+        {
+            id = $"{at.ToUnixTimeMilliseconds()}-{Guid.NewGuid().ToString("N")[..6]}",
+            at = at.ToString("O", CultureInfo.InvariantCulture),
+            channelId, type, sourceId, title, detail, url
+        });
+
+    // Electron recorded each distinct channel failure in the recent-events list.
+    public void RecordChannelFailure(string channelId, string message, DateTimeOffset at)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var name = connection.CreateCommand();
+        name.Transaction = transaction;
+        name.CommandText = """
+            SELECT title FROM runtime_tracking WHERE channel_id=$id AND title<>''
+            UNION ALL SELECT json_extract(metadata_json,'$.title') FROM channels WHERE id=$id
+            UNION ALL SELECT json_extract(metadata_json,'$.title') FROM runtime_channels WHERE id=$id
+            """;
+        name.Parameters.AddWithValue("$id", channelId);
+        var title = name.ExecuteScalar() as string;
+        var key = $"{channelId}|error|{message}";
+        if (ReadImportedEventKeys(connection, transaction).Contains(key)) return;
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT OR IGNORE INTO runtime_events(event_key,payload_json) VALUES($key,$payload)";
+        insert.Parameters.AddWithValue("$key", key);
+        insert.Parameters.AddWithValue("$payload", EventPayload(channelId, "error", "",
+            $"{(string.IsNullOrEmpty(title) ? "채널" : title)} 확인 실패", message, "", at));
+        insert.ExecuteNonQuery();
+        using var bound = connection.CreateCommand();
+        bound.Transaction = transaction;
+        bound.CommandText = "DELETE FROM runtime_events WHERE id NOT IN (SELECT id FROM runtime_events ORDER BY id DESC LIMIT 100)";
+        bound.ExecuteNonQuery();
+        transaction.Commit();
+    }
+
+    public string ReadApiKey()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT json_extract(value,'$.apiKey') FROM meta WHERE key='settings'";
+        return command.ExecuteScalar() as string ?? "";
+    }
+
     public MonitorPollConfiguration ReadPollConfiguration()
     {
         using var connection = Open();
@@ -224,7 +272,8 @@ public sealed class NativeMonitorStore
             insert.Transaction = transaction;
             insert.CommandText = "INSERT OR IGNORE INTO runtime_events(event_key,payload_json) VALUES($key,$payload)";
             insert.Parameters.AddWithValue("$key", key);
-            insert.Parameters.AddWithValue("$payload", JsonSerializer.Serialize(item));
+            insert.Parameters.AddWithValue("$payload", EventPayload(item.ChannelId, item.Type, item.SourceId,
+                item.Title, item.Detail, item.Url, snapshot.CheckedAt));
             insert.ExecuteNonQuery();
         }
         using (var bound = connection.CreateCommand())
@@ -273,7 +322,7 @@ public sealed class NativeMonitorStore
                     metadata.Parameters.AddWithValue("$video", video.Id);
                     metadata.Parameters.AddWithValue("$json", JsonSerializer.Serialize(new
                     { videoId = video.Id, title = video.Title, url = video.Url,
-                        thumbnailUrl = video.ThumbnailUrl, publishedAt = video.PublishedAt, source = "page" }));
+                        thumbnailUrl = video.ThumbnailUrl, publishedAt = video.PublishedAt, source = video.Source ?? "page" }));
                     metadata.ExecuteNonQuery();
                 }
                 using var previousVideo = connection.CreateCommand();

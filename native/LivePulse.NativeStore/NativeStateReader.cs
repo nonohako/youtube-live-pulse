@@ -17,6 +17,19 @@ public sealed class NativeStateReader
         }.ToString();
     }
 
+    public int CountLiveChannels()
+    {
+        using var connection = new SqliteConnection(connectionString);
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT count(*) FROM runtime_snapshots
+            WHERE json_type(payload_json,'$.live')='object'
+              AND channel_id NOT IN (SELECT id FROM runtime_removed_channels)
+            """;
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
     public JsonObject Read(string? subscriberId = null,
         IReadOnlyList<(string ChannelId, string VideoId)>? selectedVideos = null,
         MonitorSweepResult? monitorSweep = null)
@@ -58,6 +71,18 @@ public sealed class NativeStateReader
             var channel = JsonNode.Parse(json)?.AsObject()
                 ?? throw new InvalidDataException("저장된 채널을 읽을 수 없습니다.");
             channel["id"] = id;
+            // Electron refreshed the stored name/avatar on every check; new channels start as placeholders.
+            using (var latest = connection.CreateCommand())
+            {
+                latest.CommandText = "SELECT title,avatar_url FROM runtime_tracking WHERE channel_id=$id";
+                latest.Parameters.AddWithValue("$id", id);
+                using var row = latest.ExecuteReader();
+                if (row.Read())
+                {
+                    if (!string.IsNullOrEmpty(row.GetString(0))) channel["title"] = row.GetString(0);
+                    if (!string.IsNullOrEmpty(row.GetString(1))) channel["avatarUrl"] = row.GetString(1);
+                }
+            }
             var snapshot = Scalar(connection,
                 "SELECT payload_json FROM runtime_snapshots WHERE channel_id=$id", id);
             channel["snapshot"] = snapshot is null ? null : JsonNode.Parse(snapshot);
@@ -92,7 +117,8 @@ public sealed class NativeStateReader
             channel["videoViewHistories"] = Videos(connection, id, selectedVideos);
             channels.Add(channel);
         }
-        var events = JsonNode.Parse(Meta(connection, "events"))?.AsArray() ?? new JsonArray();
+        // Newest first: runtime events precede the imported Electron list; removed channels' events are hidden.
+        var events = new JsonArray();
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "SELECT payload_json FROM runtime_events ORDER BY id DESC LIMIT 100";
@@ -107,9 +133,12 @@ public sealed class NativeStateReader
                         item[char.ToLowerInvariant(key[0]) + key[1..]] = item[key]?.DeepClone();
                         item.Remove(key);
                     }
-                events.Add(item);
+                if (ids.Contains((string?)item["channelId"] ?? "")) events.Add(item);
             }
         }
+        foreach (var item in JsonNode.Parse(Meta(connection, "events"))?.AsArray() ?? new JsonArray())
+            if (events.Count < 100 && item is JsonObject imported && ids.Contains((string?)imported["channelId"] ?? ""))
+                events.Add(imported.DeepClone());
         var cloud = new JsonObject { ["lastSyncAt"] = null, ["lastCollectionAt"] = null, ["error"] = null };
         using (var command = connection.CreateCommand())
         {

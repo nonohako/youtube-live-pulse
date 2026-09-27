@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 
@@ -20,13 +21,37 @@ public interface IVideoStatisticsSource
         CancellationToken cancellationToken = default);
 }
 
-// Read-only public-page diagnostic. It does not poll, notify, open URLs, or persist data.
+// Public-page YouTube reader with optional Data API enrichment. It does not poll, notify,
+// open URLs, or persist data.
 public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatisticsSource, IDisposable
 {
     private const string Origin = "https://www.youtube.com";
     private const int MaxPageBytes = 8 * 1024 * 1024;
+    private static readonly TimeSpan OfficialInterval = TimeSpan.FromMinutes(10);
     private readonly HttpClient http;
     private readonly bool ownsHttp;
+    private readonly ConcurrentDictionary<string, (DateTimeOffset At, YouTubePageParser.ChannelMetadata Metadata)> official
+        = new(StringComparer.Ordinal);
+    private volatile string apiKey = "";
+
+    // Empty disables the Data API. Changing the key discards official metadata fetched with the old one.
+    public string ApiKey
+    {
+        get => apiKey;
+        set
+        {
+            var next = value?.Trim() ?? "";
+            if (next == apiKey) return;
+            apiKey = next;
+            official.Clear();
+        }
+    }
+
+    // A manual refresh fetches official channel statistics again instead of waiting 10 minutes.
+    public void ExpireOfficialMetadata()
+    {
+        foreach (var (id, cached) in official) official[id] = (DateTimeOffset.MinValue, cached.Metadata);
+    }
 
     public YouTubeSnapshotClient(HttpClient? httpClient = null)
     {
@@ -46,6 +71,15 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
         var handle = YouTubeChannelInput.ExtractHandle(input);
         if (handle is null)
             throw new ArgumentException("지원하는 형식: YouTube 채널 URL, @핸들, 또는 UC로 시작하는 채널 ID", nameof(input));
+        if (apiKey is { Length: > 0 } key)
+        {
+            try
+            {
+                if (await YouTubeDataApi.ResolveHandleAsync(http, handle, key, cancellationToken) is { } apiId)
+                    return YouTubeChannelInput.Normalize(apiId);
+            }
+            catch (HttpRequestException) { /* The public handle page below remains the fallback. */ }
+        }
         var page = await FetchAsync($"{Origin}/{Uri.EscapeDataString(handle)}", cancellationToken);
         if (!page.Success) throw new HttpRequestException($"YouTube 채널 확인 실패{(page.StatusCode is { } status ? $" (HTTP {status})" : "")}");
         var id = YouTubeChannelInput.FindChannelId(page.Body);
@@ -59,12 +93,21 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
         var ids = videoIds.Where(id => id.Length == 11
             && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-')).Distinct(StringComparer.Ordinal)
             .Take(8).ToArray();
+        IReadOnlyList<VideoCandidate> officialItems = [];
+        if (ids.Length > 0 && apiKey is { Length: > 0 } key)
+        {
+            try { officialItems = await YouTubeDataApi.FetchVideosAsync(http, ids, key, cancellationToken); }
+            catch (HttpRequestException) { /* Public watch pages below fill every requested video. */ }
+            var found = officialItems.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+            ids = ids.Where(id => !found.Contains(id)).ToArray();
+        }
         var tasks = ids.Select(async id =>
         {
             var page = await FetchAsync($"{Origin}/watch?v={id}", cancellationToken);
             return page.Success ? YouTubeBroadcast.ParseVideoStatistics(page.Body, page.FinalUrl) : null;
         });
-        return (await Task.WhenAll(tasks)).Where(item => item is not null).Cast<VideoCandidate>().ToArray();
+        return officialItems.Concat((await Task.WhenAll(tasks)).Where(item => item is not null)
+            .Cast<VideoCandidate>().Select(item => item with { Source = "page" })).ToArray();
     }
 
     public async Task<YouTubeSnapshot> FetchChannelSnapshotAsync(string channelId,
@@ -79,9 +122,32 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
         var postsTask = FetchPostsAsync($"{channelUrl}/posts", cancellationToken);
         var feedTask = FetchFeedAsync($"{Origin}/feeds/videos.xml?channel_id={channelId}", cancellationToken);
         var liveTask = FetchLiveAsync($"{channelUrl}/live", now, cancellationToken);
+        var key = apiKey;
+        var officialTask = key.Length > 0 && (!official.TryGetValue(channelId, out var cached)
+            || now - cached.At >= OfficialInterval || now < cached.At)
+            ? YouTubeDataApi.FetchChannelAsync(http, channelId, key, cancellationToken) : null;
         await Task.WhenAll(streamsTask, videosTask, shortsTask, postsTask, feedTask, liveTask);
-        return Compose(await streamsTask, await videosTask, await shortsTask, await postsTask,
+        var snapshot = Compose(await streamsTask, await videosTask, await shortsTask, await postsTask,
             await feedTask, await liveTask);
+        if (key.Length == 0) return snapshot;
+        var warnings = snapshot.Warnings.ToList();
+        if (officialTask is not null)
+        {
+            try { official[channelId] = (now, await officialTask); }
+            catch (Exception error) when (error is HttpRequestException or InvalidDataException)
+            { warnings.Add($"공식 채널 통계 확인 실패: {error.Message}"); }
+        }
+        if (!official.TryGetValue(channelId, out var current)) return snapshot with { Warnings = warnings };
+        var page = snapshot.Metadata;
+        var api = current.Metadata;
+        return snapshot with
+        {
+            Warnings = warnings,
+            Metadata = new YouTubePageParser.ChannelMetadata(
+                api.Title.Length > 0 ? api.Title : page.Title,
+                api.AvatarUrl.Length > 0 ? api.AvatarUrl : page.AvatarUrl,
+                api.SubscriberText, api.SubscriberCount, "api")
+        };
     }
 
     private async Task<VideoPage> FetchVideosAsync(string url, DateTimeOffset now, bool includeMetadata,

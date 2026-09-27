@@ -335,6 +335,8 @@ function render() {
     ? `업데이트 ${update.percent || 0}%`
     : '앱 업데이트 확인';
   elements.updateButton.disabled = appState.app?.nativePersonal || ['checking', 'downloading'].includes(update?.status);
+  // The portable build updates by rebuilding; an always-disabled button only confused users.
+  elements.updateButton.hidden = Boolean(appState.app?.nativePersonal);
   renderMonitorStatus();
   if (!document.querySelector('dialog[open]')) {
     renderChannels(); renderEvents(); renderViewsPanel();
@@ -1586,7 +1588,6 @@ async function handleUpdateCheck() {
 
 function openSettings() {
   const settings = appState.settings;
-  elements.settingApiKey.disabled = Boolean(appState.app?.nativePersonal);
   elements.settingStartup.checked = settings.startAtLogin;
   elements.settingLive.checked = settings.autoOpenLive;
   elements.settingUpcoming.checked = settings.autoOpenUpcoming;
@@ -1604,9 +1605,7 @@ function openSettings() {
   elements.settingApiKey.placeholder = settings.hasApiKey
     ? '저장된 키 유지 (변경할 때만 입력)'
     : '입력하지 않아도 작동합니다';
-  elements.apiKeyStatus.textContent = appState.app?.nativePersonal
-    ? '개인용 빌드는 공개 페이지로 영상 감지와 조회수를 수집합니다. API 키 연동은 아직 적용되지 않습니다.'
-    : settings.hasApiKey
+  elements.apiKeyStatus.textContent = settings.hasApiKey
     ? 'API 키 저장됨 · 공식 채널·영상 통계를 사용합니다. 구독자 수는 공개 정책상 반올림됩니다.'
     : 'API 키 없음 · 공개 페이지로 영상 감지와 조회수 수집을 계속합니다.';
   elements.startupHelp.textContent = appState.app?.nativePersonal

@@ -1,63 +1,9 @@
 {
   "name": "youtube-live-pulse",
-  "version": "1.12.1",
-  "description": "지정한 YouTube 채널의 라이브, 예약 방송, 새 영상과 게시물을 알려주는 Windows 트레이 앱",
-  "main": "src/main.js",
-  "author": "Local user",
+  "private": true,
+  "description": "라이브 펄스: 화면(renderer) 계산 코드와 Fly 클라우드 수집기 테스트. 앱 본체는 native/ (C#).",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "test": "node --test",
-    "icon": "electron scripts/generate-icon.js",
-    "pack": "electron-builder --dir --win --publish never",
-    "build": "electron-builder --win nsis --publish never",
-    "release": "electron-builder --win nsis --publish always"
-  },
-  "dependencies": {
-    "electron-updater": "^6.8.9",
-    "read-excel-file": "^9.3.5"
-  },
-  "devDependencies": {
-    "electron": "^40.0.0",
-    "electron-builder": "^26.0.12"
-  },
-  "build": {
-    "appId": "kr.local.youtubelivepulse",
-    "productName": "라이브 펄스",
-    "artifactName": "LivePulse-Setup-${version}.${ext}",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "src/**/*",
-      "assets/**/*",
-      "package.json"
-    ],
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "nonohako",
-        "repo": "youtube-live-pulse",
-        "releaseType": "release"
-      }
-    ],
-    "win": {
-      "icon": "assets/pulse.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "runAfterFinish": true
-    }
+    "test": "node --test"
   }
 }

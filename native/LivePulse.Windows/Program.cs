@@ -32,6 +32,14 @@ internal static class Program
             VerifyStartup();
             return;
         }
+        var identity = WindowsIdentity.GetCurrent().User!.Value;
+        var quitName = @"Local\LivePulseNative.Quit." + identity;
+        if (args is ["--quit"])
+        {
+            // Graceful stop for scripts: the running app finishes its current write/backup first.
+            if (EventWaitHandle.TryOpenExisting(quitName, out var running)) using (running) running.Set();
+            return;
+        }
         var layout = PortableLayout.Find(AppContext.BaseDirectory);
         // Diagnostic and isolated arguments keep their own behavior even inside a portable build.
         var personal = layout is not null && (args.Length == 0 || args is ["--hidden"]) ? layout : null;
@@ -40,7 +48,6 @@ internal static class Program
 
         // The DB lease remains the writer guard. This gate also routes double-clicks
         // to the existing window before another tray or database connection is created.
-        var identity = WindowsIdentity.GetCurrent().User!.Value;
         using var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\LivePulseNative.Show." + identity);
         using var instance = new Mutex(false, @"Local\LivePulseNative.Instance." + identity);
         bool ownsInstance;
@@ -51,10 +58,13 @@ internal static class Program
             if (!args.Contains("--hidden")) show.Set();
             return;
         }
+        using var quit = new EventWaitHandle(false, EventResetMode.AutoReset, quitName);
         var listener = ThreadPool.RegisterWaitForSingleObject(show,
             (_, _) => app.Dispatcher.BeginInvoke((Action)app.ShowWindow), null, Timeout.Infinite, false);
+        var quitListener = ThreadPool.RegisterWaitForSingleObject(quit,
+            (_, _) => app.Dispatcher.BeginInvoke((Action)app.Quit), null, Timeout.Infinite, true);
         try { app.Run(); }
-        finally { listener.Unregister(null); instance.ReleaseMutex(); }
+        finally { listener.Unregister(null); quitListener.Unregister(null); instance.ReleaseMutex(); }
     }
 
     private static void VerifyStartup()

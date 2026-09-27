@@ -10,7 +10,7 @@ public sealed record Broadcast(string Id, string Title, string Url, string Thumb
 public sealed record VideoCandidate(string Id, bool IsLive = false, bool IsUpcoming = false,
     string Title = "", string Url = "", string ThumbnailUrl = "", string PublishedText = "",
     long? ViewCount = null, string? ScheduledStart = null, string? PublishedAt = null,
-    string? UpdatedAt = null);
+    string? UpdatedAt = null, string? Source = null);
 
 public static partial class YouTubeBroadcast
 {

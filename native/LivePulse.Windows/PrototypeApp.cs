@@ -38,7 +38,8 @@ internal sealed class PrototypeApp : System.Windows.Application
     private string? _lastNotificationUrl;
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunValueName = "라이브 펄스";
-    private const string DesktopShortcutName = "라이브 펄스 (네이티브).lnk";
+    // "(네이티브)" was the name while the Electron app was still installed.
+    private static readonly string[] DesktopShortcutNames = ["라이브 펄스.lnk", "라이브 펄스 (네이티브).lnk"];
     private readonly PortableLayout? _personal;
     internal bool IsPersonal => _personal is not null;
     internal string WebViewProfilePath => _personal?.WebViewProfile
@@ -66,9 +67,32 @@ internal sealed class PrototypeApp : System.Windows.Application
             Visible = true,
             ContextMenuStrip = new Forms.ContextMenuStrip()
         };
-        _tray.ContextMenuStrip.Items.Add(IsPersonal ? "창 열기" : "시제품 창 열기", null, (_, _) => ShowWindow());
-        _tray.ContextMenuStrip.Items.Add("종료", null, (_, _) => Quit());
-        _tray.DoubleClick += (_, _) => ShowWindow();
+        var menu = _tray.ContextMenuStrip;
+        menu.Items.Add("라이브 펄스 열기", null, (_, _) => ShowWindow());
+        menu.Items.Add("지금 새로고침", null, async (_, _) =>
+        {
+            try { await RefreshAsync(); }
+            catch (Exception error) { Console.Error.WriteLine($"NATIVE_TRAY_REFRESH_FAILED {error.Message}"); }
+        });
+        if (IsPersonal)
+        {
+            menu.Items.Add(new Forms.ToolStripSeparator());
+            var startup = new Forms.ToolStripMenuItem("Windows 로그인 때 자동 실행") { CheckOnClick = true };
+            startup.Click += (_, _) =>
+            {
+                try
+                {
+                    using var partial = JsonDocument.Parse(startup.Checked ? """{"startAtLogin":true}""" : """{"startAtLogin":false}""");
+                    UpdateSettings(partial.RootElement);
+                }
+                catch (Exception error) { System.Windows.MessageBox.Show($"설정을 저장하지 못했습니다.\n{error.Message}", "라이브 펄스"); }
+            };
+            menu.Opening += (_, _) => startup.Checked = _stateReader?.Read()["settings"]?["startAtLogin"]?.GetValue<bool>() == true;
+            menu.Items.Add(startup);
+        }
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add("종료", null, (_, _) => Quit());
+        _tray.MouseClick += (_, args) => { if (args.Button == Forms.MouseButtons.Left) ShowWindow(); };
         _tray.BalloonTipClicked += (_, _) =>
         {
             if (_lastNotificationUrl is { } url) OpenUrl(url);
@@ -77,14 +101,15 @@ internal sealed class PrototypeApp : System.Windows.Application
         // Sweep start/finish is pushed promptly; otherwise the full state refreshes every 30 s.
         _heartbeat.Tick += (_, _) =>
         {
-            if (_window is null) return;
             var sweeping = _monitorScheduler?.IsSweeping == true;
             var last = _monitorScheduler?.LastSweep;
-            if (sweeping == _lastSweeping && ReferenceEquals(last, _lastSweepSent) && ++_ticksSinceState < 30) return;
+            var sweepChanged = !ReferenceEquals(last, _lastSweepSent);
+            if (sweeping == _lastSweeping && !sweepChanged && ++_ticksSinceState < 30) return;
             _lastSweeping = sweeping;
             _lastSweepSent = last;
             _ticksSinceState = 0;
-            _window.SendState();
+            if (sweepChanged) UpdateTrayText();
+            _window?.SendState();
         };
         _heartbeat.Start();
         try
@@ -123,6 +148,19 @@ internal sealed class PrototypeApp : System.Windows.Application
             ShowWindow();
     }
 
+    // Like Electron: the tooltip shows how many channels are live.
+    private void UpdateTrayText()
+    {
+        if (_tray is null || _stateReader is null) return;
+        try
+        {
+            var live = _stateReader.CountLiveChannels();
+            _tray.Text = Volatile.Read(ref _lastCloudError) is not null ? "라이브 펄스 · 클라우드 오류"
+                : live > 0 ? $"라이브 펄스 · {live}개 채널 LIVE" : "라이브 펄스 · YouTube 채널 확인 중";
+        }
+        catch (Exception error) { Console.Error.WriteLine($"NATIVE_TRAY_TEXT_FAILED {error.Message}"); }
+    }
+
     internal void ShowWindow()
     {
         if (_quitting) return;
@@ -152,6 +190,9 @@ internal sealed class PrototypeApp : System.Windows.Application
         state["monitor"]!["nextCheckAt"] = _monitorScheduler?.NextSweepAt?.ToString("O");
         state["monitor"]!["warning"] = _monitorTask is { IsCompleted: true } ? "감시가 중단됐습니다. 앱을 다시 시작하세요."
             : _monitorBackup?.LastError;
+        if (_monitorScheduler?.CurrentChannelId is { } checking)
+            foreach (var channel in state["channels"]!.AsArray())
+                if ((string?)channel!["id"] == checking && (string?)channel["status"] != "error") channel["status"] = "checking";
         state["app"]!["nativePersonal"] = IsPersonal;
         state["app"]!["loginSettingApplied"] = IsPersonal
             && IsPersonalLoginSettingApplied(state["settings"]!["startAtLogin"]?.GetValue<bool>() == true);
@@ -168,6 +209,7 @@ internal sealed class PrototypeApp : System.Windows.Application
         _monitorStore.AddChannel(resolved);
         _cloudSync?.ReplayForNewChannel();
         _monitorBackup.AfterCommit(false);
+        _monitorScheduler?.Wake();
         _window?.SendState();
         return new { ok = true, channelId = resolved.Id };
     }
@@ -188,6 +230,12 @@ internal sealed class PrototypeApp : System.Windows.Application
             throw new InvalidOperationException("격리 감시가 시작되지 않았습니다.");
         _monitorStore.UpdateSettings(partial);
         _monitorBackup.AfterCommit(false);
+        if (_snapshotClient is not null) _snapshotClient.ApiKey = _monitorStore.ReadApiKey();
+        if (partial.TryGetProperty("pollIntervalSeconds", out _) || partial.TryGetProperty("apiKey", out _))
+        {
+            _snapshotClient?.ExpireOfficialMetadata();
+            _monitorScheduler?.Wake();
+        }
         if (IsPersonal) ApplyPersonalLoginSetting();
         _window?.SendState();
     }
@@ -253,8 +301,15 @@ internal sealed class PrototypeApp : System.Windows.Application
 
     private static void RepairDesktopShortcut()
     {
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), DesktopShortcutName);
-        if (!File.Exists(path)) return;
+        foreach (var name in DesktopShortcutNames)
+        {
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), name);
+            if (File.Exists(path)) RepairShortcut(path);
+        }
+    }
+
+    private static void RepairShortcut(string path)
+    {
         var shellType = Type.GetTypeFromProgID("WScript.Shell") ?? throw new IOException("WScript.Shell을 사용할 수 없습니다.");
         dynamic shell = Activator.CreateInstance(shellType)!;
         try
@@ -323,6 +378,7 @@ internal sealed class PrototypeApp : System.Windows.Application
     {
         if (_monitorScheduler is null || _monitorCancellation is null)
             throw new InvalidOperationException("격리 감시가 시작되지 않았습니다.");
+        _snapshotClient?.ExpireOfficialMetadata();
         await _monitorScheduler.RunNowAsync(_monitorCancellation.Token);
         _window?.SendState();
     }
@@ -470,7 +526,7 @@ internal sealed class PrototypeApp : System.Windows.Application
         }
         var store = new NativeMonitorStore(database);
         _monitorStore = store;
-        _snapshotClient = new YouTubeSnapshotClient();
+        _snapshotClient = new YouTubeSnapshotClient { ApiKey = store.ReadApiKey() };
         _monitorBackup = new NativeBackupCheckpoint(database);
         var runner = new NativeMonitorRunner(store, _snapshotClient, _monitorEffects, _monitorBackup);
         _monitorScheduler = new NativeMonitorScheduler(store, runner);
@@ -496,7 +552,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                 Volatile.Write(ref _lastCloudError, null);
                 _ = Dispatcher.BeginInvoke((Action)(() =>
                 {
-                    if (_tray is not null) _tray.Text = IsPersonal ? "라이브 펄스 · 감시 중" : "라이브 펄스 시제품 · 감시 중";
+                    UpdateTrayText();
                     _window?.SendState();
                 }));
                 Console.WriteLine($"ISOLATED_CLOUD_SYNC configured={result.Configured} pages={result.Pages} "
@@ -508,7 +564,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                 Volatile.Write(ref _lastCloudError, error.Message);
                 _ = Dispatcher.BeginInvoke((Action)(() =>
                 {
-                    if (_tray is not null) _tray.Text = IsPersonal ? "라이브 펄스 · 클라우드 오류" : "라이브 펄스 시제품 · 클라우드 오류";
+                    UpdateTrayText();
                     _window?.SendState();
                 }));
                 Console.Error.WriteLine($"ISOLATED_CLOUD_SYNC_FAILED {error.Message}");

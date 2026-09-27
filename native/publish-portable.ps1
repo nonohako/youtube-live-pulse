@@ -4,6 +4,7 @@
 # Without -FromJson, a missing data/ is copied from the earlier %LOCALAPPDATA%\LivePulseNative
 # prototype (left unchanged as a fallback). Move the whole repository folder freely afterwards;
 # the app repairs its Windows login entry and desktop shortcut on the next launch.
+# The script creates the desktop shortcut and removes intermediate native/*/bin and obj folders.
 param(
     [string]$FromJson,
     [string]$Dotnet
@@ -27,8 +28,14 @@ if (-not $Dotnet) {
 $env:DOTNET_ROOT = Split-Path -Parent $Dotnet
 $env:DOTNET_ROOT_X64 = $env:DOTNET_ROOT
 
-if (Get-Process -Name 'LivePulse', 'LivePulse.NativePrototype', '라이브 펄스' -ErrorAction SilentlyContinue) {
-    throw '라이브 펄스(네이티브/Electron)를 트레이에서 종료한 뒤 다시 실행하세요.'
+# Ask a running portable app to finish its current write/backup and quit.
+$running = Get-Process -Name 'LivePulse' -ErrorAction SilentlyContinue
+if ($running -and (Test-Path -LiteralPath (Join-Path $appDir 'LivePulse.exe'))) {
+    & (Join-Path $appDir 'LivePulse.exe') --quit
+    $running | Wait-Process -Timeout 120 -ErrorAction SilentlyContinue
+}
+if (Get-Process -Name 'LivePulse', 'LivePulse.NativePrototype' -ErrorAction SilentlyContinue) {
+    throw '라이브 펄스가 아직 실행 중입니다. 트레이에서 종료한 뒤 다시 실행하세요.'
 }
 
 # --- app/ ---------------------------------------------------------------------------------
@@ -102,11 +109,22 @@ if (Test-Path -LiteralPath $database) {
 }
 
 # --- desktop shortcut -----------------------------------------------------------------------
+$desktop = [Environment]::GetFolderPath('Desktop')
+$legacyShortcut = Join-Path $desktop '라이브 펄스 (네이티브).lnk'
+if (Test-Path -LiteralPath $legacyShortcut) { Remove-Item -LiteralPath $legacyShortcut }
 $shell = New-Object -ComObject WScript.Shell
-$shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) '라이브 펄스 (네이티브).lnk'))
+$shortcut = $shell.CreateShortcut((Join-Path $desktop '라이브 펄스.lnk'))
 $shortcut.TargetPath = Join-Path $appDir 'LivePulse.exe'
 $shortcut.Arguments = ''
 $shortcut.WorkingDirectory = $appDir
 $shortcut.IconLocation = (Join-Path $appDir 'LivePulse.exe') + ',0'
 $shortcut.Save()
-Write-Output 'SHORTCUT_READY 바탕 화면: 라이브 펄스 (네이티브)'
+Write-Output 'SHORTCUT_READY 바탕 화면: 라이브 펄스'
+
+# Intermediate build output is regenerated on the next publish; keep the repository folder small.
+Get-ChildItem -LiteralPath $PSScriptRoot -Directory | ForEach-Object {
+    foreach ($name in 'bin', 'obj') {
+        $folder = Join-Path $_.FullName $name
+        if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
+    }
+}
