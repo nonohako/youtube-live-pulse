@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 
@@ -317,15 +318,27 @@ public sealed class NativeStateReader
         command.Parameters.AddWithValue("$kind", kind);
         command.Parameters.AddWithValue("$video", videoId);
         var all = full ? new List<KeyValuePair<string, long>>() : null;
+        // The overview spans the whole history: the first observation, then each local day's last
+        // real observation (the newest 119 days), ending with the latest one. Minute-level cloud
+        // samples would otherwise make "the latest N samples" cover only the last hour.
         var tail = new Queue<KeyValuePair<string, long>>();
         KeyValuePair<string, long>? first = null;
+        KeyValuePair<string, long>? dayLast = null;
+        DateOnly? day = null;
         KeyValuePair<string, long>? pending = null;
         void Keep(KeyValuePair<string, long> sample)
         {
             if (full) { all!.Add(sample); return; }
             if (first is null) { first = sample; return; }
-            tail.Enqueue(sample);
-            if (tail.Count > 119) tail.Dequeue();
+            var sampleDay = DateTimeOffset.TryParse(sample.Key, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal, out var at) ? DateOnly.FromDateTime(at.LocalDateTime) : (DateOnly?)null;
+            if (dayLast is { } closed && sampleDay != day)
+            {
+                tail.Enqueue(closed);
+                if (tail.Count > 119) tail.Dequeue();
+            }
+            day = sampleDay;
+            dayLast = sample;
         }
         using var reader = command.ExecuteReader();
         while (reader.Read())
@@ -335,6 +348,11 @@ public sealed class NativeStateReader
             pending = sample;
         }
         if (pending is { } last) Keep(last);
+        if (!full && dayLast is { } latest)
+        {
+            tail.Enqueue(latest);
+            if (tail.Count > 119) tail.Dequeue();
+        }
         IEnumerable<KeyValuePair<string, long>> observations = full ? all! : first is { } start
             ? new[] { start }.Concat(tail).ToArray() : [];
         var output = new JsonArray();

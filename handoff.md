@@ -24,6 +24,8 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 7. **Upstash check.** The whole Fly/Upstash window (13,786 minutes since 2026-09-17 13:00 UTC, 217 videos) was compared with the app DB: nothing was missing, so no manual migration is needed.
 8. **Merge to `main`.** PR #12 was marked ready and merged with a merge commit; the tag-only release workflow did not run and is now removed.
 
+8. **Card chart fix.** Channel-card sparklines were flat because the overview kept the latest 119 samples, which minute-level cloud data turns into the last ~2 hours (the card drew the last hour). The overview now keeps the first observation plus each local day's last observation (newest 119 days) and the latest one. Cards also showed "조회수 0회" when the page gave no count (`null` became 0); they now prefer the latest recorded (cloud) count.
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 34/34, isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.

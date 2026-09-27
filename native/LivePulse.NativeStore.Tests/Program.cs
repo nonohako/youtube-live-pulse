@@ -514,6 +514,33 @@ Require((string?)cloudEvent["at"] == "2026-09-24T02:00:00Z" && (string?)cloudEve
         < orderedEvents.IndexOf(cloudEvent),
     "새 동영상 알림이 클라우드 게시 시각을 쓰지 않거나 시간순이 아님");
 
+// Minute-level cloud samples must not shrink the card overview to the last hour.
+var overviewDb = Path.Combine(folder, "overview.sqlite");
+StoreImporter.Import(source, overviewDb);
+_ = new NativeMonitorStore(overviewDb);
+var minuteStart = new DateTimeOffset(2026, 9, 20, 0, 0, 0, TimeSpan.Zero);
+using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = overviewDb, Pooling = false }.ToString()))
+{
+    raw.Open();
+    using var transaction = raw.BeginTransaction();
+    for (var minute = 0; minute < 3 * 24 * 60; minute++)
+    {
+        using var insert = raw.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT INTO runtime_cloud_samples(channel_id,kind,video_id,at,count) VALUES($id,'subscriber','',$at,$count)";
+        insert.Parameters.AddWithValue("$id", channelId);
+        insert.Parameters.AddWithValue("$at", minuteStart.AddMinutes(minute).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
+        insert.Parameters.AddWithValue("$count", 1000 + minute);
+        insert.ExecuteNonQuery();
+    }
+    transaction.Commit();
+}
+var overview = new NativeStateReader(overviewDb).Read()["channels"]![0]!["subscriberHistory"]!.AsArray();
+Require(overview.Count is >= 4 and <= 6 && (long)overview[0]!["count"]! == 100
+    && (long)overview[^1]!["count"]! == 1000 + 3 * 24 * 60 - 1
+    && DateTimeOffset.Parse((string)overview[^1]!["at"]!) - DateTimeOffset.Parse((string)overview[1]!["at"]!) > TimeSpan.FromDays(1),
+    "카드 요약 차트가 전체 기간의 하루 마지막 값 대신 최근 표본만 담음");
+
 var settingsDb = Path.Combine(folder, "settings.sqlite");
 StoreImporter.Import(source, settingsDb);
 var settingsStore = new NativeMonitorStore(settingsDb);

@@ -505,9 +505,11 @@ function renderVideoRow(video, channel) {
   }
   const history = (channel?.videoViewHistories || []).find((item) => item.videoId === video.id);
   const latestSample = history?.samples?.at(-1);
-  const viewCount = Number.isFinite(Number(video.viewCount))
-    ? Number(video.viewCount)
-    : Number(latestSample?.count);
+  // Prefer the latest recorded count (cloud every minute); a missing page count is not zero.
+  const recorded = latestSample ? Number(latestSample.count) : NaN;
+  const listed = video.viewCount === null || video.viewCount === undefined || video.viewCount === ''
+    ? NaN : Number(video.viewCount);
+  const viewCount = Number.isFinite(recorded) ? recorded : listed;
   return `
     <div class="content-row">
       <span class="content-icon">▶</span>
