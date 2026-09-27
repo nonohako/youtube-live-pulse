@@ -20,7 +20,6 @@ internal sealed class PrototypeApp : System.Windows.Application
     private bool _quitting;
     private readonly DispatcherTimer _heartbeat = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool _lastSweeping;
-    private bool _closeHintShown;
     private DateTime _lastTrim = DateTime.MinValue;
     private MonitorSweepResult? _lastSweepSent;
     private int _ticksSinceState;
@@ -435,16 +434,6 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (!ReferenceEquals(_window, window)) return;
         _window = null;
         window.DisposeSession();
-        // New tray icons start in the hidden overflow area, so say once that the app keeps running.
-        if (!_closeHintShown && _tray is not null && !_args.Contains("--ui-smoke") && !_args.Contains("--lifecycle-smoke")
-            && !_args.Contains("--lifecycle-stress"))
-        {
-            _closeHintShown = true;
-            _lastNotificationUrl = null;
-            _tray.BalloonTipTitle = "라이브 펄스";
-            _tray.BalloonTipText = "창을 닫아도 트레이에서 계속 감시합니다. 완전히 끄려면 트레이 아이콘 → 종료를 누르세요.";
-            _tray.ShowBalloonTip(4000);
-        }
         // Let the WebView and chart data go, then return the freed memory to Windows.
         _ = Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, TrimMemory);
     }

@@ -32,6 +32,8 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 11. **X button crash (user report).** Pressing the window's X button terminated the whole app: the `Closing` handler called `CloseToTray`, whose `DisposeSession` calls `Close()` while WPF is still closing (InvalidOperationException, Windows Application Error events at 13:50). This predates the portable work; the tests had called `CloseToTray` directly. Closing now defers disposal to the next dispatcher turn, smokes close via `window.Close()`, and unhandled UI exceptions are logged instead of ending the app. Verified on the personal app with WM_CLOSE: the process stayed alive in the tray, reopened its window, no crash events.
 
+12. **Close balloon removed** at the user's request. The user observed tray memory of about 30-40 MB after the fixes (previously over 100 MB).
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 34/34, isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.
