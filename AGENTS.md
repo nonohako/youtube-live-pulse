@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (card sparkline daily overview and view count fix; work continues on `main`).
+Last maintained: 2026-09-27 (startup/tray memory tuning; work continues on `main`).
 
 ## Current state
 
@@ -43,6 +43,8 @@ Last maintained: 2026-09-27 (card sparkline daily overview and view count fix; w
 - Keep the validated analytics scope per WebView session; rejected requests preserve it; dialog release, channel removal and window disposal release it. Never replace open-chart histories with overview endpoints on a timer/cloud refresh.
 - After a failed channel sweep keep saved snapshots/history but hide stale live/upcoming indications; expose effect failures without promising automatic retries of deduplicated notifications.
 - Hidden startup creates no WebView. Closing disposes WebView; minimized/hidden windows skip broadcasts and pause countdowns; restore sends fresh scoped state. Monitoring and cloud sync continue while hidden.
+- Performance: startup verifies the DB once with `quick_check` (per process and path; full `integrity_check` stays for backups), reads only settings for the login entry, defers Run/shortcut repair until idle, and counts the previous run's `.bak.1` toward the hourly backup. Measured 2026-09-27: window 5.2 s to 1.7 s. Tray-only memory uses non-concurrent GC, `System.GC.ConserveMemory=7`, and an aggressive compacting GC plus empty working set after the window closes and after sweeps while hidden (at most once a minute): hidden private bytes 85-130 MB to about 50-58 MB. Quit hides the tray icon and window immediately.
+- The first window close per session shows a balloon that monitoring continues in the tray.
 - Tray menu: open, refresh now, Windows login toggle, quit; left click opens. Notifications are tray balloons whose click opens the validated YouTube URL in Chrome.
 
 ## User-facing principles

@@ -56,6 +56,15 @@ public static class NativeStoreRecovery
                 touch.ExecuteScalar();
             }
             catch (SqliteException) { /* Validation below decides whether recovery is needed. */ }
+            // quick_check (about 5x faster than integrity_check on real data) keeps startup short;
+            // backups are still validated with the full check when they are created.
+            try
+            {
+                Validate(primary, quick: true);
+                NativeMonitorStore.MarkVerified(primary);
+                return new RecoveryResult(false, null, null);
+            }
+            catch (Exception error) when (error is SqliteException or InvalidDataException) { }
         }
         return Recover(primary);
     }
@@ -106,12 +115,12 @@ public static class NativeStoreRecovery
         return new RecoveryResult(true, selected, preserved);
     }
 
-    public static void Validate(string databasePath)
+    public static void Validate(string databasePath, bool quick = false)
     {
         if (!File.Exists(databasePath)) throw new FileNotFoundException("SQLite DB가 없습니다.", databasePath);
         using var connection = Open(databasePath, SqliteOpenMode.ReadOnly);
         using var check = connection.CreateCommand();
-        check.CommandText = "PRAGMA integrity_check";
+        check.CommandText = quick ? "PRAGMA quick_check" : "PRAGMA integrity_check";
         if (check.ExecuteScalar() as string != "ok")
             throw new InvalidDataException("SQLite 무결성 검사가 실패했습니다.");
         using var marker = connection.CreateCommand();

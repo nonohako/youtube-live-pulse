@@ -15,6 +15,11 @@ public sealed class NativeMonitorStore
 {
     private readonly string connectionString;
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> VerifiedPaths =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal static void MarkVerified(string databasePath) => VerifiedPaths[Path.GetFullPath(databasePath)] = true;
+
     public NativeMonitorStore(string databasePath)
     {
         if (!File.Exists(databasePath)) throw new FileNotFoundException("이전 DB가 없습니다.", databasePath);
@@ -35,11 +40,15 @@ public sealed class NativeMonitorStore
                 || sourceHash.Any(character => !Uri.IsHexDigit(character)))
                 throw new InvalidDataException("이전 원본의 SHA-256 표시가 없습니다.");
         }
-        using (var check = connection.CreateCommand())
+        // The store, cloud archive and state reader all open the same DB; a full-file quick_check
+        // (~0.4 s on real data) once per process and path is enough.
+        if (!VerifiedPaths.ContainsKey(Path.GetFullPath(databasePath)))
         {
+            using var check = connection.CreateCommand();
             check.CommandText = "PRAGMA quick_check";
             if (check.ExecuteScalar() as string != "ok")
                 throw new InvalidDataException("SQLite 무결성 검사가 실패했습니다.");
+            MarkVerified(databasePath);
         }
         using var schema = connection.CreateCommand();
         schema.CommandText = """
@@ -202,6 +211,14 @@ public sealed class NativeMonitorStore
                 }
         }
         return result;
+    }
+
+    public bool ReadStartAtLogin()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT json_extract(value,'$.startAtLogin') FROM meta WHERE key='settings'";
+        return command.ExecuteScalar() is long value && value == 1;
     }
 
     public string ReadApiKey()

@@ -23,6 +23,13 @@ public sealed class NativeBackupCheckpoint(string databasePath, Func<DateTimeOff
     private int backupCount;
 
     public int BackupCount => Volatile.Read(ref backupCount);
+
+    // A generation written by the previous run counts toward the hourly schedule, so a restart
+    // does not copy the whole DB again right away.
+    public void AssumeBackupAt(DateTimeOffset at)
+    {
+        lock (gate) lastBackupAt = at;
+    }
     public string? LastError => Volatile.Read(ref lastError);
 
     public void AfterCommit(bool externalEffectsPending)

@@ -20,6 +20,8 @@ internal sealed class PrototypeApp : System.Windows.Application
     private bool _quitting;
     private readonly DispatcherTimer _heartbeat = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool _lastSweeping;
+    private bool _closeHintShown;
+    private DateTime _lastTrim = DateTime.MinValue;
     private MonitorSweepResult? _lastSweepSent;
     private int _ticksSinceState;
     private CancellationTokenSource? _monitorCancellation;
@@ -87,7 +89,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                 }
                 catch (Exception error) { System.Windows.MessageBox.Show($"설정을 저장하지 못했습니다.\n{error.Message}", "라이브 펄스"); }
             };
-            menu.Opening += (_, _) => startup.Checked = _stateReader?.Read()["settings"]?["startAtLogin"]?.GetValue<bool>() == true;
+            menu.Opening += (_, _) => startup.Checked = _monitorStore?.ReadStartAtLogin() == true;
             menu.Items.Add(startup);
         }
         menu.Items.Add(new Forms.ToolStripSeparator());
@@ -109,13 +111,17 @@ internal sealed class PrototypeApp : System.Windows.Application
             _lastSweepSent = last;
             _ticksSinceState = 0;
             if (sweepChanged) UpdateTrayText();
+            if (sweepChanged && _window is null) TrimMemory();
             _window?.SendState();
         };
         _heartbeat.Start();
         try
         {
+            var startupTimer = Stopwatch.StartNew();
             StartIsolatedMonitor();
-            if (IsPersonal) RepairPersonalShellEntries();
+            Console.WriteLine($"NATIVE_STARTUP_MONITOR_MS {startupTimer.ElapsedMilliseconds} since-process={(DateTime.Now - Process.GetCurrentProcess().StartTime).TotalMilliseconds:F0}");
+            // Registry/shortcut repair (COM) is not needed for the first paint.
+            if (IsPersonal) _ = Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, RepairPersonalShellEntries);
         }
         catch (Exception error)
         {
@@ -252,7 +258,7 @@ internal sealed class PrototypeApp : System.Windows.Application
     private void ApplyPersonalLoginSetting()
     {
         if (_stateReader is null || _personal is null) return;
-        var enabled = _stateReader.Read()["settings"]!["startAtLogin"]?.GetValue<bool>() == true;
+        var enabled = _monitorStore!.ReadStartAtLogin();
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
             ?? throw new IOException("Windows 시작 항목을 열 수 없습니다.");
         var current = key.GetValue(RunValueName) as string;
@@ -423,12 +429,42 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (!ReferenceEquals(_window, window)) return;
         _window = null;
         window.DisposeSession();
+        // New tray icons start in the hidden overflow area, so say once that the app keeps running.
+        if (!_closeHintShown && _tray is not null && !_args.Contains("--ui-smoke") && !_args.Contains("--lifecycle-smoke")
+            && !_args.Contains("--lifecycle-stress"))
+        {
+            _closeHintShown = true;
+            _lastNotificationUrl = null;
+            _tray.BalloonTipTitle = "라이브 펄스";
+            _tray.BalloonTipText = "창을 닫아도 트레이에서 계속 감시합니다. 완전히 끄려면 트레이 아이콘 → 종료를 누르세요.";
+            _tray.ShowBalloonTip(4000);
+        }
+        // Let the WebView and chart data go, then return the freed memory to Windows.
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, TrimMemory);
     }
+
+    // Tray-only memory: a compacting collection that decommits free GC memory, then an
+    // empty working set. Runs only while no window exists, at most once a minute.
+    private void TrimMemory()
+    {
+        if (_window is not null || DateTime.UtcNow - _lastTrim < TimeSpan.FromMinutes(1)) return;
+        _lastTrim = DateTime.UtcNow;
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+        using var process = Process.GetCurrentProcess();
+        SetProcessWorkingSetSize(process.Handle, -1, -1);
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern bool SetProcessWorkingSetSize(IntPtr process, nint minimum, nint maximum);
 
     internal void Quit()
     {
         if (_quitting) return;
         _quitting = true;
+        // Disappear immediately; the monitor may still finish a write or backup in the background.
+        if (_tray is not null) _tray.Visible = false;
+        if (_window is { } open) { _window = null; open.DisposeSession(); }
         _heartbeat.Stop();
         _monitorCancellation?.Cancel();
         _ = FinishQuitAsync();
@@ -528,6 +564,8 @@ internal sealed class PrototypeApp : System.Windows.Application
         _monitorStore = store;
         _snapshotClient = new YouTubeSnapshotClient { ApiKey = store.ReadApiKey() };
         _monitorBackup = new NativeBackupCheckpoint(database);
+        if (File.Exists(database + ".bak.1"))
+            _monitorBackup.AssumeBackupAt(File.GetLastWriteTimeUtc(database + ".bak.1"));
         var runner = new NativeMonitorRunner(store, _snapshotClient, _monitorEffects, _monitorBackup);
         _monitorScheduler = new NativeMonitorScheduler(store, runner);
         _monitorCancellation = new CancellationTokenSource();
