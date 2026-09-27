@@ -4,30 +4,62 @@ function analysisNumber(value, unit = '') {
   return value === null || !Number.isFinite(value) ? '자료 부족' : `${value > 0 ? '+' : ''}${formatTrend(value)}${unit}`;
 }
 
-function analysisOverview(samples, unit, completed = null) {
-  const stats = window.LivePulseAnalytics.intervalSummary(samples);
-  if (!stats.last) return '<p class="analysis-chart-help">이 구간에 실제 관측 기록이 없습니다.</p>';
-  const growth = completed ? window.LivePulseChartMath.summarizeDailyRange(completed, -Infinity, Infinity) : null;
-  const change = completed ? growth?.totalChange ?? null : stats.change;
-  const speed = completed ? growth?.averageDailyChange ?? null : stats.perDay;
-  const percent = completed ? growth?.periodGrowthRate ?? null : stats.percent;
-  return `<div class="analysis-kpis">
-    ${analysisKpi('마지막 관측값', `${formatNumber(stats.last.count)}<small>${unit}</small>`, formatChartDateTime(stats.last.timestamp))}
-    ${analysisKpi('기간 증감', analysisNumber(change, unit), completed ? '완료된 날짜 · 직전 마감값 대비' : '선택 구간 첫 기록 대비', change)}
-    ${analysisKpi('일평균 증가 속도', analysisNumber(speed, `${unit}/일`), completed ? '완료 구간 평균 · 빈 날짜 경과 반영' : '실제 관측 간격 기준 · 하루 환산', speed)}
-    ${analysisKpi('기간 증가율', percent === null ? '자료 부족' : `${percent > 0 ? '+' : ''}${formatPercent(percent)}%`, completed ? '오늘 제외 · 직전 마감값 대비' : '선택 구간 첫 기록 대비', percent)}
-  </div>`;
+// Stock-style headline: the latest value and its change since the previous completed day's close.
+function analysisTicker(history, unit, now = Date.now()) {
+  const samples = window.LivePulseChartMath.normalizeSamples(history).filter(s => s.timestamp <= now);
+  const last = samples.at(-1);
+  if (!last) return '';
+  const day = new Date(last.timestamp); day.setHours(0, 0, 0, 0);
+  const close = samples.filter(s => s.timestamp < day.getTime()).at(-1);
+  const change = close ? last.count - close.count : null;
+  const percent = close?.count > 0 ? change / close.count * 100 : null;
+  const tone = change > 0 ? 'up' : change < 0 ? 'down' : '';
+  const chip = change === null ? '<span class="ticker-chip">전날 기록 없음</span>'
+    : change === 0 ? '<span class="ticker-chip">변동 없음</span>'
+    : `<span class="ticker-chip ${tone}">${change > 0 ? '▲' : change < 0 ? '▼' : '−'} ${formatNumber(Math.abs(change))}${percent === null ? '' : ` (${change >= 0 ? '+' : '−'}${formatPercent(Math.abs(percent))}%)`}</span>`;
+  return `<strong>${formatNumber(last.count)}<small>${unit}</small></strong>${chip}
+    <span class="ticker-note">${close ? `${escapeHtml(formatChartDate(close.timestamp))} 마감 대비 · ` : ''}${escapeHtml(formatChartDateTime(last.timestamp))} 기준</span>`;
 }
 
-function analysisKpi(label, value, note, change = null) {
-  return `<section class="analysis-kpi"><span>${escapeHtml(label)}</span><strong class="${change > 0 ? 'up' : change < 0 ? 'down' : ''}">${value}</strong><small title="${escapeAttribute(note)}">${escapeHtml(note)}</small></section>`;
+function marketDefaultReadout(last, unit, mode, selectable) {
+  return `<span class="market-readout-date">${escapeHtml(mode === 'daily' ? formatSelectionDate(last.timestamp) : formatChartDateTime(last.timestamp))}</span>
+    <strong>${formatNumber(last.count)}${unit}</strong>
+    <span class="market-hint">마우스로 값 확인 · 휠로 확대${selectable ? ' · 날짜 드래그로 구간 분석' : ''} · 오른쪽 음영은 예측</span>`;
 }
 
-function analysisCaption(samples, metric, unit, mode) {
-  const first = samples[0], last = samples.at(-1);
-  const date = mode === 'daily' ? formatSelectionDate : formatChartDateTime;
-  return `<div class="analysis-chart-heading"><div><h3>${metric === 'change' ? '기간 내 증감' : unit === '명' ? '구독자 추이' : '누적 조회수'}</h3><span>${escapeHtml(date(first.timestamp))} — ${escapeHtml(date(last.timestamp))}</span></div><span class="analysis-records">${formatNumber(samples.length)}${mode === 'daily' ? '개 날짜' : '개 관측'}</span></div>
-    <p class="analysis-chart-help">${metric === 'change' ? (unit === '회' ? '기간 첫 실제 관측값 대비 증감입니다. ' : '선택 기간 첫 기록 대비 증감입니다. ') : ''}마우스를 움직여 수치 확인 · 휠로 확대${unit === '명' ? ' · 날짜를 드래그해 구간 분석' : ''}</p>`;
+function analysisOutlook(forecast, unit) {
+  const video = forecast.kind === 'video';
+  const compact = value => `${formatApprox(value)}${unit}`;
+  const range = p => `${formatApprox(p.low)} ~ ${formatApprox(p.high)}`;
+  const pace = forecast.momentum === null ? '' : Math.abs(forecast.momentum) < 0.1 ? '이전 7일과 비슷한 속도'
+    : `이전 7일보다 ${formatPercent(Math.abs(forecast.momentum) * 100)}% ${forecast.momentum > 0 ? '빨라짐' : '느려짐'}`;
+  const rows = [];
+  if (forecast.recent !== null) rows.push(['최근 7일 하루 평균', `${analysisNumber(forecast.recent, unit)}`, pace,
+    forecast.momentum > 0.1 ? 'up' : forecast.momentum < -0.1 ? 'down' : '']);
+  if (!forecast.ready) {
+    return `<aside class="market-outlook"><h3>전망 <small>참고용 추정</small></h3>
+      <dl class="outlook-list">${rows.map(outlookRow).join('')}</dl>
+      <p class="outlook-empty">${escapeHtml(forecast.reason)}</p></aside>`;
+  }
+  const week = forecast.project(7), month = forecast.project(30), milestone = forecast.milestone;
+  if (video) rows.push(['증가 속도 변화', forecast.halfLifeDays === null ? '줄지 않음'
+    : `약 ${formatTrend(forecast.halfLifeDays)}일마다 절반`, `지금 하루 약 ${compact(forecast.rate)}`, '']);
+  rows.push(['7일 뒤', `약 ${compact(week.value)}`, `80% 범위 ${range(week)}`, '']);
+  rows.push(['30일 뒤', `약 ${compact(month.value)}`, `80% 범위 ${range(month)}`, '']);
+  rows.push([`${compact(milestone.target)} 도달`, milestone.days === null ? '지금 추세로는 어려움'
+    : milestone.days < 1 ? '하루 안에' : `${formatChartDate(milestone.timestamp)} 전후`,
+    milestone.days === null ? '1년 이상 걸리거나 증가가 멈춤' : `약 ${formatTrend(Math.max(1, milestone.days))}일 뒤`, '']);
+  const summary = video
+    ? `지금 하루 약 ${compact(forecast.rate)}씩 늘고 있고, ${forecast.halfLifeDays === null ? '증가 속도가 줄지 않고 있어요' : `증가 속도는 약 ${formatTrend(forecast.halfLifeDays)}일마다 절반으로 줄고 있어요`}. 7일 뒤 약 ${compact(week.value)}로 예상돼요.`
+    : `${forecast.recent === null ? '' : `최근 7일 하루 평균 ${analysisNumber(forecast.recent, unit)}씩 늘었어요${pace ? ` (${pace})` : ''}. `}이 추세라면 30일 뒤 약 ${compact(month.value)}으로 예상돼요.`;
+  return `<aside class="market-outlook"><h3>전망 <small>참고용 추정</small></h3>
+    <p class="outlook-summary">${escapeHtml(summary)}</p>
+    <dl class="outlook-list">${rows.map(outlookRow).join('')}</dl>
+    <p class="outlook-method">최근 ${forecast.windowDays}일의 완료된 날짜 기록으로 계산했습니다. 오늘은 집계 중이라 제외하며, 예측은 저장하지 않습니다.</p></aside>`;
+}
+
+function outlookRow([label, value, note, tone]) {
+  return `<div><dt>${escapeHtml(label)}</dt><dd><strong>${escapeHtml(value)}</strong>${note ? `<small class="${tone}">${escapeHtml(note)}</small>` : ''}</dd></div>`;
 }
 
 const analysisRecordPages = new Map();
@@ -53,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const next = parent.querySelector(`[data-record-step="${step}"]:not(:disabled)`) || parent.querySelector('[data-record-step]:not(:disabled)');
     next?.focus({preventScroll: true});
   });
-  for (const [kind, dialogId, renderChart] of [['subscriber', 'subscriber-dialog', renderSubscriberDetail], ['video', 'video-view-dialog', renderVideoViewDetail]]) {
+  for (const [kind, dialogId] of [['subscriber', 'subscriber-dialog'], ['video', 'video-view-dialog']]) {
     const dialog = document.getElementById(dialogId);
     dialog.addEventListener('close', () => analysisRecordPages.delete(kind === 'subscriber' ? '명' : '회'));
     dialog.classList.add('analytics-workspace');
@@ -67,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const tabs = document.createElement('div');
     tabs.className = 'analysis-tabs'; tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '분석 화면');
-    const sections = [['overview','추이'],['records','일별 기록'], ...(kind === 'subscriber' ? [['growth','성장 분석']] : [])];
+    const sections = [['overview','차트'],['records','일별 기록']];
     tabs.innerHTML = sections.map(([value,label], i) => `<button type="button" role="tab" aria-selected="${i === 0}" data-analysis-tab="${value}">${label}</button>`).join('');
     header.after(tabs); dialog.dataset.analysisTab = 'overview';
     tabs.addEventListener('click', e => {
@@ -100,18 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const controls = document.createElement('div');
     controls.className = 'analysis-controls';
     toolbar.before(controls);
-    controls.append(toolbar, dialog.querySelector('.chart-mode'));
-    const metric = document.createElement('div');
-    metric.className = 'analysis-metric-switch';
-    metric.setAttribute('aria-label', '차트에 표시할 값');
-    metric.innerHTML = `<button type="button" data-analysis-metric="total">${kind === 'subscriber' ? '구독자 수' : '누적 조회수'}</button><button type="button" data-analysis-metric="change">기간 증감</button>`;
-    controls.append(metric);
-    metric.addEventListener('click', e => {
-      const value = e.target.closest('[data-analysis-metric]')?.dataset.analysisMetric;
-      if (!value) return;
-      saveChartPreference(kind + 'Metric', value);
-      renderChart();
-    });
+    controls.append(document.getElementById(kind + '-ticker'), toolbar, dialog.querySelector('.chart-mode'));
     const disclaimer = dialog.querySelector('.chart-disclaimer');
     const help = document.createElement('details');
     help.className = 'analysis-help';

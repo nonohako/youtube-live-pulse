@@ -735,8 +735,6 @@ function renderSubscriberDetail() {
   const math = window.LivePulseChartMath;
   const now = Date.now();
   const displayMode = readChartPreferences().subscriberMode;
-  const metric = readChartPreferences().subscriberMetric;
-  elements.subscriberDialog.querySelectorAll('[data-analysis-metric]').forEach(b => { b.classList.toggle('active', b.dataset.analysisMetric === metric); b.setAttribute('aria-pressed', b.dataset.analysisMetric === metric); });
   document.getElementById('subscriber-chart-mode').value = displayMode;
   const displayHistory = displayMode === 'daily'
     ? math.collapseSamplesByLocalDate(channel.subscriberHistory || [])
@@ -782,20 +780,8 @@ function renderSubscriberDetail() {
       subscriberChartViewport.endTime
     )
     : baseTimeAxis;
-  const summary = math.summarizeSamples(samples);
   const resetZoomButton = elements.subscriberDialog.querySelector('[data-reset-chart-zoom]');
   resetZoomButton.hidden = !subscriberChartViewport;
-
-  const changeClass = summary.change > 0 ? 'up' : summary.change < 0 ? 'down' : '';
-  const changeText = `${summary.change >= 0 ? '+' : ''}${formatNumber(summary.change)}`;
-  const slopeText = `${summary.slopePerDay >= 0 ? '+' : ''}${formatTrend(summary.slopePerDay)}/일`;
-  const rangeLabel = subscriberChartViewport ? '확대 구간' : ({
-    '7d': '7일',
-    '30d': '30일',
-    '90d': '90일',
-    '1y': '1년',
-    all: '전체'
-  }[subscriberChartRange] || '선택 기간');
 
   const growth = subscriberChartViewport
     ? math.analyzeGrowthForTimeWindow(
@@ -809,7 +795,6 @@ function renderSubscriberDetail() {
       subscriberChartRange,
       now
     );
-  const growthTimeAxis = math.buildCompletedDayAxis(growth.daily);
   let selectionSummary = subscriberChartSelection
     ? math.summarizeDailyRange(
       growth.daily,
@@ -821,31 +806,30 @@ function renderSubscriberDetail() {
     subscriberChartSelection = null;
     selectionSummary = null;
   }
-  const chart = buildDetailChart(
-    samples,
-    null,
-    timeAxis,
-    growth.daily,
-    subscriberChartSelection,
-    displayMode,
-    { metric, baseline: baseSamples[0].count, plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples }
-  );
-  const growthChart = buildGrowthChart(growth.daily, growthTimeAxis);
+  const outlook = window.LivePulseAnalytics.forecast(channel.subscriberHistory || [], 'subscriber', now);
+  const chart = buildMarketChart(samples, timeAxis, growth.daily, subscriberChartSelection, displayMode, {
+    unit: '명', title: '구독자 수 추이', size: marketChartSize(elements.subscriberDetailContent),
+    forecast: subscriberChartViewport ? null : outlook, horizonDays: forecastHorizonDays(baseTimeAxis),
+    plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples
+  });
   detailChartModel = {
     ...chart.model,
     baseSamples,
-    fullTimeAxis: baseTimeAxis
+    fullTimeAxis: baseTimeAxis,
+    defaultReadout: marketDefaultReadout(samples.at(-1), '명', displayMode, true)
   };
+  document.getElementById('subscriber-ticker').innerHTML = analysisTicker(channel.subscriberHistory, '명', now);
   elements.subscriberDetailContent.innerHTML = `
-    ${analysisOverview(subscriberChartViewport ? math.filterSamplesInTimeWindow(math.filterSamples(channel.subscriberHistory, subscriberChartRange, now), timeAxis.startTime, timeAxis.endTime) : math.filterSamples(channel.subscriberHistory, subscriberChartRange, now), '명', growth.daily)}
-    <section class="analysis-plot-panel">
-      ${analysisCaption(samples, metric, '명', displayMode)}
-      ${chart.svg}
-      ${renderSelectionSummary(selectionSummary)}
-    </section>
-    ${renderGrowthAnalysis(growth, growthChart)}
+    <div class="market-layout">
+      <section class="analysis-plot-panel">
+        ${chart.svg}
+        ${renderSelectionSummary(selectionSummary)}
+      </section>
+      ${analysisOutlook(outlook, '명')}
+    </div>
     ${analysisDailyTable(growth.daily, '명', [subscriberChartChannelId, subscriberChartRange, displayMode, subscriberChartViewport])}
     `;
+  hideMarketHover(elements.subscriberDialog, detailChartModel, SUBSCRIBER_CHART_IDS);
 }
 
 function renderVideoViewDetail() {
@@ -874,8 +858,6 @@ function renderVideoViewDetail() {
   const math = window.LivePulseChartMath;
   const now = Date.now();
   const displayMode = readChartPreferences().videoMode;
-  const metric = readChartPreferences().videoMetric;
-  elements.videoViewDialog.querySelectorAll('[data-analysis-metric]').forEach(b => { b.classList.toggle('active', b.dataset.analysisMetric === metric); b.setAttribute('aria-pressed', b.dataset.analysisMetric === metric); });
   document.getElementById('video-chart-mode').value = displayMode;
   const visualHistory = displayMode === 'daily' ? math.collapseSamplesByLocalDate(history.samples || []) : history.samples || [];
   const baseSamples = math.filterSamples(visualHistory, videoViewChartRange, now);
@@ -919,103 +901,46 @@ function renderVideoViewDetail() {
   const timeAxis = videoViewChartViewport
     ? math.buildTimeWindowAxis(videoViewChartViewport.startTime, videoViewChartViewport.endTime)
     : baseTimeAxis;
-  const summary = math.summarizeSamples(samples);
-  const periodGrowth = samples[0].count > 0
-    ? (summary.change / samples[0].count) * 100
-    : null;
-  const changeClass = summary.change > 0 ? 'up' : summary.change < 0 ? 'down' : '';
-  const rangeLabel = videoViewChartViewport ? '확대 구간' : ({
-    '7d': '7일',
-    '30d': '30일',
-    '90d': '90일',
-    '1y': '1년',
-    all: '전체'
-  }[videoViewChartRange] || '선택 기간');
-  const observedSamples = videoViewChartViewport ? math.filterSamplesInTimeWindow(math.filterSamples(history.samples, videoViewChartRange, now), timeAxis.startTime, timeAxis.endTime) : math.filterSamples(history.samples, videoViewChartRange, now);
-  const chart = buildDetailChart(
-    samples,
-    math.linearRegression(samples),
-    timeAxis,
-    [],
-    null,
-    displayMode,
-    {
-      metric, baseline: math.filterSamples(history.samples, videoViewChartRange, now)[0]?.count,
-      plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples,
-      svgId: 'video-view-detail-svg',
-      crosshairId: 'video-view-crosshair',
-      dotId: 'video-view-hover-dot',
-      tooltipId: 'video-view-tooltip',
-      selectionId: 'video-view-selection',
-      gradientId: 'video-view-chart-gradient',
-      titleId: 'video-view-chart-title',
-      descId: 'video-view-chart-desc',
-      title: '영상 조회수 상세 추이',
-      description: '선택한 기간의 실제 조회수 또는 첫 관측값 대비 증감을 나타냅니다.',
-      selectionEnabled: false
-    }
-  );
+  const daily = videoViewChartViewport
+    ? math.analyzeGrowthForTimeWindow(history.samples, timeAxis.startTime, timeAxis.endTime, now).daily
+    : math.analyzeGrowthForRange(history.samples, videoViewChartRange, now).daily;
+  const outlook = window.LivePulseAnalytics.forecast(history.samples, 'video', now);
+  const chart = buildMarketChart(samples, timeAxis, daily, null, displayMode, {
+    unit: '회', title: '영상 조회수 추이', ids: VIDEO_CHART_IDS, selectionEnabled: false,
+    size: marketChartSize(elements.videoViewDetailContent),
+    forecast: videoViewChartViewport ? null : outlook, horizonDays: forecastHorizonDays(baseTimeAxis),
+    plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples
+  });
   videoViewChartModel = {
     ...chart.model,
     baseSamples,
-    fullTimeAxis: baseTimeAxis
+    fullTimeAxis: baseTimeAxis,
+    defaultReadout: marketDefaultReadout(samples.at(-1), '회', displayMode, false)
   };
   resetZoomButton.hidden = !videoViewChartViewport;
+  document.getElementById('video-ticker').innerHTML = analysisTicker(history.samples, '회', now);
   elements.videoViewDetailContent.innerHTML = `
-    ${analysisOverview(observedSamples, '회')}
-    <section class="analysis-plot-panel">
-      ${analysisCaption(samples, metric, '회', displayMode)}
-      ${chart.svg}
-    </section>
-    ${analysisDailyTable(videoViewChartViewport ? math.analyzeGrowthForTimeWindow(history.samples, timeAxis.startTime, timeAxis.endTime, now).daily : math.analyzeGrowthForRange(history.samples, videoViewChartRange, now).daily, '회', [videoViewChartChannelId, videoViewChartVideoId, videoViewChartRange, displayMode, videoViewChartViewport])}
+    <div class="market-layout">
+      <section class="analysis-plot-panel">${chart.svg}</section>
+      ${analysisOutlook(outlook, '회')}
+    </div>
+    ${analysisDailyTable(daily, '회', [videoViewChartChannelId, videoViewChartVideoId, videoViewChartRange, displayMode, videoViewChartViewport])}
     `;
-}
-
-function renderDetailMetric(label, value, className = '') {
-  return `
-    <div class="detail-metric">
-      <span>${escapeHtml(label)}</span>
-      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
-    </div>`;
+  hideMarketHover(elements.videoViewDialog, videoViewChartModel, VIDEO_CHART_IDS);
 }
 
 function renderSelectionSummary(summary) {
-  if (!summary) {
-    return `
-      <section class="selection-analysis empty" aria-label="선택 구간 분석 안내">
-        <div>
-          <strong>날짜 또는 구간 분석</strong>
-          <span>위 차트에서 완료된 날짜를 클릭하거나 좌우로 드래그해 보세요.</span>
-        </div>
-      </section>`;
-  }
-
+  if (!summary) return '';
   const rangeLabel = summary.startTime === summary.endTime
     ? formatSelectionDate(summary.startTime)
     : `${formatSelectionDate(summary.startTime)} – ${formatSelectionDate(summary.endTime)}`;
-  const total = formatSignedAnalysis(summary.totalChange, '명', formatNumber);
-  const averageChange = formatSignedAnalysis(summary.averageDailyChange, '명/일');
-  const averageRate = formatSignedAnalysis(summary.averageGrowthRate, '%/일', formatPercent);
-  const periodRate = formatSignedAnalysis(summary.periodGrowthRate, '%', formatPercent);
-  const slope = formatSignedAnalysis(summary.slopePerDay, '명/일');
-
   return `
     <section class="selection-analysis" aria-labelledby="selection-analysis-title">
-      <div class="selection-analysis-header">
-        <div>
-          <div class="eyebrow">SELECTED RANGE</div>
-          <h3 id="selection-analysis-title">${escapeHtml(rangeLabel)}</h3>
-          <span>완료일 ${summary.dayCount}개 기준</span>
-        </div>
-        <button type="button" data-clear-chart-selection>선택 해제</button>
-      </div>
-      <div class="selection-metrics">
-        ${renderSelectionMetric('누적 증감', total)}
-        ${renderSelectionMetric('일평균 증가량', averageChange)}
-        ${renderSelectionMetric('일평균 성장률', averageRate)}
-        ${renderSelectionMetric('구간 성장률', periodRate)}
-        ${renderSelectionMetric('추세 기울기', slope)}
-      </div>
+      <h3 id="selection-analysis-title">${escapeHtml(rangeLabel)} <small>완료일 ${summary.dayCount}개</small></h3>
+      ${renderSelectionMetric('누적 증감', formatSignedAnalysis(summary.totalChange, '명', formatNumber))}
+      ${renderSelectionMetric('하루 평균', formatSignedAnalysis(summary.averageDailyChange, '명/일'))}
+      ${renderSelectionMetric('구간 성장률', formatSignedAnalysis(summary.periodGrowthRate, '%', formatPercent))}
+      <button type="button" data-clear-chart-selection>선택 해제</button>
     </section>`;
 }
 
@@ -1024,73 +949,6 @@ function renderSelectionMetric(label, metric) {
     <div class="selection-metric">
       <span>${escapeHtml(label)}</span>
       <strong class="${escapeAttribute(metric.className)}">${escapeHtml(metric.value)}</strong>
-    </div>`;
-}
-
-function renderGrowthAnalysis(growth, chart) {
-  const dailyChange = formatSignedAnalysis(growth.latestDailyChange, '명/일');
-  const growthRate = formatSignedAnalysis(growth.latestGrowthRate, '%/일', formatPercent);
-  const acceleration = formatChangeState(
-    growth.accelerationChange,
-    '가속',
-    '둔화',
-    '명/일 차이'
-  );
-  const momentum = formatChangeState(
-    growth.momentumChange,
-    '강화',
-    '약화',
-    '명/일'
-  );
-  const slope = formatChangeState(
-    growth.slopeChange,
-    '상승',
-    '하락',
-    '명/일'
-  );
-  const momentumDetail = growth.momentumChange === null
-    ? '일간 변화 6개 필요'
-    : `직전 3개 완료 구간 하루 평균 ${formatSignedAnalysis(growth.previousMomentum, '명/일').value} → 최근 3개 ${formatSignedAnalysis(growth.recentMomentum, '명/일').value}`;
-  const slopeDetail = growth.slopeChange === null
-    ? '일별 마감 기록 4개 필요'
-    : `전반 ${formatSignedAnalysis(growth.earlierSlope, '명/일').value} → 후반 ${formatSignedAnalysis(growth.laterSlope, '명/일').value}`;
-
-  const completedLabel = Number.isFinite(growth.latestCompletedAt)
-    ? `${formatChartDate(growth.latestCompletedAt)} 마감 기준 · ${growth.daily.length}개 완료일`
-    : '완료된 날짜 기록 없음';
-
-  return `
-    <section class="growth-analysis" aria-labelledby="growth-analysis-title">
-      <div class="growth-analysis-header">
-        <div>
-          <div class="eyebrow">GROWTH SIGNALS</div>
-          <h3 id="growth-analysis-title">성장 분석</h3>
-        </div>
-        <span>${escapeHtml(completedLabel)}</span>
-      </div>
-      <div class="growth-metrics">
-        ${renderGrowthMetric('일일 증가량', dailyChange.value, dailyChange.className, '마지막 완료일의 하루 평균')}
-        ${renderGrowthMetric('성장률 추이', growthRate.value, growthRate.className, '마지막 완료일의 일일 증가율')}
-        ${renderGrowthMetric('직전 대비 속도', acceleration.value, acceleration.className, '최근 증가량 − 직전 증가량')}
-        ${renderGrowthMetric('최근 3구간 변화', momentum.value, momentum.className, momentumDetail)}
-        ${renderGrowthMetric('전후반 추세 차이', slope.value, slope.className, slopeDetail)}
-      </div>
-      <div class="growth-chart-legend">
-        <strong>일별 증가량 · 성장률 추이</strong>
-        <span><i class="legend-growth-bar"></i>증가량</span>
-        <span><i class="legend-growth-rate"></i>성장률</span>
-      </div>
-      ${chart}
-      <p class="growth-method">오늘은 집계가 끝나지 않았으므로 모든 성장 분석과 증가량 차트에서 제외합니다. 완료된 날짜별 마지막 측정값을 마감값으로 사용하고, 첫 표시일의 변화는 기간 밖 직전 마감값과 비교합니다. 측정일 사이가 비면 증가분을 경과 일수로 나눕니다. 둔화는 최근 두 완료 구간의 하루 증가량 차이, 모멘텀은 최근 3개 완료 구간과 그 직전 3개 완료 구간의 하루 평균 증가량, 기울기는 선택 기간 전반부와 후반부 추세를 비교합니다.</p>
-    </section>`;
-}
-
-function renderGrowthMetric(label, value, className, detail) {
-  return `
-    <div class="growth-metric">
-      <span>${escapeHtml(label)}</span>
-      <strong class="${escapeAttribute(className)}">${escapeHtml(value)}</strong>
-      <small title="${escapeAttribute(detail)}">${escapeHtml(detail)}</small>
     </div>`;
 }
 
@@ -1103,208 +961,204 @@ function formatSignedAnalysis(value, suffix, formatter = formatTrend) {
   };
 }
 
-function formatChangeState(value, positiveLabel, negativeLabel, suffix) {
-  const formatted = formatSignedAnalysis(value, suffix);
-  if (!Number.isFinite(value)) return formatted;
-  const label = value > 0 ? positiveLabel : value < 0 ? negativeLabel : '변화 없음';
-  return { ...formatted, value: `${label} ${formatted.value}` };
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SUBSCRIBER_CHART_IDS = {svg: 'subscriber-detail-svg', crosshair: 'detail-crosshair', dot: 'detail-hover-dot',
+  readout: 'detail-chart-tooltip', selection: 'detail-selection'};
+const VIDEO_CHART_IDS = {svg: 'video-view-detail-svg', crosshair: 'video-view-crosshair', dot: 'video-view-hover-dot',
+  readout: 'video-view-tooltip', selection: 'video-view-selection'};
+
+function forecastHorizonDays(axis) {
+  return Math.max(2, Math.min(60, Math.round((axis.endTime - axis.startTime) / DAY_MS * 0.25)));
 }
 
-function buildGrowthChart(dailySamples, timeAxis) {
-  const samples = dailySamples.filter((sample) => Number.isFinite(sample.dailyChange));
-  if (!samples.length) {
-    return `
-      <div class="growth-chart-empty">
-        일별 증가량 차트는 서로 다른 날짜의 기록이 2개 이상 모이면 표시됩니다.
-      </div>`;
+// Pixel-sized viewBox so labels are never stretched; the side panel sits beside wide charts.
+function marketChartSize(content) {
+  const available = Math.max(0, (content?.clientWidth || 1000) - 34);
+  const width = Math.max(520, Math.round(available >= 900 ? available - 296 : available));
+  const compact = window.innerHeight <= 740;
+  const height = Math.round(Math.max(220, Math.min(480, window.innerHeight - (compact ? 350 : 380))));
+  return {width, height};
+}
+
+function niceTicks(low, high, count = 4) {
+  const span = Math.max(1e-9, high - low);
+  const raw = span / count, power = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map(n => n * power).find(n => n >= raw) || raw;
+  const ticks = [];
+  for (let value = Math.ceil(low / step) * step; value <= high + step * 1e-6; value += step) ticks.push(value);
+  return ticks;
+}
+
+// Stock-style chart: value pane with a right price axis and last-value tag, a daily-gain pane
+// below it (like volume) with a 7-day average, and an optional dashed forecast band after the
+// latest observation. Forecast values are drawn only; they are never treated as observations.
+function buildMarketChart(samples, timeAxis, dailySamples = [], selection = null, displayMode = 'samples', options = {}) {
+  const ids = options.ids || SUBSCRIBER_CHART_IDS;
+  const unit = options.unit || '명';
+  const {width, height} = options.size || {width: 840, height: 300};
+  const forecast = options.forecast?.ready ? options.forecast : null;
+  const anchor = forecast?.anchor;
+  const endTime = forecast ? Math.max(timeAxis.endTime, anchor.timestamp + options.horizonDays * DAY_MS) : timeAxis.endTime;
+  const axis = forecast ? window.LivePulseChartMath.buildTimeWindowAxis(timeAxis.startTime, endTime) : timeAxis;
+  const plot = {left: 12, right: 78, top: 14};
+  const axisHeight = 26, gap = 22;
+  const volumeHeight = Math.max(44, Math.round(height * 0.2));
+  const mainBottom = height - axisHeight - volumeHeight - gap;
+  const volumeTop = mainBottom + gap, volumeBottom = height - axisHeight;
+  plot.bottom = height - mainBottom;
+  const plotWidth = width - plot.left - plot.right;
+  const plotRight = plot.left + plotWidth;
+  const toX = time => plot.left + (time - axis.startTime) / Math.max(1, axis.endTime - axis.startTime) * plotWidth;
+
+  const projection = [];
+  if (forecast) {
+    const days = (endTime - anchor.timestamp) / DAY_MS;
+    for (let i = 0; i <= 32; i++) {
+      const at = days * i / 32;
+      projection.push({timestamp: anchor.timestamp + at * DAY_MS, ...forecast.project(at)});
+    }
   }
+  // The band may be wide; scale for the data and the projected center, and clip the band instead.
+  const domainValues = (options.domainSamples || samples).map(sample => sample.count)
+    .concat(projection.map(point => point.value));
+  const rawLow = Math.min(...domainValues), rawHigh = Math.max(...domainValues);
+  const pad = Math.max(1, (rawHigh - rawLow) * 0.08, rawHigh * 0.001);
+  const low = Math.max(0, rawLow - pad), high = rawHigh + pad;
+  const toY = value => plot.top + (high - value) / Math.max(1, high - low) * (mainBottom - plot.top);
 
-  const width = 840;
-  const height = 210;
-  const plot = { left: 68, right: 58, top: 18, bottom: 40 };
-  const plotWidth = width - plot.left - plot.right;
-  const plotHeight = height - plot.top - plot.bottom;
-  const startTime = timeAxis.startTime;
-  const endTime = timeAxis.endTime;
-  const timeRange = Math.max(1, endTime - startTime);
-  const toX = (timestamp) => plot.left + ((timestamp - startTime) / timeRange) * plotWidth;
+  const points = samples.map(sample => ({x: toX(sample.timestamp), y: toY(sample.count), sample}));
+  const line = (options.plotSamples || samples).map(sample => `${toX(sample.timestamp).toFixed(1)},${toY(sample.count).toFixed(1)}`);
+  const first = (options.plotSamples || samples)[0], last = samples.at(-1);
+  const direction = last.count >= (options.domainSamples || samples)[0].count ? 'up' : 'down';
+  const area = `${toX(first.timestamp).toFixed(1)},${mainBottom} ${line.join(' ')} ${toX((options.plotSamples || samples).at(-1).timestamp).toFixed(1)},${mainBottom}`;
 
-  const changes = samples.map((sample) => sample.dailyChange);
-  const changeMin = Math.min(0, ...changes);
-  const changeMax = Math.max(0, ...changes);
-  const changePadding = Math.max(1, (changeMax - changeMin) * 0.12);
-  const minChange = changeMin - changePadding;
-  const maxChange = changeMax + changePadding;
-  const changeRange = Math.max(1, maxChange - minChange);
-  const toChangeY = (value) => plot.top + ((maxChange - value) / changeRange) * plotHeight;
-  const zeroY = toChangeY(0);
-
-  const rates = samples.map((sample) => sample.growthRate).filter(Number.isFinite);
-  const rateMin = Math.min(0, ...rates);
-  const rateMax = Math.max(0, ...rates);
-  const ratePadding = Math.max(0.001, (rateMax - rateMin) * 0.12);
-  const minRate = rateMin - ratePadding;
-  const maxRate = rateMax + ratePadding;
-  const rateRange = Math.max(0.001, maxRate - minRate);
-  const toRateY = (value) => plot.top + ((maxRate - value) / rateRange) * plotHeight;
-  const barWidth = Math.max(1, Math.min(20, plotWidth / Math.max(8, samples.length * 1.7)));
-
-  const yTicks = Array.from({ length: 4 }, (_, index) => {
-    const ratio = index / 3;
-    const y = plot.top + ratio * plotHeight;
-    const changeValue = maxChange - ratio * changeRange;
-    const rateValue = maxRate - ratio * rateRange;
-    return `
-      <line class="detail-grid" x1="${plot.left}" y1="${y}" x2="${plot.left + plotWidth}" y2="${y}"/>
-      <text class="detail-axis-label y" x="${plot.left - 10}" y="${y + 3}">${escapeHtml(formatTrend(changeValue))}</text>
-      <text class="detail-axis-label growth-rate-axis" x="${plot.left + plotWidth + 10}" y="${y + 3}">${escapeHtml(formatPercent(rateValue))}%</text>`;
-  }).join('');
-  const xTicks = timeAxis.ticks.map((timestamp) => {
-    const x = toX(timestamp);
-    return `
-      <line class="detail-tick" x1="${x}" y1="${plot.top + plotHeight}" x2="${x}" y2="${plot.top + plotHeight + 5}"/>
-      <text class="detail-axis-label x" x="${x}" y="${height - 13}">${escapeHtml(formatChartDate(timestamp))}</text>`;
-  }).join('');
-  const bars = samples.map((sample) => {
-    const x = Math.min(
-      plot.left + plotWidth - barWidth,
-      Math.max(plot.left, toX(sample.dayTimestamp) - barWidth / 2)
-    );
-    const valueY = toChangeY(sample.dailyChange);
-    const y = Math.min(valueY, zeroY);
-    const barHeight = Math.max(1, Math.abs(zeroY - valueY));
-    const className = sample.dailyChange >= 0 ? 'up' : 'down';
-    return `<rect class="growth-bar ${className}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${barWidth.toFixed(2)}" height="${barHeight.toFixed(2)}" rx="2"><title>${escapeHtml(formatChartDate(sample.dayTimestamp))}: ${escapeHtml(formatSignedAnalysis(sample.dailyChange, '명/일').value)}</title></rect>`;
-  }).join('');
-  const ratePoints = samples.filter((sample) => Number.isFinite(sample.growthRate)).map((sample) => ({
-    x: toX(sample.dayTimestamp),
-    y: toRateY(sample.growthRate),
-    sample
-  }));
-  const rateLine = ratePoints.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
-  const rateDots = ratePoints.map((point) => `<circle class="growth-rate-dot" cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3"><title>${escapeHtml(formatChartDate(point.sample.dayTimestamp))}: ${escapeHtml(formatSignedAnalysis(point.sample.growthRate, '%/일', formatPercent).value)}</title></circle>`).join('');
-
-  return `
-    <div class="growth-chart-wrap">
-      <svg id="subscriber-growth-svg" class="growth-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="일별 구독자 증가량과 성장률 추이">
-        ${yTicks}
-        ${xTicks}
-        <line class="growth-zero-line" x1="${plot.left}" y1="${zeroY}" x2="${plot.left + plotWidth}" y2="${zeroY}"/>
-        ${bars}
-        <polyline class="growth-rate-line" points="${rateLine}"/>
-        ${rateDots}
-      </svg>
-    </div>`;
-}
-
-function buildDetailChart(
-  samples,
-  trend,
-  timeAxis,
-  dailySamples = [],
-  selection = null,
-  displayMode = 'samples',
-  options = {}
-) {
-  const svgId = options.svgId || 'subscriber-detail-svg';
-  const crosshairId = options.crosshairId || 'detail-crosshair';
-  const dotId = options.dotId || 'detail-hover-dot';
-  const tooltipId = options.tooltipId || 'detail-chart-tooltip';
-  const selectionId = options.selectionId || 'detail-selection';
-  const gradientId = options.gradientId || 'detail-chart-gradient';
-  const titleId = options.titleId || 'detail-chart-title';
-  const descId = options.descId || 'detail-chart-desc';
-  const width = 840;
-  const height = window.innerHeight <= 740 ? 170 : 240;
-  const plot = { left: 68, right: 18, top: 18, bottom: 44 };
-  const plotWidth = width - plot.left - plot.right;
-  const plotHeight = height - plot.top - plot.bottom;
-  const metric = options.metric || 'total';
-  const baseline = metric === 'change' ? (options.baseline ?? samples[0].count) : 0;
-  const values = (options.domainSamples || samples).map(sample => sample.count - baseline);
-  const combined = values;
-  const rawMin = Math.min(...combined);
-  const rawMax = Math.max(...combined);
-  const rawRange = rawMax - rawMin;
-  const padding = Math.max(1, rawRange * 0.12, rawMax * 0.002);
-  const minValue = metric === 'change' ? Math.min(0, rawMin - padding) : Math.max(0, rawMin - padding);
-  const maxValue = metric === 'change' ? Math.max(0, rawMax + padding) : rawMax + padding;
-  const valueRange = Math.max(1, maxValue - minValue);
-  const startTime = timeAxis.startTime;
-  const endTime = timeAxis.endTime;
-  const timeRange = Math.max(1, endTime - startTime);
-  const toX = (timestamp) => plot.left + ((timestamp - startTime) / timeRange) * plotWidth;
-  const toY = (value) => plot.top + ((maxValue - value) / valueRange) * plotHeight;
-  const points = samples.map((sample) => ({
-    x: toX(sample.timestamp),
-    y: toY(sample.count - baseline),
-    sample
-  }));
-  const dayPoints = dailySamples.filter((sample) => {
-    const nextDay = new Date(sample.dayTimestamp);
-    nextDay.setDate(nextDay.getDate() + 1);
-    return sample.dayTimestamp <= endTime && nextDay.getTime() > startTime;
-  }).map((sample) => ({
-    x: Math.min(plot.left + plotWidth, Math.max(plot.left, toX(sample.dayTimestamp))),
-    sample
-  }));
-  const linePointsData = (options.plotSamples || samples).map(sample => ({x: toX(sample.timestamp), y: toY(sample.count - baseline)}));
-  const linePoints = linePointsData.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
-  const areaPoints = `${linePointsData[0].x},${plot.top + plotHeight} ${linePoints} ${linePointsData.at(-1).x},${plot.top + plotHeight}`;
-  const yTicks = Array.from({ length: 5 }, (_, index) => {
-    const ratio = index / 4;
-    const y = plot.top + ratio * plotHeight;
-    const value = maxValue - ratio * valueRange;
-    return `
-      <line class="detail-grid" x1="${plot.left}" y1="${y}" x2="${plot.left + plotWidth}" y2="${y}"/>
-      <text class="detail-axis-label y" x="${plot.left - 10}" y="${y + 3}">${escapeHtml(formatCompact(value))}</text>`;
-  }).join('');
-  const xTicks = window.LivePulseChartMath.detailTicks(timeAxis, displayMode, plotWidth).map(tick => {
-    const x = toX(tick.time), base = plot.top + plotHeight;
-    const anchor = x < plot.left + 32 ? 'start' : x > width - plot.right - 32 ? 'end' : 'middle';
+  const valueTicks = niceTicks(low, high, height < 280 ? 3 : 4).map(value => `
+    <line class="market-grid" x1="${plot.left}" x2="${plotRight}" y1="${toY(value).toFixed(1)}" y2="${toY(value).toFixed(1)}"/>
+    <text class="market-axis" x="${plotRight + 8}" y="${(toY(value) + 4).toFixed(1)}">${escapeHtml(formatCompact(value))}</text>`).join('');
+  const timeTicks = window.LivePulseChartMath.detailTicks(axis, displayMode, plotWidth).map(tick => {
+    const x = toX(tick.time);
     const label = tick.major ? formatChartDate(tick.time) : new Date(tick.time).getHours() + '시';
-    return `<line class="detail-tick ${tick.major ? 'detail-day-boundary' : 'detail-hour-tick'}" x1="${x}" x2="${x}" y1="${tick.major ? plot.top : base}" y2="${base + (tick.major ? 13 : 6)}"/>
-      ${tick.major || tick.label ? `<text class="detail-axis-label detail-time-label ${tick.major ? 'detail-day-label' : ''}" x="${x}" y="${base + (tick.major ? 34 : 19)}" text-anchor="${anchor}">${escapeHtml(label)}</text>` : ''}`;
+    return `<line class="market-grid ${tick.major ? 'market-day' : ''}" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${plot.top}" y2="${volumeBottom}"/>
+      ${tick.major || tick.label ? `<text class="market-axis ${tick.major ? 'market-day-label' : ''}" x="${x.toFixed(1)}" y="${height - 8}" text-anchor="middle">${escapeHtml(label)}</text>` : ''}`;
   }).join('');
-  const pointDots = points.length <= 40
-    ? points.map((point) => `<circle class="detail-point" cx="${point.x}" cy="${point.y}" r="2.5"/>`).join('')
+
+  // Daily gains of completed days, centered on their date, with the 7-day average line.
+  const visibleDays = dailySamples.filter(day => Number.isFinite(day.dailyChange)
+    && day.dayTimestamp + DAY_MS > axis.startTime && day.dayTimestamp <= axis.endTime);
+  const average = visibleDays.map(day => {
+    const recent = dailySamples.filter(other => Number.isFinite(other.dailyChange)
+      && other.dayTimestamp > day.dayTimestamp - 7 * DAY_MS && other.dayTimestamp <= day.dayTimestamp);
+    return recent.reduce((sum, other) => sum + other.dailyChange, 0) / recent.length;
+  });
+  const gains = visibleDays.map(day => day.dailyChange).concat(average);
+  const gainHigh = Math.max(1, ...gains), gainLow = Math.min(0, ...gains);
+  const toGainY = value => volumeTop + (gainHigh - value) / (gainHigh - gainLow) * (volumeBottom - volumeTop);
+  const dayWidth = DAY_MS / Math.max(1, axis.endTime - axis.startTime) * plotWidth;
+  const barWidth = Math.max(1.5, Math.min(26, dayWidth * 0.66));
+  const bars = visibleDays.map(day => {
+    const x = toX(day.dayTimestamp + DAY_MS / 2), top = Math.min(toGainY(day.dailyChange), toGainY(0));
+    return `<rect class="market-bar ${day.dailyChange < 0 ? 'down' : 'up'}" x="${(x - barWidth / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${Math.max(1, Math.abs(toGainY(day.dailyChange) - toGainY(0))).toFixed(1)}"/>`;
+  }).join('');
+  const averageLine = average.length > 1
+    ? `<polyline class="market-average" points="${visibleDays.map((day, i) => `${toX(day.dayTimestamp + DAY_MS / 2).toFixed(1)},${toGainY(average[i]).toFixed(1)}`).join(' ')}"/>`
     : '';
-  const selectionMarkup = options.selectionEnabled === false
-    ? ''
-    : selection
-      ? buildSelectionMarkup(selection, toX, endTime, plot, plotHeight, selectionId)
-      : `<rect id="${escapeAttribute(selectionId)}" class="detail-selection hidden"/>`;
+
+  let forecastMarkup = '';
+  if (forecast) {
+    const startX = toX(anchor.timestamp);
+    const band = projection.map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.high).toFixed(1)}`)
+      .concat(projection.slice().reverse().map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.low).toFixed(1)}`)).join(' ');
+    forecastMarkup = `
+      <rect class="market-future" x="${startX.toFixed(1)}" y="${plot.top}" width="${Math.max(0, plotRight - startX).toFixed(1)}" height="${(volumeBottom - plot.top).toFixed(1)}"/>
+      <text class="market-future-label" x="${(startX + 8).toFixed(1)}" y="${plot.top + 14}">예측</text>
+      <polygon class="market-band" points="${band}" clip-path="url(#${escapeAttribute(ids.svg)}-clip)"/>
+      <polyline class="market-forecast" points="${projection.map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.value).toFixed(1)}`).join(' ')}"/>`;
+  }
+  const lastY = toY(last.count);
+  const tag = `<line class="market-last-line ${direction}" x1="${plot.left}" x2="${plotRight}" y1="${lastY.toFixed(1)}" y2="${lastY.toFixed(1)}"/>
+    <rect class="market-tag ${direction}" x="${plotRight + 2}" y="${(lastY - 10).toFixed(1)}" width="${plot.right - 4}" height="20" rx="4"/>
+    <text class="market-tag-text" x="${plotRight + 8}" y="${(lastY + 4).toFixed(1)}">${escapeHtml(formatCompact(last.count))}</text>`;
+  const selectionMarkup = options.selectionEnabled === false ? ''
+    : selection ? buildSelectionMarkup(selection, toX, axis.endTime, plot, mainBottom - plot.top, ids.selection)
+      : `<rect id="${escapeAttribute(ids.selection)}" class="detail-selection hidden"/>`;
+  const dayPoints = dailySamples.filter(day => day.dayTimestamp <= axis.endTime && day.dayTimestamp + DAY_MS > axis.startTime)
+    .map(day => ({x: Math.min(plotRight, Math.max(plot.left, toX(day.dayTimestamp))), sample: day}));
 
   return {
-    model: { width, height, points, dayPoints, plot, timeAxis, displayMode, metric, baseline },
+    model: {width, height, points, dayPoints, plot, timeAxis: axis, displayMode, unit, forecast,
+      anchorX: forecast ? toX(anchor.timestamp) : Infinity, mainBottom, volumeBottom,
+      dailyByDay: new Map(dailySamples.map(day => [day.dayTimestamp, day])),
+      toTime: x => axis.startTime + (x - plot.left) / plotWidth * (axis.endTime - axis.startTime), toY, low, high},
     svg: `
-      <div class="detail-chart-wrap">
-        <svg id="${escapeAttribute(svgId)}" class="detail-chart" tabindex="0" aria-keyshortcuts="ArrowLeft ArrowRight Home End" viewBox="0 0 ${width} ${height}"
-          preserveAspectRatio="none" role="img" aria-labelledby="${escapeAttribute(titleId)} ${escapeAttribute(descId)}">
-          <title id="${escapeAttribute(titleId)}">${escapeHtml(options.title || '구독자 수 상세 추이')}</title>
-          <desc id="${escapeAttribute(descId)}">${escapeHtml(options.description || '선택한 기간의 실제 관측값 또는 첫 관측값 대비 증감을 나타냅니다.')}</desc>
+      <div class="market-readout" id="${escapeAttribute(ids.readout)}" aria-live="off"></div>
+      <div class="detail-chart-wrap market-chart-wrap">
+        <svg id="${escapeAttribute(ids.svg)}" class="detail-chart market-chart" tabindex="0" aria-keyshortcuts="ArrowLeft ArrowRight Home End"
+          viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeAttribute(options.title || '구독자 수 추이')}">
           <defs>
-            <clipPath id="${escapeAttribute(svgId)}-clip"><rect x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${plotHeight}"/></clipPath>
-            <linearGradient id="${escapeAttribute(gradientId)}" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="#38d995" stop-opacity="0.23"/>
-              <stop offset="100%" stop-color="#38d995" stop-opacity="0"/>
+            <clipPath id="${escapeAttribute(ids.svg)}-clip"><rect x="${plot.left}" y="${plot.top}" width="${plotWidth}" height="${mainBottom - plot.top}"/></clipPath>
+            <linearGradient id="${escapeAttribute(ids.svg)}-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" class="market-fill-top ${direction}"/><stop offset="100%" class="market-fill-bottom"/>
             </linearGradient>
           </defs>
-          ${yTicks}
-          ${xTicks}
-          <g clip-path="url(#${escapeAttribute(svgId)}-clip)">
-          <polygon class="detail-chart-area" fill="url(#${escapeAttribute(gradientId)})" points="${areaPoints}"/>
-          ${metric === 'change' ? `<line class="analysis-zero-line" x1="${plot.left}" x2="${plot.left + plotWidth}" y1="${toY(0)}" y2="${toY(0)}"/>` : ''}
-          <polyline class="detail-actual-line" points="${linePoints}"/>
-          ${pointDots}
+          ${timeTicks}
+          ${valueTicks}
+          <line class="market-divider" x1="${plot.left}" x2="${plotRight}" y1="${mainBottom}" y2="${mainBottom}"/>
+          <text class="market-pane-label" x="${plot.left + 4}" y="${volumeTop - 5}">하루 증가 · <tspan class="market-average-key">7일 평균</tspan></text>
+          <text class="market-axis" x="${plotRight + 8}" y="${volumeTop + 10}">${escapeHtml(formatCompact(gainHigh))}</text>
+          ${bars}${averageLine}
+          ${forecastMarkup}
+          <g clip-path="url(#${escapeAttribute(ids.svg)}-clip)">
+            <polygon fill="url(#${escapeAttribute(ids.svg)}-fill)" points="${area}"/>
+            <polyline class="market-line ${direction}" points="${line.join(' ')}"/>
           </g>
+          ${tag}
           ${selectionMarkup}
-          <line id="${escapeAttribute(crosshairId)}" class="detail-crosshair hidden" y1="${plot.top}" y2="${plot.top + plotHeight}"/>
-          <circle id="${escapeAttribute(dotId)}" class="detail-hover-dot hidden" r="5"/>
+          <line id="${escapeAttribute(ids.crosshair)}" class="detail-crosshair hidden" y1="${plot.top}" y2="${volumeBottom}"/>
+          <g id="${escapeAttribute(ids.crosshair)}-h" class="hidden"><line class="market-hline" x1="${plot.left}" x2="${plotRight}"/>
+            <rect class="market-hover-tag" x="${plotRight + 2}" width="${plot.right - 4}" height="20" rx="4"/><text class="market-tag-text" x="${plotRight + 8}"></text></g>
+          <circle id="${escapeAttribute(ids.dot)}" class="detail-hover-dot hidden" r="5"/>
         </svg>
-        <div id="${escapeAttribute(tooltipId)}" class="detail-chart-tooltip hidden"></div>
       </div>`
   };
+}
+
+// Shared hover for both analysis charts: actual samples before the anchor, forecast after it.
+function moveMarketHover(dialog, model, event, ids) {
+  const svg = dialog.querySelector('#' + ids.svg);
+  const bounds = svg?.getBoundingClientRect();
+  if (!svg || !bounds?.width || !model?.points?.length) return;
+  const viewX = (event.clientX - bounds.left) / bounds.width * model.width;
+  const crosshair = dialog.querySelector('#' + ids.crosshair), dot = dialog.querySelector('#' + ids.dot);
+  const horizontal = dialog.querySelector('#' + ids.crosshair + '-h'), readout = dialog.querySelector('#' + ids.readout);
+  let x, y, value, html;
+  if (model.forecast && viewX > model.anchorX && viewX <= model.width - model.plot.right) {
+    const time = model.toTime(viewX), p = model.forecast.project((time - model.forecast.anchor.timestamp) / DAY_MS);
+    x = viewX; y = model.toY(p.value); value = p.value;
+    html = `<span class="market-readout-date">${escapeHtml(formatChartDateTime(time))}</span><span class="market-forecast-key">예측</span>
+      <strong>약 ${escapeHtml(formatNumber(p.value))}${model.unit}</strong><span>80% 범위 ${escapeHtml(formatApprox(p.low))} ~ ${escapeHtml(formatApprox(p.high))}</span>`;
+  } else {
+    const point = window.LivePulseChartHover.nearest(model.points, viewX);
+    x = point.x; y = point.y; value = point.sample.count;
+    const dayStart = new Date(point.sample.timestamp); dayStart.setHours(0, 0, 0, 0);
+    const day = model.dailyByDay.get(dayStart.getTime());
+    html = `<span class="market-readout-date">${escapeHtml(model.displayMode === 'daily' ? formatSelectionDate(point.sample.timestamp) : formatChartDateTime(point.sample.timestamp))}</span>
+      <strong>${escapeHtml(formatNumber(value))}${model.unit}</strong>
+      ${day && Number.isFinite(day.dailyChange) ? `<span>그날 하루 <b class="${day.dailyChange > 0 ? 'up' : day.dailyChange < 0 ? 'down' : ''}">${escapeHtml(formatSignedAnalysis(day.dailyChange, model.unit).value)}</b>${day.elapsedDays > 1 ? ` (${day.elapsedDays}일 평균)` : ''}</span>` : '<span>오늘 · 집계 중</span>'}`;
+  }
+  crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x); crosshair.classList.remove('hidden');
+  dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.classList.remove('hidden');
+  horizontal.querySelector('line').setAttribute('y1', y); horizontal.querySelector('line').setAttribute('y2', y);
+  horizontal.querySelector('rect').setAttribute('y', y - 10);
+  horizontal.querySelector('text').setAttribute('y', y + 4);
+  horizontal.querySelector('text').textContent = formatCompact(value);
+  horizontal.classList.remove('hidden');
+  readout.innerHTML = html;
+}
+
+function hideMarketHover(dialog, model, ids) {
+  for (const id of [ids.crosshair, ids.crosshair + '-h', ids.dot]) dialog.querySelector('#' + id)?.classList.add('hidden');
+  const readout = dialog.querySelector('#' + ids.readout);
+  if (readout && model) readout.innerHTML = model.defaultReadout || '';
 }
 
 function buildSelectionMarkup(selection, toX, endTime, plot, plotHeight, selectionId = 'detail-selection') {
@@ -1346,31 +1200,7 @@ function handleDetailChartPointerMove(event) {
     return;
   }
 
-  const bounds = svg.getBoundingClientRect();
-  const viewX = ((event.clientX - bounds.left) / bounds.width) * detailChartModel.width;
-  const point = window.LivePulseChartHover.nearest(detailChartModel.points, viewX);
-  const crosshair = elements.subscriberDialog.querySelector('#detail-crosshair');
-  const dot = elements.subscriberDialog.querySelector('#detail-hover-dot');
-  const tooltip = elements.subscriberDialog.querySelector('#detail-chart-tooltip');
-  if (!crosshair || !dot || !tooltip) return;
-
-  crosshair.setAttribute('x1', point.x);
-  crosshair.setAttribute('x2', point.x);
-  dot.setAttribute('cx', point.x);
-  dot.setAttribute('cy', point.y);
-  crosshair.classList.remove('hidden');
-  dot.classList.remove('hidden');
-  tooltip.classList.remove('hidden');
-  tooltip.innerHTML = `
-    <strong>${detailChartModel.metric === 'change' ? analysisNumber(point.sample.count - detailChartModel.baseline, '명') : `${escapeHtml(formatNumber(point.sample.count))}명`}</strong>
-    ${detailChartModel.metric === 'change' ? `<span>전체 ${formatNumber(point.sample.count)}명</span>` : ''}
-    <span>${escapeHtml(detailChartModel.displayMode === 'daily'
-      ? formatSelectionDate(point.sample.timestamp)
-      : formatChartDateTime(point.sample.timestamp))}</span>`;
-  const pixelX = (point.x / detailChartModel.width) * bounds.width;
-  const pixelY = (point.y / detailChartModel.height) * bounds.height;
-  tooltip.style.left = `${Math.min(bounds.width - 84, Math.max(84, pixelX))}px`;
-  tooltip.style.top = `${Math.max(8, pixelY - 62)}px`;
+  moveMarketHover(elements.subscriberDialog, detailChartModel, event, SUBSCRIBER_CHART_IDS);
 }
 
 function handleDetailChartPointerUp(event) {
@@ -1399,20 +1229,15 @@ function handleDetailChartPointerCancel(event) {
 }
 
 function handleDetailChartWheel(event) {
-  const svg = event.target.closest?.('#subscriber-detail-svg, #subscriber-growth-svg');
+  const svg = event.target.closest?.('#subscriber-detail-svg');
   const model = detailChartModel;
   if (!svg || !model?.points?.length || !model?.fullTimeAxis || !event.deltaY) return;
   const bounds = svg.getBoundingClientRect();
   if (!bounds.width) return;
 
   event.preventDefault();
-  const plotRight = svg.id === 'subscriber-growth-svg' ? 58 : model.plot.right;
-  const plotWidth = model.width - model.plot.left - plotRight;
-  const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
-  const anchorRatio = Math.min(1, Math.max(0, (viewX - model.plot.left) / plotWidth));
   const currentWindow = subscriberChartViewport || model.fullTimeAxis;
-  const anchorTime = currentWindow.startTime
-    + (currentWindow.endTime - currentWindow.startTime) * anchorRatio;
+  const anchorTime = wheelAnchorTime(event, bounds, model, currentWindow);
   const nextWindow = window.LivePulseChartMath.zoomTimeWindow(
     currentWindow,
     model.fullTimeAxis,
@@ -1436,33 +1261,8 @@ function handleDetailChartWheel(event) {
 }
 
 function handleVideoViewPointerMove(event) {
-  const svg = event.target.closest?.('#video-view-detail-svg');
-  const model = videoViewChartModel;
-  if (!svg || !model?.points?.length) return;
-  const bounds = svg.getBoundingClientRect();
-  if (!bounds.width) return;
-  const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
-  const point = window.LivePulseChartHover.nearest(model.points, viewX);
-  const crosshair = elements.videoViewDialog.querySelector('#video-view-crosshair');
-  const dot = elements.videoViewDialog.querySelector('#video-view-hover-dot');
-  const tooltip = elements.videoViewDialog.querySelector('#video-view-tooltip');
-  if (!crosshair || !dot || !tooltip) return;
-
-  crosshair.setAttribute('x1', point.x);
-  crosshair.setAttribute('x2', point.x);
-  dot.setAttribute('cx', point.x);
-  dot.setAttribute('cy', point.y);
-  crosshair.classList.remove('hidden');
-  dot.classList.remove('hidden');
-  tooltip.classList.remove('hidden');
-  tooltip.innerHTML = `
-    <strong>${model.metric === 'change' ? analysisNumber(point.sample.count - model.baseline, '회') : `${escapeHtml(formatNumber(point.sample.count))}회`}</strong>
-    ${model.metric === 'change' ? `<span>누적 ${formatNumber(point.sample.count)}회</span>` : ''}
-    <span>${escapeHtml(formatChartDateTime(point.sample.timestamp))}</span>`;
-  const pixelX = (point.x / model.width) * bounds.width;
-  const pixelY = (point.y / model.height) * bounds.height;
-  tooltip.style.left = `${Math.min(bounds.width - 84, Math.max(84, pixelX))}px`;
-  tooltip.style.top = `${Math.max(8, pixelY - 62)}px`;
+  if (!event.target.closest?.('#video-view-detail-svg')) return;
+  moveMarketHover(elements.videoViewDialog, videoViewChartModel, event, VIDEO_CHART_IDS);
 }
 
 function handleVideoViewWheel(event) {
@@ -1473,12 +1273,8 @@ function handleVideoViewWheel(event) {
   if (!bounds.width) return;
 
   event.preventDefault();
-  const plotWidth = model.width - model.plot.left - model.plot.right;
-  const viewX = ((event.clientX - bounds.left) / bounds.width) * model.width;
-  const anchorRatio = Math.min(1, Math.max(0, (viewX - model.plot.left) / plotWidth));
   const currentWindow = videoViewChartViewport || model.fullTimeAxis;
-  const anchorTime = currentWindow.startTime
-    + (currentWindow.endTime - currentWindow.startTime) * anchorRatio;
+  const anchorTime = wheelAnchorTime(event, bounds, model, currentWindow);
   const nextWindow = window.LivePulseChartMath.zoomTimeWindow(
     currentWindow,
     model.fullTimeAxis,
@@ -1500,9 +1296,13 @@ function handleVideoViewWheel(event) {
 
 function hideVideoViewTooltip() {
   hoverFrames.clear('video');
-  elements.videoViewDialog.querySelector('#video-view-crosshair')?.classList.add('hidden');
-  elements.videoViewDialog.querySelector('#video-view-hover-dot')?.classList.add('hidden');
-  elements.videoViewDialog.querySelector('#video-view-tooltip')?.classList.add('hidden');
+  hideMarketHover(elements.videoViewDialog, videoViewChartModel, VIDEO_CHART_IDS);
+}
+
+// The drawn axis may extend into the forecast, so map the cursor through it, then keep it in data.
+function wheelAnchorTime(event, bounds, model, currentWindow) {
+  const time = model.toTime((event.clientX - bounds.left) / bounds.width * model.width);
+  return Math.min(currentWindow.endTime, Math.max(currentWindow.startTime, time));
 }
 
 function isSameTimeWindow(left, right) {
@@ -1548,9 +1348,7 @@ function updateSelectionOverlay(firstTime, secondTime) {
 
 function hideDetailChartTooltip() {
   hoverFrames.clear('subscriber');
-  elements.subscriberDialog.querySelector('#detail-crosshair')?.classList.add('hidden');
-  elements.subscriberDialog.querySelector('#detail-hover-dot')?.classList.add('hidden');
-  elements.subscriberDialog.querySelector('#detail-chart-tooltip')?.classList.add('hidden');
+  hideMarketHover(elements.subscriberDialog, detailChartModel, SUBSCRIBER_CHART_IDS);
 }
 
 function renderEvents() {
@@ -1743,6 +1541,12 @@ function formatCompact(value) {
     notation: 'compact',
     maximumFractionDigits: 2
   }).format(numeric);
+}
+
+function formatApprox(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '—';
+  return cachedFormatter('NumberFormat', { notation: 'compact', maximumSignificantDigits: 3 }).format(numeric);
 }
 
 function formatNumber(value) {

@@ -32,8 +32,6 @@ test('interval analytics preserve gaps, negative changes and insufficient baseli
  assert.equal(intervalSummary(samples).change,-20);
  assert.equal(intervalSummary(samples.slice(0,1)).change,null);
  assert.equal(intervalSummary([{at:samples[0].at,count:0},{at:samples[1].at,count:20}]).percent,null);
- assert.equal(preferences({videoMetric:'change',subscriberMetric:'bad'}).videoMetric,'change');
- assert.equal(preferences({subscriberMetric:'bad'}).subscriberMetric,'total');
 });
 
 test('hour axis preserves every hourly tick and emphasizes local midnight',()=>{
@@ -78,4 +76,40 @@ test('plot continuity retains adjacent real points without altering visible-wind
  assert.deepEqual(plotSamples(points,from,to).map(s=>s.count),[110,120,130]);
  assert.deepEqual(filterSamplesInTimeWindow(points,from,to).map(s=>s.count),[120]);
  assert.equal(points.length,4);
+});
+
+test('subscriber forecast uses completed-day drift, widens its band and finds the next milestone',()=>{
+ const {forecast,nextMilestone}=require('../src/renderer/analytics-math');
+ const day=d=>new Date(2026,8,d,23).toISOString();
+ const samples=[];for(let d=1;d<=20;d++)samples.push({at:day(d),count:100000+d*1000+(d%2?300:-300)});
+ samples.push({at:new Date(2026,8,21,9).toISOString(),count:999999}); // today's partial is only the anchor
+ const now=new Date(2026,8,21,10).getTime();
+ const result=forecast(samples,'subscriber',now);
+ assert.equal(result.ready,true);
+ assert.ok(Math.abs(result.rate-1000)<60);
+ assert.equal(result.anchor.count,999999);
+ const week=result.project(7),month=result.project(30);
+ assert.ok(week.low<week.value&&week.value<week.high);
+ assert.ok(month.high-month.low>week.high-week.low);
+ assert.equal(result.project(0).value,999999);
+ assert.equal(nextMilestone(1220000),1300000);assert.equal(nextMilestone(95000),96000);assert.equal(nextMilestone(3),10);
+ assert.ok(Math.abs(result.recent-1000)<200);
+ assert.equal(forecast(samples.slice(0,4),'subscriber',now).ready,false);
+});
+
+test('video forecast decays daily gains and never reports an unreachable milestone date',()=>{
+ const {forecast}=require('../src/renderer/analytics-math');
+ const samples=[];let total=500000;
+ for(let d=1;d<=16;d++){total+=Math.round(80000*Math.pow(0.8,d));samples.push({at:new Date(2026,8,d,23).toISOString(),count:total});}
+ const now=new Date(2026,8,17,8).getTime();
+ const result=forecast(samples,'video',now);
+ assert.equal(result.ready,true);
+ assert.ok(Math.abs(result.halfLifeDays-Math.log(2)/-Math.log(0.8))<0.2);
+ const gain=result.project(30).value-total, remaining=80000*Math.pow(0.8,17)/(1-0.8);
+ assert.ok(Math.abs(gain-remaining)/remaining<0.15);
+ assert.ok(result.momentum<0);
+ const flat=forecast(samples.map(s=>({...s,count:1000})),'video',now);
+ assert.equal(flat.ready,false);
+ const fading=forecast(samples,'video',now);
+ if(fading.milestone.days===null)assert.equal(fading.milestone.timestamp,null);
 });
