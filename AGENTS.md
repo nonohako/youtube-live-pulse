@@ -29,6 +29,7 @@ Last maintained: 2026-09-27 (card sparkline daily overview and view count fix; w
 - Interrupted-backup residue (`.backup.tmp` and its hot journal) is discarded only after the primary and every existing generation validate under the writer lease. Never remove or restore a partial backup without that validation.
 - Personal startup calls `NativeStoreRecovery.OpenForStartup` under the lease: a read-write open rolls back a crash journal (read-only validation rejects such a valid DB), then the primary is validated or the newest valid backup is restored with the corrupt primary preserved. No valid copy stops startup visibly.
 - Never initialize defaults over unreadable data. Recovery restores only real records; never fill gaps with estimated values or fixtures.
+- The 2026-08-02..09-16 subscriber gap was filled from Playboard daily totals at the user's request (xlsx-import semantics). Past counts cannot come from the public Data API.
 - Real observations recorded by another runtime may be merged only with exact-instant deduplication (done once for Electron's 2026-09-26/27 run: 11 subscriber and 2,321 video samples).
 
 ## Monitoring and UI state invariants
