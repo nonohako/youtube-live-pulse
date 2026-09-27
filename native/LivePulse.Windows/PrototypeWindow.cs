@@ -107,6 +107,41 @@ internal sealed class PrototypeWindow : Window
         return false;
     }
 
+    // Development timing on an isolated copy: bridge + render time to open and close charts.
+    internal async Task ProbeTimingAsync()
+    {
+        var view = _view ?? throw new InvalidOperationException("WebView가 준비되지 않음");
+        await view.ExecuteScriptAsync("""
+            window.__lpTiming = 'pending';
+            (async () => {
+              const frame = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+              const state = await window.livePulse.getState();
+              const channel = state.channels[0];
+              const out = [];
+              for (let i = 0; i < 3; i++) {
+                let t = performance.now();
+                await openSubscriberChart(channel.id, 'all'); await frame();
+                out.push('subscriberOpen=' + Math.round(performance.now() - t));
+                t = performance.now();
+                elements.subscriberDialog.close(); await frame();
+                out.push('subscriberClose=' + Math.round(performance.now() - t));
+                const video = appState.channels[0].videoViewHistories[0];
+                t = performance.now();
+                await openVideoViewChart(channel.id, video.videoId); await frame();
+                out.push('videoOpen=' + Math.round(performance.now() - t));
+                elements.videoViewDialog.close(); await frame();
+              }
+              return out.join(' ');
+            })().then(value => window.__lpTiming = value).catch(error => window.__lpTiming = 'error ' + error.message);
+            """);
+        for (var attempt = 0; attempt < 600; attempt++)
+        {
+            var result = await view.ExecuteScriptAsync("window.__lpTiming");
+            if (result != "\"pending\"") { Console.WriteLine($"NATIVE_UI_TIMING {result}"); return; }
+            await Task.Delay(100);
+        }
+    }
+
     internal async Task ProbeRefreshAsync()
     {
         var view = _view ?? throw new InvalidOperationException("WebView가 준비되지 않음");

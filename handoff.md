@@ -34,6 +34,8 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 12. **Close balloon removed** at the user's request. The user observed tray memory of about 30-40 MB after the fixes (previously over 100 MB).
 
+13. **Chart delay and close flicker (user report).** Each state read took about 400 ms: the subscriber query on `samples` omitted `source` and scanned all imported rows, and video endpoints ran eight new commands per video. With the index-friendly predicate and one prepared statement per channel a read takes about 120 ms. Chart dialogs now open immediately with a loading placeholder; on a copy of real data the filled chart appeared after about 0.2-0.3 s. The card sparkline flattened after closing a chart because it briefly drew the last 60 minute-level samples; it now always uses daily closes. The build is portable-only (`app/` + `data/`); there is no installer track.
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 34/34, isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.

@@ -725,6 +725,7 @@ internal sealed class PrototypeApp : System.Windows.Application
             if (_args.Contains("--ui-smoke-actions") && !await window.ProbeActionsAsync())
                 throw new InvalidOperationException("채널 추가·삭제 또는 설정 저장 실패");
             if (_args.Contains("--ui-smoke-refresh")) await window.ProbeRefreshAsync();
+            if (_args.Contains("--ui-smoke-timing")) await window.ProbeTimingAsync();
             Console.WriteLine($"NATIVE_UI_SMOKE_PASSED channels={channelCount} browser={window.BrowserProcessId}");
             window.Close(); // the real X-button path
             var timer = System.Diagnostics.Stopwatch.StartNew();

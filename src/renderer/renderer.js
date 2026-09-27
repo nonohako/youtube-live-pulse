@@ -548,10 +548,9 @@ function renderPostRow(post) {
 function renderSubscriberChart(history, displayMode = 'samples') {
   const math = window.LivePulseChartMath;
   const allSamples = math.normalizeSamples(history);
-  const visualSamples = displayMode === 'daily'
-    ? math.collapseSamplesByLocalDate(allSamples)
-    : allSamples;
-  const samples = visualSamples.slice(-60);
+  // The card always shows daily closes: while a detail chart is open this channel carries its
+  // full minute-level history, and "the last 60 samples" would briefly draw a flat last hour.
+  const samples = math.collapseSamplesByLocalDate(allSamples).slice(-60);
   if (!allSamples.length) {
     return {
       delta: 0,
@@ -608,8 +607,27 @@ function emptyChart() {
     </svg>`;
 }
 
+// Open the dialog at once with a placeholder; the full history arrives from the host afterwards.
+function showDetailLoading(dialog, titleElement, content, title) {
+  titleElement.textContent = title || 'YouTube 채널';
+  content.innerHTML = '<div class="empty-state"><strong>차트를 불러오는 중…</strong></div>';
+  if (!dialog.open) dialog.showModal();
+}
+
 async function openSubscriberChart(channelId, initialRange = readChartPreferences().subscriberRange, selectSmokeRange = false) {
-  if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: channelId, videos: []})) return;
+  if (appState?.analyticsLazy) {
+    const current = appState.channels.find((item) => item.id === channelId);
+    if (!elements.subscriberDialog.open) {
+      showDetailLoading(elements.subscriberDialog, elements.subscriberDialogTitle, elements.subscriberDetailContent,
+        current?.snapshot?.metadata?.title || current?.title);
+    }
+    if (!await requestAnalytics({subscriberId: channelId, videos: []})) {
+      // A failed request leaves no data to show; a superseded one is handled by the newer request.
+      if (!analyticsRequestPending && elements.subscriberDialog.open) elements.subscriberDialog.close();
+      return;
+    }
+    if (!elements.subscriberDialog.open) return; // closed while loading
+  }
   const channel = appState?.channels.find((item) => item.id === channelId);
   if (!channel) return;
   subscriberChartChannelId = channelId;
@@ -638,7 +656,20 @@ async function openSubscriberChart(channelId, initialRange = readChartPreference
 }
 
 async function openVideoViewChart(channelId, videoId) {
-  if (appState?.analyticsLazy && !await requestAnalytics({subscriberId: null, videos: [{channelId, videoId}]})) return;
+  if (appState?.analyticsLazy) {
+    const current = appState.channels.find((item) => item.id === channelId)
+      ?.videoViewHistories?.find((item) => item.videoId === videoId);
+    if (!elements.videoViewDialog.open) {
+      showDetailLoading(elements.videoViewDialog, elements.videoViewDialogTitle, elements.videoViewDetailContent,
+        current?.title);
+    }
+    if (!await requestAnalytics({subscriberId: null, videos: [{channelId, videoId}]})) {
+      // A failed request leaves no data to show; a superseded one is handled by the newer request.
+      if (!analyticsRequestPending && elements.videoViewDialog.open) elements.videoViewDialog.close();
+      return;
+    }
+    if (!elements.videoViewDialog.open) return; // closed while loading
+  }
   const channel = appState?.channels.find((item) => item.id === channelId);
   const histories = (channel?.videoViewHistories || []).filter((history) => history.samples?.length);
   if (!channel || !histories.length) return;

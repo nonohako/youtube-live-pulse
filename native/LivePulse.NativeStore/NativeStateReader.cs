@@ -249,6 +249,7 @@ public sealed class NativeStateReader
                 videos[reader.GetString(0)] = JsonNode.Parse(reader.GetString(1))?.AsObject() ?? new JsonObject();
         }
         var output = new JsonArray();
+        using var endpoints = PrepareEndpoints(connection, channelId);
         foreach (var (videoId, video) in videos)
         {
             video["videoId"] = videoId;
@@ -256,45 +257,53 @@ public sealed class NativeStateReader
             video["url"] ??= "https://www.youtube.com/watch?v=" + videoId;
             video["samples"] = selected.Any(item => item.ChannelId == channelId && item.VideoId == videoId)
                 ? Samples(connection, channelId, "video", videoId, full: true)
-                : VideoEndpoints(connection, channelId, videoId);
+                : VideoEndpoints(endpoints, videoId);
             output.Add(video);
         }
         return output;
     }
 
-    private static JsonArray VideoEndpoints(SqliteConnection connection, string channelId, string videoId)
+    // One prepared statement (first/last row of each of the four sources) reused for every video;
+    // creating eight commands per video cost about 80 ms per channel on real data.
+    private static readonly string EndpointSql = string.Join(" UNION ALL ", new[]
     {
-        var candidates = new List<(string At, long Count, int Priority)>();
-        foreach (var (table, source, priority) in new[]
-        {
-            ("samples", "local", 2), ("samples", "cloud", 1),
-            ("runtime_cloud_samples", "", 1), ("runtime_video_samples", "", 3)
-        })
-        {
-            foreach (var direction in new[] { "ASC", "DESC" })
+        ("samples WHERE source='local' AND channel_id=$id AND kind='video' AND video_id=$video", 2),
+        ("samples WHERE source='cloud' AND channel_id=$id AND kind='video' AND video_id=$video", 1),
+        ("runtime_cloud_samples WHERE channel_id=$id AND kind='video' AND video_id=$video", 1),
+        ("runtime_video_samples WHERE channel_id=$id AND video_id=$video", 3)
+    }.SelectMany(item => new[] { "ASC", "DESC" }.Select(direction =>
+        $"SELECT * FROM (SELECT at,count,{item.Item2} FROM {item.Item1} ORDER BY at {direction} LIMIT 1)")));
+
+    private static SqliteCommand PrepareEndpoints(SqliteConnection connection, string channelId)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = EndpointSql;
+        command.Parameters.AddWithValue("$id", channelId);
+        command.Parameters.AddWithValue("$video", "");
+        command.Prepare();
+        return command;
+    }
+
+    private static JsonArray VideoEndpoints(SqliteCommand command, string videoId)
+    {
+        command.Parameters["$video"].Value = videoId;
+        var candidates = new List<(string At, DateTimeOffset Instant, long Count, long Priority)>();
+        using (var reader = command.ExecuteReader())
+            while (reader.Read())
             {
-                using var command = connection.CreateCommand();
-                command.CommandText = table == "samples"
-                    ? $"SELECT at,count FROM samples WHERE source=$source AND channel_id=$id AND kind='video' AND video_id=$video ORDER BY at {direction} LIMIT 1"
-                    : table == "runtime_cloud_samples"
-                    ? $"SELECT at,count FROM runtime_cloud_samples WHERE channel_id=$id AND kind='video' AND video_id=$video ORDER BY at {direction} LIMIT 1"
-                    : $"SELECT at,count FROM runtime_video_samples WHERE channel_id=$id AND video_id=$video ORDER BY at {direction} LIMIT 1";
-                if (table == "samples") command.Parameters.AddWithValue("$source", source);
-                command.Parameters.AddWithValue("$id", channelId);
-                command.Parameters.AddWithValue("$video", videoId);
-                using var reader = command.ExecuteReader();
-                if (reader.Read()) candidates.Add((reader.GetString(0), reader.GetInt64(1), priority));
+                var at = reader.GetString(0);
+                if (DateTimeOffset.TryParse(at, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant))
+                    candidates.Add((at, instant, reader.GetInt64(1), reader.GetInt64(2)));
             }
-        }
         var output = new JsonArray();
-        foreach (var at in candidates.Select(item => item.At).Distinct(StringComparer.Ordinal)
-            .OrderBy(at => at, StringComparer.Ordinal).Take(1)
-            .Concat(candidates.Select(item => item.At).Distinct(StringComparer.Ordinal)
-                .OrderByDescending(at => at, StringComparer.Ordinal).Take(1))
-            .Distinct(StringComparer.Ordinal))
+        if (candidates.Count == 0) return output;
+        // Compare instants, not strings: sources store different ISO formats.
+        var first = candidates.Min(item => item.Instant);
+        var last = candidates.Max(item => item.Instant);
+        foreach (var instant in first == last ? new[] { first } : new[] { first, last })
         {
-            var selected = candidates.Where(item => item.At == at).MaxBy(item => item.Priority);
-            output.Add(new JsonObject { ["at"] = at, ["count"] = selected.Count });
+            var selected = candidates.Where(item => item.Instant == instant).MaxBy(item => item.Priority);
+            output.Add(new JsonObject { ["at"] = selected.At, ["count"] = selected.Count });
         }
         return output;
     }
@@ -305,7 +314,7 @@ public sealed class NativeStateReader
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT at,count,CASE source WHEN 'local' THEN 2 ELSE 1 END AS priority
-              FROM samples WHERE channel_id=$id AND kind=$kind AND video_id=$video
+              FROM samples WHERE source IN ('local','cloud') AND channel_id=$id AND kind=$kind AND video_id=$video
             UNION ALL SELECT at,count,1 FROM runtime_cloud_samples
               WHERE channel_id=$id AND kind=$kind AND video_id=$video
             UNION ALL SELECT at,count,3 FROM runtime_subscriber_samples
