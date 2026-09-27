@@ -50,6 +50,8 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 20. **Zoom jump fix (user report).** Wheel zoom moved the date under the cursor: the unzoomed chart included the forecast area but zoomed charts did not, so the cursor's screen position meant a different date after each step. Zoom now uses the drawn axis including the forecast area (windows inside the forecast are allowed); in the harness repeated zoom in/out kept the cursor's time within minutes on a 90-day chart.
 
+21. **Hover kept across re-renders (user report).** After a wheel step the readout fell back to the idle hint until the mouse moved. The chart now remembers the last cursor position over it and re-applies the hover after any re-render (zoom or background refresh); leaving the chart clears it.
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 36/36 (forecast tests added with the chart change), isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.

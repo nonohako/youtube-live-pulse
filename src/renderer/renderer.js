@@ -827,7 +827,7 @@ function renderSubscriberDetail() {
     </div>
     ${analysisDailyTable(growth.daily, '명', [subscriberChartChannelId, subscriberChartRange, displayMode, subscriberChartViewport])}
     `;
-  hideMarketHover(elements.subscriberDialog, detailChartModel, SUBSCRIBER_CHART_IDS);
+  restoreMarketHover(elements.subscriberDialog, detailChartModel, SUBSCRIBER_CHART_IDS);
 }
 
 function renderVideoViewDetail() {
@@ -921,7 +921,7 @@ function renderVideoViewDetail() {
     </div>
     ${analysisDailyTable(daily, '회', [videoViewChartChannelId, videoViewChartVideoId, videoViewChartRange, displayMode, videoViewChartViewport])}
     `;
-  hideMarketHover(elements.videoViewDialog, videoViewChartModel, VIDEO_CHART_IDS);
+  restoreMarketHover(elements.videoViewDialog, videoViewChartModel, VIDEO_CHART_IDS);
 }
 
 function renderSelectionSummary(summary) {
@@ -1124,10 +1124,21 @@ function buildMarketChart(samples, timeAxis, dailySamples = [], selection = null
 }
 
 // Shared hover for both analysis charts: actual samples before the anchor, forecast after it.
+// Last cursor position over each chart, so a re-render (wheel zoom, background refresh) keeps the
+// readout under a cursor that has not moved.
+const marketHoverAt = new Map();
+
+function restoreMarketHover(dialog, model, ids) {
+  const clientX = marketHoverAt.get(ids.svg);
+  if (clientX === undefined) hideMarketHover(dialog, model, ids);
+  else moveMarketHover(dialog, model, {clientX}, ids);
+}
+
 function moveMarketHover(dialog, model, event, ids) {
   const svg = dialog.querySelector('#' + ids.svg);
   const bounds = svg?.getBoundingClientRect();
   if (!svg || !bounds?.width || !model?.points?.length) return;
+  marketHoverAt.set(ids.svg, event.clientX);
   const viewX = (event.clientX - bounds.left) / bounds.width * model.width;
   const crosshair = dialog.querySelector('#' + ids.crosshair), dot = dialog.querySelector('#' + ids.dot);
   const horizontal = dialog.querySelector('#' + ids.crosshair + '-h'), readout = dialog.querySelector('#' + ids.readout);
@@ -1157,6 +1168,7 @@ function moveMarketHover(dialog, model, event, ids) {
 }
 
 function hideMarketHover(dialog, model, ids) {
+  marketHoverAt.delete(ids.svg);
   for (const id of [ids.crosshair, ids.crosshair + '-h', ids.dot]) dialog.querySelector('#' + id)?.classList.add('hidden');
   const readout = dialog.querySelector('#' + ids.readout);
   if (readout && model) readout.innerHTML = model.defaultReadout || '';
@@ -1190,6 +1202,7 @@ function handleDetailChartPointerDown(event) {
 
 function handleDetailChartPointerMove(event) {
   const svg = event.target.closest?.('#subscriber-detail-svg');
+  if (!svg && marketHoverAt.has(SUBSCRIBER_CHART_IDS.svg)) hideDetailChartTooltip();
   if (!svg || !detailChartModel?.points?.length) return;
   if (detailChartDrag?.pointerId === event.pointerId) {
     const day = nearestSelectableDay(event, svg);
@@ -1250,12 +1263,14 @@ function handleDetailChartWheel(event) {
   subscriberChartViewport = isSameTimeWindow(nextWindow, model.fullTimeAxis) ? null : nextWindow;
   subscriberChartSelection = null;
   detailChartDrag = null;
-  hideDetailChartTooltip();
   renderSubscriberDetail();
 }
 
 function handleVideoViewPointerMove(event) {
-  if (!event.target.closest?.('#video-view-detail-svg')) return;
+  if (!event.target.closest?.('#video-view-detail-svg')) {
+    if (marketHoverAt.has(VIDEO_CHART_IDS.svg)) hideVideoViewTooltip();
+    return;
+  }
   moveMarketHover(elements.videoViewDialog, videoViewChartModel, event, VIDEO_CHART_IDS);
 }
 
@@ -1278,7 +1293,6 @@ function handleVideoViewWheel(event) {
   );
   if (!nextWindow || isSameTimeWindow(nextWindow, currentWindow)) return;
   videoViewChartViewport = isSameTimeWindow(nextWindow, model.fullTimeAxis) ? null : nextWindow;
-  hideVideoViewTooltip();
   renderVideoViewDetail();
 }
 
