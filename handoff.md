@@ -26,6 +26,8 @@ CORE_TESTS_PASSED (new Data API fixture cases), NATIVE_STORE_TESTS_PASSED (failu
 
 - A natural live-event Chrome open and balloon click on the native app has not been observed yet.
 - The Data API path is covered by fixtures only (no key is configured).
-- Five runtime events created before 2026-09-27 have no stored time and show without a relative time.
+- Five runtime events created before 2026-09-27 have no stored time; the UI now shows the video's official publish time recorded by the cloud (or local metadata) for them.
+- Three of those five "new video" events are false alerts for videos published in June/July (`wdH5_I7UiHA`, `Yy58f1A6F-c`, `8r-YPb_tKlM`), raised by early native runs. A possible fix is to skip "new video" events/notifications when the known publish time (RSS or cloud) is much older than the check; not implemented pending the user's decision.
+- The cloud collector already tracks new uploads (uploads playlist every 5 minutes, newest 10 videos every minute, title + publishedAt); it excludes live/upcoming items and community posts, and its `seenAt` is a last-seen, not first-seen, time.
 - The .NET 10 SDK lives in `%TEMP%\livepulse-dotnet10`; reinstall it if a temp cleaner removes it.
 - CHZZK support remains planned (see `AGENTS.md`).

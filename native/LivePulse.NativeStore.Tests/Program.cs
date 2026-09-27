@@ -438,6 +438,26 @@ using (var client = new HttpClient(new CloudFixtureHandler([])))
     Require((await new NativeCloudSync(importedDb, client).SyncOnceAsync()) is
         { Configured: false, Pages: 0 }, "연결 키가 없는 저장소에서 클라우드 요청을 시도함");
 
+var legacyEventDb = Path.Combine(folder, "legacy-events.sqlite");
+StoreImporter.Import(source, legacyEventDb);
+_ = new NativeMonitorStore(legacyEventDb);
+using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = legacyEventDb, Pooling = false }.ToString()))
+{
+    raw.Open();
+    using var insert = raw.CreateCommand();
+    insert.CommandText = $$"""
+        INSERT INTO runtime_events(event_key,payload_json) VALUES('{{channelId}}|video|legacyvid01',
+          '{"ChannelId":"{{channelId}}","Type":"video","SourceId":"legacyvid01","Title":"새 동영상","Detail":"옛 알림","Url":""}');
+        INSERT INTO runtime_video_metadata(channel_id,video_id,metadata_json)
+          VALUES('{{channelId}}','legacyvid01','{"videoId":"legacyvid01","publishedAt":"2026-09-26T11:00:33Z"}');
+        """;
+    insert.ExecuteNonQuery();
+}
+var legacyEvent = new NativeStateReader(legacyEventDb).Read()["events"]!.AsArray()
+    .Single(item => (string?)item!["sourceId"] == "legacyvid01")!;
+Require((string?)legacyEvent["at"] == "2026-09-26T11:00:33Z",
+    "시간이 없는 옛 새 동영상 알림에 기록된 게시 시각을 쓰지 않음");
+
 var settingsDb = Path.Combine(folder, "settings.sqlite");
 StoreImporter.Import(source, settingsDb);
 var settingsStore = new NativeMonitorStore(settingsDb);

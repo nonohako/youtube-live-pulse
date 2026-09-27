@@ -133,7 +133,12 @@ public sealed class NativeStateReader
                         item[char.ToLowerInvariant(key[0]) + key[1..]] = item[key]?.DeepClone();
                         item.Remove(key);
                     }
-                if (ids.Contains((string?)item["channelId"] ?? "")) events.Add(item);
+                if (!ids.Contains((string?)item["channelId"] ?? "")) continue;
+                // Events stored before 2026-09-27 have no time; a video's official publish time
+                // (recorded by the cloud collector or a local check) is the closest real record.
+                if (item["at"] is null && (string?)item["type"] == "video" && (string?)item["sourceId"] is { } videoId)
+                    item["at"] = PublishedAt(connection, (string)item["channelId"]!, videoId);
+                events.Add(item);
             }
         }
         foreach (var item in JsonNode.Parse(Meta(connection, "events"))?.AsArray() ?? new JsonArray())
@@ -165,6 +170,22 @@ public sealed class NativeStateReader
                 ["update"] = new JsonObject { ["status"] = "development", ["currentVersion"] = "prototype",
                     ["message"] = "포터블 빌드는 native/publish-portable.ps1로 다시 빌드해 업데이트합니다." } }
         };
+    }
+
+    private static string? PublishedAt(SqliteConnection connection, string channelId, string videoId)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_cloud_videos WHERE channel_id=$channel AND video_id=$video
+            UNION ALL SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_video_metadata WHERE channel_id=$channel AND video_id=$video
+            UNION ALL SELECT json_extract(metadata_json,'$.publishedAt') FROM series WHERE channel_id=$channel AND kind='video' AND video_id=$video
+            """;
+        command.Parameters.AddWithValue("$channel", channelId);
+        command.Parameters.AddWithValue("$video", videoId);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            if (!reader.IsDBNull(0) && reader.GetValue(0) is string text && DateTimeOffset.TryParse(text, out _)) return text;
+        return null;
     }
 
     private static JsonArray Videos(SqliteConnection connection, string channelId,
