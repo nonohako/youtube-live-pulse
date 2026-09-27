@@ -38,6 +38,8 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 14. **Folder cleanup.** Sent the Electron-era `.smoke-user-data` (432 MB) to the Recycle Bin, deleted the regenerable `artifacts/` test probes, and dropped Electron entries from `.gitignore`. The repository folder is now about 1.1 GB, almost all of it `data/` (DB plus two backups) and `app/`.
 
+15. **No white flash when opening from the tray.** The WebView is recreated on each open (to keep tray memory low); the WPF window and WebView2 default background are now the dashboard color. A capture 150 ms after the window appeared averaged brightness 16/255 (dark), not white.
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 34/34, isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.

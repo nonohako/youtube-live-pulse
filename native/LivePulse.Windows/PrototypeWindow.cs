@@ -235,6 +235,7 @@ internal sealed class PrototypeWindow : Window
             Background = System.Windows.Media.Brushes.DarkSlateBlue,
             Foreground = System.Windows.Media.Brushes.White
         });
+        Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x0d, 0x0f, 0x14));
         Content = _layout;
         StateChanged += (_, _) => UpdateWindowActivity();
         IsVisibleChanged += (_, _) => UpdateWindowActivity();
@@ -254,7 +255,9 @@ internal sealed class PrototypeWindow : Window
     {
         try
         {
-            var view = new WebView2();
+            // Match the dashboard background (--bg) so opening from the tray never flashes white
+            // while the WebView2 browser process starts.
+            var view = new WebView2 { DefaultBackgroundColor = System.Drawing.Color.FromArgb(0x0d, 0x0f, 0x14) };
             _view = view;
             Grid.SetRow(view, 1);
             _layout.Children.Add(view);
