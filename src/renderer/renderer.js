@@ -740,7 +740,6 @@ function renderSubscriberDetail() {
     ? math.collapseSamplesByLocalDate(channel.subscriberHistory || [])
     : channel.subscriberHistory || [];
   const baseSamples = math.filterSamples(displayHistory, subscriberChartRange, now);
-  const baseTimeAxis = math.buildTimeAxis(baseSamples, subscriberChartRange, now);
   if (!baseSamples.length) {
     subscriberChartViewport = null;
     detailChartModel = null;
@@ -753,6 +752,8 @@ function renderSubscriberDetail() {
     return;
   }
 
+  const outlook = window.LivePulseAnalytics.forecast(channel.subscriberHistory || [], 'subscriber', now);
+  const baseTimeAxis = forecastAxis(math.buildTimeAxis(baseSamples, subscriberChartRange, now), outlook);
   if (subscriberChartViewport) {
     subscriberChartViewport = math.zoomTimeWindow(
       subscriberChartViewport,
@@ -770,10 +771,8 @@ function renderSubscriberDetail() {
       subscriberChartViewport.endTime
     )
     : baseSamples;
-  if (!samples.length) {
-    subscriberChartViewport = null;
-    samples = baseSamples;
-  }
+  // A window inside the forecast area has no observations; keep the adjacent real points.
+  if (!samples.length) samples = math.plotSamples(baseSamples, subscriberChartViewport.startTime, subscriberChartViewport.endTime);
   const timeAxis = subscriberChartViewport
     ? math.buildTimeWindowAxis(
       subscriberChartViewport.startTime,
@@ -806,10 +805,9 @@ function renderSubscriberDetail() {
     subscriberChartSelection = null;
     selectionSummary = null;
   }
-  const outlook = window.LivePulseAnalytics.forecast(channel.subscriberHistory || [], 'subscriber', now);
   const chart = buildMarketChart(samples, timeAxis, growth.daily, subscriberChartSelection, displayMode, {
     unit: '명', title: '구독자 수 추이', size: marketChartSize(elements.subscriberDetailContent),
-    forecast: subscriberChartViewport ? null : outlook, horizonDays: forecastHorizonDays(baseTimeAxis),
+    forecast: outlook, domainEnd: baseTimeAxis.endTime,
     plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples
   });
   detailChartModel = {
@@ -875,7 +873,8 @@ function renderVideoViewDetail() {
   }
 
   const lastSampleTime = baseSamples.at(-1).timestamp;
-  const baseTimeAxis = math.buildTimeAxis(baseSamples, videoViewChartRange, lastSampleTime);
+  const outlook = window.LivePulseAnalytics.forecast(history.samples, 'video', now);
+  const baseTimeAxis = forecastAxis(math.buildTimeAxis(baseSamples, videoViewChartRange, lastSampleTime), outlook);
   if (videoViewChartViewport) {
     videoViewChartViewport = math.zoomTimeWindow(
       videoViewChartViewport,
@@ -894,21 +893,17 @@ function renderVideoViewDetail() {
       videoViewChartViewport.endTime
     )
     : baseSamples;
-  if (!samples.length) {
-    videoViewChartViewport = null;
-    samples = baseSamples;
-  }
+  if (!samples.length) samples = math.plotSamples(baseSamples, videoViewChartViewport.startTime, videoViewChartViewport.endTime);
   const timeAxis = videoViewChartViewport
     ? math.buildTimeWindowAxis(videoViewChartViewport.startTime, videoViewChartViewport.endTime)
     : baseTimeAxis;
   const daily = videoViewChartViewport
     ? math.analyzeGrowthForTimeWindow(history.samples, timeAxis.startTime, timeAxis.endTime, now).daily
     : math.analyzeGrowthForRange(history.samples, videoViewChartRange, now).daily;
-  const outlook = window.LivePulseAnalytics.forecast(history.samples, 'video', now);
   const chart = buildMarketChart(samples, timeAxis, daily, null, displayMode, {
     unit: '회', title: '영상 조회수 추이', ids: VIDEO_CHART_IDS, selectionEnabled: false,
     size: marketChartSize(elements.videoViewDetailContent),
-    forecast: videoViewChartViewport ? null : outlook, horizonDays: forecastHorizonDays(baseTimeAxis),
+    forecast: outlook, domainEnd: baseTimeAxis.endTime,
     plotSamples: math.plotSamples(baseSamples, timeAxis.startTime, timeAxis.endTime), domainSamples: baseSamples
   });
   videoViewChartModel = {
@@ -967,8 +962,13 @@ const SUBSCRIBER_CHART_IDS = {svg: 'subscriber-detail-svg', crosshair: 'detail-c
 const VIDEO_CHART_IDS = {svg: 'video-view-detail-svg', crosshair: 'video-view-crosshair', dot: 'video-view-hover-dot',
   readout: 'video-view-tooltip', selection: 'video-view-selection'};
 
-function forecastHorizonDays(axis) {
-  return Math.max(2, Math.min(60, Math.round((axis.endTime - axis.startTime) / DAY_MS * 0.25)));
+// The drawn and zoomable axis: the data range plus a forecast horizon of a quarter of it (2-60 days).
+// Zoom works on this same axis, so the date under the cursor stays put while zooming.
+function forecastAxis(axis, forecast) {
+  if (!forecast?.ready) return axis;
+  const horizon = Math.max(2, Math.min(60, Math.round((axis.endTime - axis.startTime) / DAY_MS * 0.25)));
+  return window.LivePulseChartMath.buildTimeWindowAxis(axis.startTime,
+    Math.max(axis.endTime, forecast.anchor.timestamp + horizon * DAY_MS));
 }
 
 // Pixel-sized viewBox so labels are never stretched; the side panel sits beside wide charts.
@@ -998,8 +998,8 @@ function buildMarketChart(samples, timeAxis, dailySamples = [], selection = null
   const {width, height} = options.size || {width: 840, height: 300};
   const forecast = options.forecast?.ready ? options.forecast : null;
   const anchor = forecast?.anchor;
-  const endTime = forecast ? Math.max(timeAxis.endTime, anchor.timestamp + options.horizonDays * DAY_MS) : timeAxis.endTime;
-  const axis = forecast ? window.LivePulseChartMath.buildTimeWindowAxis(timeAxis.startTime, endTime) : timeAxis;
+  const axis = timeAxis;
+  const showForecast = forecast && axis.endTime > anchor.timestamp;
   const plot = {left: 12, right: 78, top: 14};
   const axisHeight = 26, gap = 22;
   const volumeHeight = Math.max(44, Math.round(height * 0.2));
@@ -1011,16 +1011,17 @@ function buildMarketChart(samples, timeAxis, dailySamples = [], selection = null
   const toX = time => plot.left + (time - axis.startTime) / Math.max(1, axis.endTime - axis.startTime) * plotWidth;
 
   const projection = [];
-  if (forecast) {
-    const days = (endTime - anchor.timestamp) / DAY_MS;
+  if (showForecast) {
+    const from = Math.max(0, (axis.startTime - anchor.timestamp) / DAY_MS), days = (axis.endTime - anchor.timestamp) / DAY_MS;
     for (let i = 0; i <= 32; i++) {
-      const at = days * i / 32;
+      const at = from + (days - from) * i / 32;
       projection.push({timestamp: anchor.timestamp + at * DAY_MS, ...forecast.project(at)});
     }
   }
   // The band may be wide; scale for the data and the projected center, and clip the band instead.
+  // Keep the preset Y domain while zooming: it always spans the whole horizon's projected center.
   const domainValues = (options.domainSamples || samples).map(sample => sample.count)
-    .concat(projection.map(point => point.value));
+    .concat(forecast && options.domainEnd > anchor.timestamp ? [forecast.project((options.domainEnd - anchor.timestamp) / DAY_MS).value] : []);
   const rawLow = Math.min(...domainValues), rawHigh = Math.max(...domainValues);
   const pad = Math.max(1, (rawHigh - rawLow) * 0.08, rawHigh * 0.001);
   const low = Math.max(0, rawLow - pad), high = rawHigh + pad;
@@ -1064,15 +1065,15 @@ function buildMarketChart(samples, timeAxis, dailySamples = [], selection = null
     : '';
 
   let forecastMarkup = '';
-  if (forecast) {
-    const startX = toX(anchor.timestamp);
+  if (showForecast) {
+    const startX = Math.max(plot.left, toX(anchor.timestamp));
     const band = projection.map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.high).toFixed(1)}`)
       .concat(projection.slice().reverse().map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.low).toFixed(1)}`)).join(' ');
     forecastMarkup = `
       <rect class="market-future" x="${startX.toFixed(1)}" y="${plot.top}" width="${Math.max(0, plotRight - startX).toFixed(1)}" height="${(volumeBottom - plot.top).toFixed(1)}"/>
       <text class="market-future-label" x="${(startX + 8).toFixed(1)}" y="${plot.top + 14}">예측</text>
       <polygon class="market-band" points="${band}" clip-path="url(#${escapeAttribute(ids.svg)}-clip)"/>
-      <polyline class="market-forecast" points="${projection.map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.value).toFixed(1)}`).join(' ')}"/>`;
+      <polyline class="market-forecast" clip-path="url(#${escapeAttribute(ids.svg)}-clip)" points="${projection.map(p => `${toX(p.timestamp).toFixed(1)},${toY(p.value).toFixed(1)}`).join(' ')}"/>`;
   }
   const lastY = toY(last.count);
   const tag = `<line class="market-last-line ${direction}" x1="${plot.left}" x2="${plotRight}" y1="${lastY.toFixed(1)}" y2="${lastY.toFixed(1)}"/>
@@ -1246,13 +1247,6 @@ function handleDetailChartWheel(event) {
     CHART_MINIMUM_SPAN_MS
   );
   if (!nextWindow || isSameTimeWindow(nextWindow, currentWindow)) return;
-
-  const nextSamples = window.LivePulseChartMath.filterSamplesInTimeWindow(
-    model.baseSamples,
-    nextWindow.startTime,
-    nextWindow.endTime
-  );
-  if (!nextSamples.length) return;
   subscriberChartViewport = isSameTimeWindow(nextWindow, model.fullTimeAxis) ? null : nextWindow;
   subscriberChartSelection = null;
   detailChartDrag = null;
@@ -1283,12 +1277,6 @@ function handleVideoViewWheel(event) {
     CHART_MINIMUM_SPAN_MS
   );
   if (!nextWindow || isSameTimeWindow(nextWindow, currentWindow)) return;
-  const nextSamples = window.LivePulseChartMath.filterSamplesInTimeWindow(
-    model.baseSamples,
-    nextWindow.startTime,
-    nextWindow.endTime
-  );
-  if (!nextSamples.length) return;
   videoViewChartViewport = isSameTimeWindow(nextWindow, model.fullTimeAxis) ? null : nextWindow;
   hideVideoViewTooltip();
   renderVideoViewDetail();
