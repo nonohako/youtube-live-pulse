@@ -159,7 +159,7 @@ function cacheElements() {
     'setting-posts', 'setting-local-stats', 'local-stats-help', 'setting-subscriber-chart-mode', 'setting-interval',
     'setting-api-key', 'api-key-status',
     'setting-cloud-url', 'setting-cloud-token', 'cloud-sync-status',
-    'import-cloud-connection',
+    'import-cloud-connection', 'setting-backup-folder', 'backup-folder-status', 'choose-backup-folder',
     'startup-help', 'app-version', 'update-button', 'update-status',
     'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
     'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content',
@@ -231,6 +231,10 @@ function bindEvents() {
     elements.settingCloudToken.placeholder = '저장된 연결 키 유지';
     elements.cloudSyncStatus.textContent = '연결 파일 적용 완료 · 동기화 중';
     render();
+  }));
+  elements.chooseBackupFolder.addEventListener('click', () => safely(async () => {
+    const result = await window.livePulse.chooseBackupFolder();
+    if (!result.canceled) elements.settingBackupFolder.value = result.path;
   }));
   elements.hideButton.addEventListener('click', () => window.livePulse.hideWindow());
   elements.quitButton.addEventListener('click', () => {
@@ -1634,6 +1638,11 @@ function openSettings() {
   elements.settingCloudUrl.value = settings.cloudUrl || '';
   elements.settingCloudToken.value = '';
   elements.settingCloudToken.placeholder = settings.hasCloudToken ? '저장된 연결 키 유지' : '새로 연결할 때 입력';
+  elements.settingBackupFolder.value = settings.externalBackupFolder || '';
+  const backup = appState.app?.externalBackup || {};
+  elements.backupFolderStatus.textContent = !settings.externalBackupFolder ? '외부 백업 안 함'
+    : backup.error || (backup.running ? '백업하는 중…'
+      : backup.lastAt ? `최근 외부 백업: ${new Date(backup.lastAt).toLocaleString('ko-KR')}` : '곧 첫 백업을 만듭니다.');
   elements.cloudSyncStatus.textContent = appState.cloud?.error || (settings.cloudUrl
     ? (appState.cloud?.lastSyncAt ? `최근 동기화: ${new Date(appState.cloud.lastSyncAt).toLocaleString('ko-KR')}` : '연결 후 동기화를 기다립니다.')
     : '클라우드 연결 안 됨');
@@ -1674,7 +1683,8 @@ async function handleSaveSettings(event) {
     recordLocalStatistics: elements.settingLocalStats.checked,
     subscriberChartMode: elements.settingSubscriberChartMode.value,
     pollIntervalSeconds: Number(elements.settingInterval.value),
-    cloudUrl: elements.settingCloudUrl.value.trim()
+    cloudUrl: elements.settingCloudUrl.value.trim(),
+    externalBackupFolder: elements.settingBackupFolder.value.trim()
   };
   if (elements.settingApiKey.value.trim()) update.apiKey = elements.settingApiKey.value.trim();
   if (elements.settingCloudToken.value.trim()) update.cloudToken = elements.settingCloudToken.value.trim();

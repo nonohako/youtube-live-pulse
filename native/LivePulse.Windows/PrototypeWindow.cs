@@ -396,6 +396,9 @@ internal sealed class PrototypeWindow : Window
                         throw new InvalidDataException("주소가 올바르지 않습니다.");
                     result = _app.OpenUrl(address.GetString()!);
                     break;
+                case "chooseBackupFolder":
+                    result = _app.ChooseBackupFolder();
+                    break;
                 case "importCloudConnection":
                     result = _app.ImportCloudConnection();
                     break;

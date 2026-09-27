@@ -207,6 +207,14 @@
         <small>PC를 꺼도 서버가 1분마다 수집합니다. 서버에 등록한 채널의 서버의 최근 30일 기록을 받아 로컬에 계속 보관합니다. 구독자 수는 YouTube의 공개 단위로 표시됩니다. 주소를 비우고 저장하면 연결을 해제합니다.</small>
       </div>
 
+      <div class="field-group">
+        <label for="setting-backup-folder">하루 한 번 외부 백업 <span>선택</span></label>
+        <input id="setting-backup-folder" type="text" autocomplete="off" placeholder="예: G:\내 드라이브\라이브 펄스 백업">
+        <small id="backup-folder-status">외부 백업 안 함</small>
+        <button id="choose-backup-folder" type="button" class="text-button">폴더 선택</button>
+        <small>기록 DB를 하루 한 번 압축해 이 폴더에 저장하고 최근 3일치만 남깁니다. Google Drive 데스크톱 앱의 폴더를 고르면 자동으로 드라이브에 올라갑니다. 비우고 저장하면 끕니다.</small>
+      </div>
+
       <div class="dialog-actions">
         <button id="quit-button" type="button" class="danger-text-button">앱 완전히 종료</button>
         <div>

@@ -20,6 +20,10 @@ internal sealed class PrototypeApp : System.Windows.Application
     private bool _quitting;
     private readonly DispatcherTimer _heartbeat = new() { Interval = TimeSpan.FromSeconds(1) };
     private bool _lastSweeping;
+    private int _externalBackupRunning;
+    private DateTime _externalBackupCheckedAt = DateTime.UtcNow.AddMinutes(-8);
+    private string? _externalBackupAt;
+    private string? _externalBackupError;
     private DateTime _lastTrim = DateTime.MinValue;
     private MonitorSweepResult? _lastSweepSent;
     private int _ticksSinceState;
@@ -117,6 +121,7 @@ internal sealed class PrototypeApp : System.Windows.Application
             _ticksSinceState = 0;
             if (sweepChanged) UpdateTrayText();
             if (sweepChanged && _window is null) TrimMemory();
+            RunExternalBackupIfDue();
             _window?.SendState();
         };
         _heartbeat.Start();
@@ -157,6 +162,48 @@ internal sealed class PrototypeApp : System.Windows.Application
             Dispatcher.BeginInvoke(async () => await RunMonitorSmokeAsync());
         else if (!_args.Contains("--hidden"))
             ShowWindow();
+    }
+
+    // Daily zip of the newest backup generation into the user's folder (e.g. Google Drive).
+    // Checked every 10 minutes (first check 2 minutes after start) off the UI thread.
+    private void RunExternalBackupIfDue(bool force = false)
+    {
+        if (_monitorStore is null || _personal is null) return;
+        if (!force && DateTime.UtcNow - _externalBackupCheckedAt < TimeSpan.FromMinutes(10)) return;
+        _externalBackupCheckedAt = DateTime.UtcNow;
+        string folder;
+        try { folder = _monitorStore.ReadExternalBackupFolder(); }
+        catch (Exception error) { Volatile.Write(ref _externalBackupError, error.Message); return; }
+        if (folder.Length == 0) { Volatile.Write(ref _externalBackupError, null); return; }
+        if (Interlocked.Exchange(ref _externalBackupRunning, 1) != 0) return;
+        var database = _personal.Database;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var result = NativeExternalBackup.RunIfDue(database, folder, DateTime.Now);
+                if (result.Path is { } path && File.Exists(path))
+                    Volatile.Write(ref _externalBackupAt, File.GetLastWriteTimeUtc(path).ToString("O"));
+                Volatile.Write(ref _externalBackupError, null);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                Volatile.Write(ref _externalBackupError, $"외부 백업 실패: {error.Message}");
+                Console.Error.WriteLine($"NATIVE_EXTERNAL_BACKUP_FAILED {error}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _externalBackupRunning, 0);
+                _ = Dispatcher.BeginInvoke(() => _window?.SendState());
+            }
+        });
+    }
+
+    internal object ChooseBackupFolder()
+    {
+        var picker = new Microsoft.Win32.OpenFolderDialog { Title = "하루 한 번 백업을 저장할 폴더 (예: Google Drive 폴더)" };
+        if (picker.ShowDialog(_window) != true) return new { canceled = true };
+        return new { canceled = false, path = picker.FolderName };
     }
 
     // Like Electron: the tooltip shows how many channels are live.
@@ -205,6 +252,12 @@ internal sealed class PrototypeApp : System.Windows.Application
             foreach (var channel in state["channels"]!.AsArray())
                 if ((string?)channel!["id"] == checking && (string?)channel["status"] != "error") channel["status"] = "checking";
         state["app"]!["nativePersonal"] = IsPersonal;
+        state["app"]!["externalBackup"] = new JsonObject
+        {
+            ["lastAt"] = Volatile.Read(ref _externalBackupAt),
+            ["error"] = Volatile.Read(ref _externalBackupError),
+            ["running"] = Volatile.Read(ref _externalBackupRunning) != 0
+        };
         state["app"]!["loginSettingApplied"] = IsPersonal
             && IsPersonalLoginSettingApplied(state["settings"]!["startAtLogin"]?.GetValue<bool>() == true);
         if (Volatile.Read(ref _lastCloudError) is { } error)
@@ -248,6 +301,7 @@ internal sealed class PrototypeApp : System.Windows.Application
             _monitorScheduler?.Wake();
         }
         if (IsPersonal) ApplyPersonalLoginSetting();
+        if (partial.TryGetProperty("externalBackupFolder", out _)) RunExternalBackupIfDue(force: true);
         _window?.SendState();
     }
 

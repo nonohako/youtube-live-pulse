@@ -39,10 +39,15 @@ if (Get-Process -Name 'LivePulse', 'LivePulse.NativePrototype' -ErrorAction Sile
 }
 
 # --- app/ ---------------------------------------------------------------------------------
+# Framework-dependent: uses the installed .NET 10 Desktop Runtime (x64), keeping app/ small.
+# Another PC needs that runtime (windowsdesktop-runtime-10.x-win-x64) before LivePulse.exe starts.
+if (-not (Get-ChildItem "$env:ProgramFiles\dotnet\shared\Microsoft.WindowsDesktop.App" -Directory -Filter '10.*' -ErrorAction SilentlyContinue)) {
+    throw '.NET 10 Desktop Runtime(x64)이 설치되어 있지 않습니다. 먼저 설치하세요.'
+}
 $staging = Join-Path $root 'app.publish-tmp'
 if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
 & $Dotnet publish (Join-Path $PSScriptRoot 'LivePulse.Windows/LivePulse.Windows.csproj') -c Release -r win-x64 `
-    --self-contained true --output $staging -nologo -v q
+    --self-contained false --output $staging -nologo -v q
 if ($LASTEXITCODE -ne 0) { throw '앱 빌드가 실패했습니다. 기존 app 폴더는 그대로입니다.' }
 New-Item -ItemType File -Path (Join-Path $staging $marker) -Force | Out-Null
 if (Test-Path -LiteralPath $appDir) {

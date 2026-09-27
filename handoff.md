@@ -40,6 +40,8 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 15. **No white flash when opening from the tray.** The WebView is recreated on each open (to keep tray memory low); the WPF window and WebView2 default background are now the dashboard color. A capture 150 ms after the window appeared averaged brightness 16/255 (dark), not white.
 
+16. **Smaller app, external backup.** `publish-portable.ps1` now builds framework-dependent against the installed .NET 10 Desktop Runtime: `app/` shrank from 177 MB to 4.9 MB and warm startup to the window is about 1.25 s. A daily external backup (zip of `.bak.1`, newest three kept) writes to a folder chosen in settings; Google Drive for desktop is not installed yet, so no folder is configured. Answered: new channels stay local; the cloud's list is `CHANNEL_IDS` in `cloud/fly.toml`. The SDK still lives in `%TEMP%`.
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 34/34, isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.

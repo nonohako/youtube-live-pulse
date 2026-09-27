@@ -719,6 +719,30 @@ ExpectFailure(() => NativeStoreRecovery.CreateBackup(forcedDb),
     "손상된 백업 세대가 있는데 중단된 임시 백업을 지움");
 Require(File.Exists(forcedDb + ".backup.tmp"), "검증 실패 후 임시 백업을 지움");
 
+// Daily external copy into a user folder (Google Drive for desktop).
+var externalFolder = Path.Combine(folder, "external");
+Directory.CreateDirectory(externalFolder);
+File.WriteAllText(Path.Combine(externalFolder, "unrelated.txt"), "keep");
+foreach (var day in new[] { 20, 21, 22, 23 })
+    File.WriteAllBytes(Path.Combine(externalFolder, $"live-pulse-202609{day}.sqlite.zip"), [1]);
+var external = NativeExternalBackup.RunIfDue(forcedDb, externalFolder, new DateTime(2026, 9, 27, 9, 0, 0));
+Require(external.Created && File.Exists(Path.Combine(externalFolder, "live-pulse-20260927.sqlite.zip"))
+    && !NativeExternalBackup.RunIfDue(forcedDb, externalFolder, new DateTime(2026, 9, 27, 18, 0, 0)).Created
+    && Directory.GetFiles(externalFolder, "live-pulse-*.sqlite.zip").Length == NativeExternalBackup.KeepDays
+    && File.Exists(Path.Combine(externalFolder, "unrelated.txt"))
+    && !File.Exists(Path.Combine(externalFolder, "live-pulse-20260921.sqlite.zip")),
+    "외부 백업 생성·하루 1회·최근 3일 유지 또는 다른 파일 보호 오류");
+using (var zip = System.IO.Compression.ZipFile.OpenRead(Path.Combine(externalFolder, "live-pulse-20260927.sqlite.zip")))
+{
+    var restoredCopy = Path.Combine(folder, "external-restored.sqlite");
+    zip.Entries.Single().ExtractToFile(restoredCopy);
+    NativeStoreRecovery.Validate(restoredCopy);
+    Require(new NativeMonitorStore(restoredCopy).Load(channelId).Tracking.OpenedBroadcastIds.Contains("live:thirdlive11"),
+        "외부 백업에서 복원한 DB가 최신 백업 세대와 다름");
+}
+ExpectFailure(() => NativeExternalBackup.RunIfDue(forcedDb, Path.Combine(folder, "missing"), DateTime.Now),
+    "없는 외부 백업 폴더를 조용히 넘김");
+
 var schedulerDb = Path.Combine(folder, "scheduler.sqlite");
 StoreImporter.Import(source, schedulerDb);
 var schedulerStore = new NativeMonitorStore(schedulerDb);

@@ -213,6 +213,14 @@ public sealed class NativeMonitorStore
         return result;
     }
 
+    public string ReadExternalBackupFolder()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT json_extract(value,'$.externalBackupFolder') FROM meta WHERE key='settings'";
+        return command.ExecuteScalar() as string ?? "";
+    }
+
     public bool ReadStartAtLogin()
     {
         using var connection = Open();
@@ -532,6 +540,13 @@ public sealed class NativeMonitorStore
                     if (token.Length != 0 && !Regex.IsMatch(token, "^[A-Za-z0-9_-]{32,256}$"))
                         throw new InvalidDataException("클라우드 읽기 키가 올바르지 않습니다.");
                     settings[property.Name] = token;
+                    break;
+                case "externalBackupFolder":
+                    if (value.ValueKind != JsonValueKind.String) throw new InvalidDataException("외부 백업 폴더가 올바르지 않습니다.");
+                    var folder = value.GetString()!.Trim();
+                    if (folder.Length > 400 || (folder.Length != 0 && !Path.IsPathFullyQualified(folder)))
+                        throw new InvalidDataException("외부 백업 폴더는 전체 경로여야 합니다.");
+                    settings[property.Name] = folder;
                     break;
                 default:
                     throw new InvalidDataException("지원하지 않는 설정 값입니다.");

@@ -43,6 +43,7 @@
       importSubscriberHistory: id => invoke('importSubscriberHistory', id),
       updateSettings: settings => invoke('updateSettings', settings),
       importCloudConnection: () => invoke('importCloudConnection'),
+      chooseBackupFolder: () => invoke('chooseBackupFolder'),
       openUrl: url => invoke('openUrl', url),
       hideWindow: () => invoke('hideWindow'),
       quit: () => invoke('quit'),

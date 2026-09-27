@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (faster state reads and chart opening; work continues on `main`).
+Last maintained: 2026-09-27 (framework-dependent build, daily external backup; work continues on `main`).
 
 ## Current state
 
@@ -15,12 +15,12 @@ Last maintained: 2026-09-27 (faster state reads and chart opening; work continue
 
 ## Portable layout
 
-- `native/publish-portable.ps1` publishes a self-contained build to `<repo>/app` (with the `LivePulse.portable` marker), creates the desktop shortcut `라이브 펄스.lnk`, and removes intermediate `native/*/bin|obj`. It first asks a running app to quit with `app\LivePulse.exe --quit` (graceful: finishes the current write/backup). `-FromJson PATH` performs first setup from an Electron `live-pulse.json` (the final one is archived in `data/legacy/`).
+- `native/publish-portable.ps1` publishes a framework-dependent build (about 5 MB; needs the installed .NET 10 Desktop Runtime x64, which the script checks) to `<repo>/app` (with the `LivePulse.portable` marker), creates the desktop shortcut `라이브 펄스.lnk`, and removes intermediate `native/*/bin|obj`. It first asks a running app to quit with `app\LivePulse.exe --quit` (graceful: finishes the current write/backup). `-FromJson PATH` performs first setup from an Electron `live-pulse.json` (the final one is archived in `data/legacy/`).
 - All personal data lives in `<repo>/data`: `live-pulse.sqlite`, `.bak.1/.bak.2`, the WebView2 profile, `startup-error.log`/`runtime-error.log`, and `legacy/` (compressed final Electron JSON, preserved Electron Run command). `app/` and `data/` are gitignored; rebuilds never overwrite `data/`.
 - Paths are relative to the executable, so the folder can move (e.g. to D:). On launch the app rewrites its own `라이브 펄스` Run value and a desktop shortcut (`라이브 펄스.lnk` or legacy `라이브 펄스 (네이티브).lnk`) that targets a LivePulse executable. Never overwrite an unrelated Run value or shortcut.
 - Only a marked build with no arguments or only `--hidden` opens personal data. Missing `data/` or an unrecoverable DB stops visibly; never fall back to fixture data. Unmarked development builds keep fixture/isolated behavior (`--isolated-monitor-db` needs an ignored `artifacts/migration-isolated-data/*.probe.sqlite`).
 - A per-user mutex and events route repeated launches to the existing window and `--quit` to a graceful stop. The `.native-lock` DB lease is the writer guard.
-- The .NET 10 SDK is currently at `%TEMP%\livepulse-dotnet10` (a temp cleaner may remove it; reinstall with `winget install Microsoft.DotNet.SDK.10` or pass `-Dotnet`).
+- Building needs the .NET 10 **SDK**; the user installed only the Desktop Runtime (2026-09-27). The SDK is currently at `%TEMP%\livepulse-dotnet10` (a temp cleaner may remove it; reinstall with `winget install Microsoft.DotNet.SDK.10` or pass `-Dotnet`).
 
 ## Storage, backup and recovery invariants
 
@@ -30,6 +30,7 @@ Last maintained: 2026-09-27 (faster state reads and chart opening; work continue
 - Personal startup calls `NativeStoreRecovery.OpenForStartup` under the lease: a read-write open rolls back a crash journal (read-only validation rejects such a valid DB), then the primary is validated or the newest valid backup is restored with the corrupt primary preserved. No valid copy stops startup visibly.
 - Never initialize defaults over unreadable data. Recovery restores only real records; never fill gaps with estimated values or fixtures.
 - The 2026-08-02..09-16 subscriber gap was filled from Playboard daily totals at the user's request (xlsx-import semantics). Past counts cannot come from the public Data API.
+- Daily external backup: when `externalBackupFolder` is set (settings dialog, folder picker via the `chooseBackupFolder` bridge action), `NativeExternalBackup` zips a quick-checked copy of `.bak.1` to `live-pulse-YYYYMMDD.sqlite.zip` once per local day (checked every 10 minutes, off the UI thread) and keeps the newest three such files; it never touches other files. Intended target: a Google Drive for desktop folder (not installed on 2026-09-27). Status shows in settings via `app.externalBackup`.
 - Real observations recorded by another runtime may be merged only with exact-instant deduplication (done once for Electron's 2026-09-26/27 run: 11 subscriber and 2,321 video samples).
 
 ## Monitoring and UI state invariants
@@ -138,6 +139,7 @@ Also run `LivePulse.exe --startup-self-test` and, for UI changes, the isolated W
 
 ## Cloud statistics invariants
 
+- The cloud tracks only `CHANNEL_IDS` in `cloud/fly.toml` (currently the two channels, at most 5). Channels added in the app are not sent to the cloud; the app records their statistics locally (cloud-first fallback) unless the list is edited and `fly deploy` is run.
 - `cloud/` is a separate Node-only Fly.io service; never deploy the desktop app or personal local data. Keep one 512MB shared machine with autostop disabled and `--ha=false`.
 - Collect channel statistics every minute and track up to 100 eligible videos per channel. Refresh up to three 50-item uploads pages every five minutes. Poll the newest 10 plus 15 highest smoothed-growth videos every minute; remaining recent/rising videos every five minutes and quiet older videos hourly. Exclude active live/upcoming videos. Cloud collection does not replace desktop notification detection.
 - Keep YouTube and Upstash credentials only in Fly secrets. Desktop sync uses a separate read-only service token, hidden from renderer state; never embed user credentials in the public installer or repository.
