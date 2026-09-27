@@ -196,7 +196,7 @@ Do not store NAVER login cookies or credentials. If authenticated access becomes
 
 ## Safety and repository hygiene
 
-- Never commit API keys, tokens, cookies, local user data or subscriber-history files. `app/`, `data/`, `artifacts/` and `native/**/bin|obj` are ignored.
+- Never commit API keys, tokens, cookies, local user data or subscriber-history files. `app/`, `data/`, `artifacts/` (recreated by smoke fixtures) and `native/**/bin|obj` are ignored.
 - Do not launch personal monitoring from a packaged (MSIX) tool shell; check `GetCurrentPackageFullName` if unsure. Claude Code shells here had no package identity; earlier Codex sessions redirected LocalAppData writes.
 - `.git` is owned by the Codex sandbox account (`CodexSandboxOffline`); the user's global git config lists this folder under `safe.directory`. Do not change file ownership.
 - Send personal data copies to the Recycle Bin rather than hard-deleting them; avoid destructive Git commands.
