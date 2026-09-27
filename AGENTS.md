@@ -1,16 +1,16 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (cloud-first statistics, old-content filter, cloud-timed events) after completing the C# migration: Electron parity items were ported, the Electron app/source/build outputs were removed, and the personal app runs portably from this folder.
+Last maintained: 2026-09-27 (C# migration merged into `main`; work continues on `main`).
 
 ## Current state
 
 - **Live Pulse (라이브 펄스)** is a single-user personal Windows tray app written in C# (.NET 10, WPF host + WebView2). It monitors YouTube channels in the background, shows notifications and opens Chrome for a live or scheduled broadcast. The HTML/CSS/JS dashboard in `src/renderer` is hosted in WebView2 through `native/LivePulse.Windows/bridge.js` (`window.livePulse`).
 - The Electron app is retired: its installed copy was uninstalled on 2026-09-27 and `src/main.js`, `src/lib`, Electron scripts/tests, `package-lock.json` and the release workflow were removed. Git history (up to commit 94d53df) keeps them. Public GitHub Releases up to v1.12.1 remain Electron builds; do not publish new tags/installers unless the user asks for public distribution.
-- The user asked to reduce overengineering. Prefer focused fixes from real use; do not add speculative abstractions. After each completed task, commit and push the current branch without asking (no tags/releases).
+- The user asked to reduce overengineering. Prefer focused fixes from real use; do not add speculative abstractions. After each completed task, commit and push `main` without asking (no tags/releases).
 
 ## Upstash access for agents
 
-- `.mcp.json` registers the `upstash-redis` MCP server (`@upstash/redis-mcp`). It reads `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_READONLY_TOKEN` from the user's environment; use the **read-only** token and never write tokens into the repository. The collector owns writes to `live-pulse:v1:*`.
+- `.mcp.json` registers the `upstash-redis` MCP server (`@upstash/redis-mcp`). It reads `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_READONLY_TOKEN` from the user's environment (both set as user variables and verified on 2026-09-27: the keys are `live-pulse:v1:metadata` and `live-pulse:v1:samples`). Use only read commands and never write tokens into the repository. The collector owns writes to `live-pulse:v1:*`.
 - On 2026-09-27 the full server window (2026-09-17 13:00 UTC onward: 13,786 minutes, 27,572 subscriber and 844,732 view rows, 217 videos) was compared with the app DB through the Fly read API: nothing was missing. The app's cloud sync is the migration path; do not copy Upstash data by hand.
 
 ## Portable layout
@@ -55,7 +55,7 @@ Last maintained: 2026-09-27 (cloud-first statistics, old-content filter, cloud-t
 
 ## Repository
 
-- Public repository: `https://github.com/nonohako/youtube-live-pulse` (default branch `main`; the native work is on `codex/csharp-webview2-migration`).
+- Public repository: `https://github.com/nonohako/youtube-live-pulse` (default branch `main`, where all work happens; the C# migration was merged from `codex/csharp-webview2-migration` in PR #12 on 2026-09-27).
 - `native/LivePulse.Core`: YouTube input resolution, public-page/RSS parsing, optional Data API, change planning.
 - `native/LivePulse.NativeStore`: SQLite store, backups/recovery, scheduler, cloud sync, state projection, xlsx import.
 - `native/LivePulse.Windows`: WPF tray host, WebView2 bridge, portable layout, Run/shortcut repair.
@@ -123,17 +123,11 @@ Also run `LivePulse.exe --startup-self-test` and, for UI changes, the isolated W
 - Subscriber, single-video and comparison charts expose samples/daily selectors inline; daily uses each local date final observation without rewriting stored histories. Existing completed-day subscriber growth rules remain unchanged.
 - Persist validated chart period/mode preferences per chart type in renderer localStorage, including across window/app restarts; it contains presentation preferences only, never credentials. Zoom/selection reset on period or mode changes.
 - The native `--ui-smoke --ui-smoke-refresh --ui-smoke-actions` run drives real WebView interactions against fixture data. The renderer has no host objects or Node access.
-
 - Coalesce chart hover events to one animation frame and binary-search actual samples; tooltips must not wait for native SVG title delays. Preserve chart DOM on status-only updates and avoid rebuilding background lists while a dialog is open. Cache cloud chart projections without mutating or truncating the stored archive; omit unchanged histories from IPC only when the renderer can reuse its previous full state.
-
 - Analysis workspaces share four summary metrics, period/mode controls and total/change chart switches. Video summary rates use actual raw observation intervals regardless of daily display; subscriber growth uses completed local dates only. Missing baselines render as insufficient data, never zero. Daily tables show actual closes and elapsed gaps; library velocity is the full recorded interval average, not a recent forecast. Cache per-video summary calculations outside hover handlers.
-
 - Analytics separates trend, daily records and subscriber growth into keyboard-operable sections. Keep the hover readout above the plot, preserve arrow/Home/End record navigation, and verify the full plot fits the compact 900x660 overview.
-
 - Normal UI state carries bounded subscriber sparklines and only video endpoints. The validated analytics subscription exposes full chart projections only for the selected subscriber channel and at most four videos. Closing analytics releases detail data. Hidden/minimized windows receive no background state broadcasts and pause renderer countdowns; show/restore sends a fresh complete state. Core polling and cloud collection must continue while hidden.
-
 - Sample-time axes show hourly minor ticks within seven days, with density-aware hour labels and stronger local-midnight date lines. Daily/long-range views retain calendar ticks. Zoom plots include adjacent real points outside the viewport under an SVG clip, while hover/summary samples stay in-range. Keep the preset Y domain and change baseline stable during zoom; never store or expose interpolated boundary values as observations.
-
 - Comparison change baselines, interval rates and first/last observations always use raw in-range records, independent of samples/daily presentation. Daily comparison points retain their real observation timestamp for the readout; midnight is only a plot position. Exclude future records before collapsing days. Account for SVG screen transforms when mapping comparison pointer coordinates.
 - Daily record tables page through all actual completed dates in the selected range (ten per page); reset paging on channel/video, range, mode or viewport changes and release page data on dialog close. Keep hidden-by-filter comparison selections visible with individual removal. Comparison readout rows stay outside the plot, including four long titles at 900x660; compact single-chart views keep their date caption visible.
 
@@ -194,11 +188,12 @@ Do not store NAVER login cookies or credentials. If authenticated access becomes
 3. Test relevant real public channel/video data when safe (never with Windows effects from an isolated DB).
 4. Rebuild the personal app with `native/publish-portable.ps1` when runtime code changed.
 5. Update `AGENTS.md` (`Last maintained`) and `handoff.md` in the same task.
-6. Commit and push the branch.
+6. Commit and push `main`.
 
 ## Safety and repository hygiene
 
 - Never commit API keys, tokens, cookies, local user data or subscriber-history files. `app/`, `data/`, `artifacts/` and `native/**/bin|obj` are ignored.
 - Do not launch personal monitoring from a packaged (MSIX) tool shell; check `GetCurrentPackageFullName` if unsure. Claude Code shells here had no package identity; earlier Codex sessions redirected LocalAppData writes.
+- `.git` is owned by the Codex sandbox account (`CodexSandboxOffline`); the user's global git config lists this folder under `safe.directory`. Do not change file ownership.
 - Send personal data copies to the Recycle Bin rather than hard-deleting them; avoid destructive Git commands.
 - The app is unsigned. Do not claim it is code-signed.
