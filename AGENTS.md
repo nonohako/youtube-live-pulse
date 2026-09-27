@@ -8,6 +8,11 @@ Last maintained: 2026-09-27 (cloud-first statistics, old-content filter, cloud-t
 - The Electron app is retired: its installed copy was uninstalled on 2026-09-27 and `src/main.js`, `src/lib`, Electron scripts/tests, `package-lock.json` and the release workflow were removed. Git history (up to commit 94d53df) keeps them. Public GitHub Releases up to v1.12.1 remain Electron builds; do not publish new tags/installers unless the user asks for public distribution.
 - The user asked to reduce overengineering. Prefer focused fixes from real use; do not add speculative abstractions. After each completed task, commit and push the current branch without asking (no tags/releases).
 
+## Upstash access for agents
+
+- `.mcp.json` registers the `upstash-redis` MCP server (`@upstash/redis-mcp`). It reads `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_READONLY_TOKEN` from the user's environment; use the **read-only** token and never write tokens into the repository. The collector owns writes to `live-pulse:v1:*`.
+- On 2026-09-27 the full server window (2026-09-17 13:00 UTC onward: 13,786 minutes, 27,572 subscriber and 844,732 view rows, 217 videos) was compared with the app DB through the Fly read API: nothing was missing. The app's cloud sync is the migration path; do not copy Upstash data by hand.
+
 ## Portable layout
 
 - `native/publish-portable.ps1` publishes a self-contained build to `<repo>/app` (with the `LivePulse.portable` marker), creates the desktop shortcut `라이브 펄스.lnk`, and removes intermediate `native/*/bin|obj`. It first asks a running app to quit with `app\LivePulse.exe --quit` (graceful: finishes the current write/backup). `-FromJson PATH` performs first setup from an Electron `live-pulse.json` (the final one is archived in `data/legacy/`).

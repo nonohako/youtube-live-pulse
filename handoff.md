@@ -20,6 +20,8 @@ Earlier history (Electron releases v1.x, the 2026-09-22 data recovery, the stage
 
 6. **Cloud-first records (user request).** New-video events show the cloud's official publish time and the event list is time-ordered. Unseen videos/posts older than 2 days (recorded publish time or clear relative text) are no longer alerted as new. Subscriber/view history is left to the Fly collector; the PC records it only while a channel has no cloud samples newer than 10 minutes, or always if the new settings switch "구독자·조회수를 이 PC에서도 기록" is on (off by default). Real-data check after publishing: no local subscriber/view rows while cloud samples were current. RSS 404/500 warnings (YouTube feed flakiness, not the app or Fly) are hidden while `/videos` works; Fly logs showed a collection every minute with `error: null`.
 
+7. **Upstash.** Compared the whole Fly/Upstash window with the app DB (read-only, via the Fly read API): all 13,786 minutes since 2026-09-17 13:00 UTC and all 217 video metadata entries were already in the app, so no migration was needed. Added `.mcp.json` for the Upstash Redis MCP server; the user sets `UPSTASH_REDIS_READONLY_TOKEN` themselves (URL env var already set) and restarts the app to connect.
+
 ## Verification
 
 CORE_TESTS_PASSED (new Data API fixture cases), NATIVE_STORE_TESTS_PASSED (failure events, event order/time, removed-channel filtering, backup residue/crash-journal cases), DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 34/34, isolated WebView smoke (actions, refresh, minimize/restore, close) passed; Release build 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors.
