@@ -36,6 +36,6 @@ Fly.io의 Node.js 서버 한 대가 공식 YouTube Data API에서 구독자 수(
 - Fly health check 성공만으로 YouTube 수집 성공이라 판단하지 마세요. 앱 설정의 동기화 상태와 Fly 로그의 수집 시각·오류를 함께 확인합니다.
 - API 키 제한은 YouTube Data API만 허용하는 방식이 적합합니다. 웹사이트 referrer 전용 키는 서버 요청에서 거부될 수 있습니다.
 
-검증: `node --test test/cloud.test.js`, 전체 `npm test`, 패키지 `--smoke-settings`.
+검증: `node --test test/cloud.test.js`.
 
-명령줄 온보딩도 지원합니다: `라이브 펄스.exe --cloud-config "연결 JSON의 절대 경로"`. 실행 중인 앱에도 연결 설정만 전달하며 관련 없는 설정과 기록은 보존합니다. 연결 파일에는 서버용 API 키나 Redis 쓰기 토큰을 넣지 않습니다.
+앱에서는 설정 → 클라우드 연결 파일 가져오기로 연결합니다. 연결 설정만 바뀌며 관련 없는 설정과 기록은 보존합니다. 연결 파일에는 서버용 API 키나 Redis 쓰기 토큰을 넣지 않습니다.

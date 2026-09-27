@@ -156,7 +156,7 @@ function cacheElements() {
     'settings-button', 'settings-dialog', 'settings-form', 'settings-close',
     'settings-cancel', 'hide-button', 'quit-button', 'clear-api-key',
     'setting-startup', 'setting-live', 'setting-upcoming', 'setting-videos',
-    'setting-posts', 'setting-subscriber-chart-mode', 'setting-interval',
+    'setting-posts', 'setting-local-stats', 'local-stats-help', 'setting-subscriber-chart-mode', 'setting-interval',
     'setting-api-key', 'api-key-status',
     'setting-cloud-url', 'setting-cloud-token', 'cloud-sync-status',
     'import-cloud-connection',
@@ -326,13 +326,17 @@ function bindEvents() {
 
 function render() {
   if (!appState || !windowActive) return;
-  elements.appVersion.textContent = appState.app?.version ? `v${appState.app.version}` : '';
+  elements.appVersion.textContent = appState.app?.nativePersonal
+    ? '개인용 빌드' : (appState.app?.version ? `v${appState.app.version}` : '');
   const update = appState.app?.update;
   elements.updateStatus.textContent = update?.message || '업데이트 확인 대기 중';
-  elements.updateButton.textContent = update?.status === 'downloading'
+  elements.updateButton.textContent = appState.app?.nativePersonal ? '업데이트 수동 적용'
+    : update?.status === 'downloading'
     ? `업데이트 ${update.percent || 0}%`
     : '앱 업데이트 확인';
-  elements.updateButton.disabled = ['checking', 'downloading'].includes(update?.status);
+  elements.updateButton.disabled = appState.app?.nativePersonal || ['checking', 'downloading'].includes(update?.status);
+  // The portable build updates by rebuilding; an always-disabled button only confused users.
+  elements.updateButton.hidden = Boolean(appState.app?.nativePersonal);
   renderMonitorStatus();
   if (!document.querySelector('dialog[open]')) {
     renderChannels(); renderEvents(); renderViewsPanel();
@@ -348,18 +352,22 @@ function renderMonitorStatus() {
   const channels = appState.channels || [];
   const liveChannels = channels.filter((channel) => channel.snapshot?.live);
   const hasError = channels.some((channel) => channel.status === 'error');
+  const warning = monitor.warning || '';
 
   elements.globalLivePill.classList.toggle('live', liveChannels.length > 0);
   elements.globalLivePill.innerHTML = liveChannels.length
     ? `<span class="status-dot"></span><span>${liveChannels.length}개 채널 LIVE</span>`
     : '<span class="status-dot"></span><span>라이브 없음</span>';
 
-  elements.sidebarDot.className = `status-dot ${hasError ? 'warning' : 'pulse'}`;
+  elements.sidebarDot.className = `status-dot ${hasError || warning ? 'warning' : 'pulse'}`;
   elements.sidebarStatusText.textContent = monitor.running
     ? '지금 확인 중'
-    : hasError ? '일부 확인 실패' : '백그라운드 감시 중';
+    : hasError ? '일부 확인 실패' : warning ? '확인 필요' : '백그라운드 감시 중';
+  elements.sidebarStatusText.title = warning;
 
-  if (monitor.running) {
+  if (warning && !monitor.running) {
+    elements.sidebarNextCheck.textContent = warning;
+  } else if (monitor.running) {
     elements.sidebarNextCheck.textContent = 'YouTube 응답 기다리는 중';
   } else if (monitor.nextCheckAt) {
     const seconds = Math.max(0, Math.ceil((new Date(monitor.nextCheckAt).getTime() - Date.now()) / 1000));
@@ -1585,6 +1593,8 @@ function openSettings() {
   elements.settingUpcoming.checked = settings.autoOpenUpcoming;
   elements.settingVideos.checked = settings.notifyNewVideos;
   elements.settingPosts.checked = settings.notifyNewPosts;
+  elements.settingLocalStats.checked = settings.recordLocalStatistics === true;
+  elements.localStatsHelp.textContent = localStatisticsHelp(settings);
   elements.settingSubscriberChartMode.value = readChartPreferences().subscriberMode;
   elements.settingInterval.value = settings.pollIntervalSeconds;
   elements.settingApiKey.value = '';
@@ -1600,10 +1610,24 @@ function openSettings() {
   elements.apiKeyStatus.textContent = settings.hasApiKey
     ? 'API 키 저장됨 · 공식 채널·영상 통계를 사용합니다. 구독자 수는 공개 정책상 반올림됩니다.'
     : 'API 키 없음 · 공개 페이지로 영상 감지와 조회수 수집을 계속합니다.';
-  elements.startupHelp.textContent = appState.app?.isPackaged
+  elements.startupHelp.textContent = appState.app?.nativePersonal
+    ? (appState.app?.loginSettingApplied
+      ? 'Windows 시작 시 개인용 앱을 실행합니다.'
+      : '저장하면 Windows 시작 항목을 현재 앱 위치로 맞춥니다.')
+    : appState.app?.isPackaged
     ? 'Windows 시작 앱 설정에 반영됩니다.'
     : '개발 실행 중에는 등록하지 않으며, 설치본에서 적용됩니다.';
   elements.settingsDialog.showModal();
+}
+
+// Mirrors the host rule: without recent cloud samples the PC records subscriber/view history itself.
+function localStatisticsHelp(settings) {
+  const base = '끄면 클라우드 기록만 사용하고, 클라우드 수집이 멈추면 자동으로 이 PC에서 기록합니다.';
+  if (settings.recordLocalStatistics) return '켜짐 · 클라우드와 별도로 이 PC에서도 구독자·조회수를 기록합니다.';
+  if (!settings.cloudUrl) return `${base} 지금은 클라우드가 연결되지 않아 이 PC에서 기록합니다.`;
+  const collected = Date.parse(appState.cloud?.lastCollectionAt || '');
+  const stale = appState.cloud?.error || !Number.isFinite(collected) || Date.now() - collected > 10 * 60 * 1000;
+  return stale ? `${base} 지금은 클라우드 수집이 멈춰 이 PC에서 대신 기록합니다.` : `${base} 지금은 클라우드 기록을 사용합니다.`;
 }
 
 async function handleSaveSettings(event) {
@@ -1614,6 +1638,7 @@ async function handleSaveSettings(event) {
     autoOpenUpcoming: elements.settingUpcoming.checked,
     notifyNewVideos: elements.settingVideos.checked,
     notifyNewPosts: elements.settingPosts.checked,
+    recordLocalStatistics: elements.settingLocalStats.checked,
     subscriberChartMode: elements.settingSubscriberChartMode.value,
     pollIntervalSeconds: Number(elements.settingInterval.value),
     cloudUrl: elements.settingCloudUrl.value.trim()

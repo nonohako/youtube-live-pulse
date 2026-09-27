@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "upstash-redis": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@upstash/redis-mcp"],
+      "env": {
+        "UPSTASH_REDIS_REST_URL": "${UPSTASH_REDIS_REST_URL}",
+        "UPSTASH_REDIS_REST_TOKEN": "${UPSTASH_REDIS_READONLY_TOKEN}"
+      }
+    }
+  }
+}
