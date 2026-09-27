@@ -348,6 +348,29 @@ using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
 Require(StoreImporter.Verify(cloudSource, cloudDb).Samples == 2
     && StoreImporter.Verify(cloudSource, cloudDb + ".bak.1").Samples == 2,
     "클라우드 동기화 뒤 원본 또는 첫 백업 표본 검증 실패");
+// A cursor replay must not copy observations the imported archive already holds.
+var replayDb = Path.Combine(folder, "cloud-replay.sqlite");
+var replayAt = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeMilliseconds() / 60_000 * 60_000;
+var replayIso = DateTimeOffset.FromUnixTimeMilliseconds(replayAt).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+var replaySource = Path.Combine(folder, "cloud-replay.json");
+File.WriteAllText(replaySource, File.ReadAllText(cloudSource)
+    .Replace("\"subscriberHistory\": [{\"at\":\"2026-09-02T00:00:00.000Z\",\"count\":101}]",
+        $"\"subscriberHistory\": [{{\"at\":\"{replayIso}\",\"count\":150}}]"));
+Require(StoreImporter.Import(replaySource, replayDb).Samples == 2, "재수신 fixture 이전 실패");
+using (var client = new HttpClient(new CloudFixtureHandler([CloudPage(replayAt, false)])))
+    await new NativeCloudSync(replayDb, client).SyncOnceAsync();
+using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+       { DataSource = replayDb, Mode = SqliteOpenMode.ReadOnly }.ToString()))
+{
+    connection.Open();
+    using var kinds = connection.CreateCommand();
+    kinds.CommandText = "SELECT group_concat(kind) FROM runtime_cloud_samples";
+    Require(kinds.ExecuteScalar() as string == "video", "재수신이 이미 가져온 클라우드 구독자 표본을 중복 저장함");
+    using var index = connection.CreateCommand();
+    index.CommandText = "SELECT count(*) FROM sqlite_master WHERE name='runtime_cloud_samples_by_time'";
+    Require(Convert.ToInt32(index.ExecuteScalar()) == 0, "기본 키와 같은 중복 색인이 남음");
+}
+
 var projected = new NativeStateReader(cloudDb).Read(channelId, [(channelId, "abcdefghijk")]);
 var projectedChannel = projected["channels"]![0]!;
 Require(projected["settings"]!["cloudToken"] is null

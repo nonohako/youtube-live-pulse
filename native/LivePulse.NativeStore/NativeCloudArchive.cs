@@ -49,8 +49,8 @@ internal sealed class NativeCloudArchive
               channel_id TEXT NOT NULL, kind TEXT NOT NULL, video_id TEXT NOT NULL,
               at TEXT NOT NULL, count INTEGER NOT NULL,
               PRIMARY KEY(channel_id,kind,video_id,at));
-            CREATE INDEX IF NOT EXISTS runtime_cloud_samples_by_time
-              ON runtime_cloud_samples(channel_id,kind,video_id,at);
+            -- Same columns as the primary key: a pure duplicate that cost tens of MB.
+            DROP INDEX IF EXISTS runtime_cloud_samples_by_time;
             CREATE TABLE IF NOT EXISTS runtime_cloud_videos(
               channel_id TEXT NOT NULL, video_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
               PRIMARY KEY(channel_id,video_id));
@@ -165,7 +165,11 @@ internal sealed class NativeCloudArchive
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO runtime_cloud_samples(channel_id,kind,video_id,at,count)
-                VALUES($channel,$kind,$video,$at,$count)
+                SELECT $channel,$kind,$video,$at,$count
+                -- A cursor replay (e.g. after adding a channel) must not copy observations that the
+                -- imported Electron archive already holds; that once duplicated 650K rows (160 MB).
+                WHERE NOT EXISTS (SELECT 1 FROM samples WHERE source='cloud' AND channel_id=$channel
+                  AND kind=$kind AND video_id=$video AND at=$at)
                 ON CONFLICT(channel_id,kind,video_id,at) DO UPDATE SET count=excluded.count
                 """;
             foreach (var name in new[] { "$channel", "$kind", "$video", "$at", "$count" })

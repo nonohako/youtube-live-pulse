@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (framework-dependent build, daily external backup; work continues on `main`).
+Last maintained: 2026-09-27 (cloud replay dedupe, SDK installed; work continues on `main`).
 
 ## Current state
 
@@ -20,7 +20,7 @@ Last maintained: 2026-09-27 (framework-dependent build, daily external backup; w
 - Paths are relative to the executable, so the folder can move (e.g. to D:). On launch the app rewrites its own `라이브 펄스` Run value and a desktop shortcut (`라이브 펄스.lnk` or legacy `라이브 펄스 (네이티브).lnk`) that targets a LivePulse executable. Never overwrite an unrelated Run value or shortcut.
 - Only a marked build with no arguments or only `--hidden` opens personal data. Missing `data/` or an unrecoverable DB stops visibly; never fall back to fixture data. Unmarked development builds keep fixture/isolated behavior (`--isolated-monitor-db` needs an ignored `artifacts/migration-isolated-data/*.probe.sqlite`).
 - A per-user mutex and events route repeated launches to the existing window and `--quit` to a graceful stop. The `.native-lock` DB lease is the writer guard.
-- Building needs the .NET 10 **SDK**; the user installed only the Desktop Runtime (2026-09-27). The SDK is currently at `%TEMP%\livepulse-dotnet10` (a temp cleaner may remove it; reinstall with `winget install Microsoft.DotNet.SDK.10` or pass `-Dotnet`).
+- The .NET 10 SDK (10.0.401) is installed in `C:\Program Files\dotnet` since 2026-09-27; the publish script prefers it over the old `%TEMP%\livepulse-dotnet10` copy (a temp cleaner may remove it; reinstall with `winget install Microsoft.DotNet.SDK.10` or pass `-Dotnet`).
 
 ## Storage, backup and recovery invariants
 
@@ -30,6 +30,7 @@ Last maintained: 2026-09-27 (framework-dependent build, daily external backup; w
 - Personal startup calls `NativeStoreRecovery.OpenForStartup` under the lease: a read-write open rolls back a crash journal (read-only validation rejects such a valid DB), then the primary is validated or the newest valid backup is restored with the corrupt primary preserved. No valid copy stops startup visibly.
 - Never initialize defaults over unreadable data. Recovery restores only real records; never fill gaps with estimated values or fixtures.
 - The 2026-08-02..09-16 subscriber gap was filled from Playboard daily totals at the user's request (xlsx-import semantics). Past counts cannot come from the public Data API.
+- Cloud sync must not store rows the imported archive already holds (`samples` with source `cloud`): a cursor replay after adding a channel once duplicated 653,823 rows (+160 MB). Those exact duplicates and the index duplicating the primary key were removed and the DB vacuumed on 2026-09-27 (434 MB to 249 MB).
 - Daily external backup: when `externalBackupFolder` is set (settings dialog, folder picker via the `chooseBackupFolder` bridge action), `NativeExternalBackup` zips a quick-checked copy of `.bak.1` to `live-pulse-YYYYMMDD.sqlite.zip` once per local day (checked every 10 minutes, off the UI thread) and keeps the newest three such files; it never touches other files. Intended target: a Google Drive for desktop folder (not installed on 2026-09-27). Status shows in settings via `app.externalBackup`.
 - Real observations recorded by another runtime may be merged only with exact-instant deduplication (done once for Electron's 2026-09-26/27 run: 11 subscriber and 2,321 video samples).
 
@@ -72,7 +73,7 @@ Last maintained: 2026-09-27 (framework-dependent build, daily external backup; w
 ## Checks
 
 ```powershell
-$dn = "$env:TEMP\livepulse-dotnet10\dotnet.exe"
+$dn = "dotnet"
 & $dn build native/LivePulse.Core.Tests/LivePulse.Core.Tests.csproj -c Release; & $dn native/LivePulse.Core.Tests/bin/Release/net10.0/LivePulse.Core.Tests.dll
 & $dn build native/LivePulse.NativeStore.Tests/LivePulse.NativeStore.Tests.csproj -c Release; & $dn native/LivePulse.NativeStore.Tests/bin/Release/net10.0/LivePulse.NativeStore.Tests.dll
 node --test

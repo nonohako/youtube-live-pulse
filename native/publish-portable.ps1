@@ -18,7 +18,7 @@ $database = Join-Path $dataDir 'live-pulse.sqlite'
 $marker = 'LivePulse.portable'
 
 if (-not $Dotnet) {
-    $candidates = @((Join-Path $env:TEMP 'livepulse-dotnet10/dotnet.exe'), 'dotnet')
+    $candidates = @('dotnet', (Join-Path $env:TEMP 'livepulse-dotnet10/dotnet.exe'))
     foreach ($candidate in $candidates) {
         $command = Get-Command $candidate -ErrorAction SilentlyContinue
         if ($command -and ((& $command.Source --list-sdks) -match '^10\.')) { $Dotnet = $command.Source; break }
