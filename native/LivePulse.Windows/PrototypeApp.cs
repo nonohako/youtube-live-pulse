@@ -61,6 +61,12 @@ internal sealed class PrototypeApp : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // A UI error must never silently end monitoring: log it and keep the tray app running.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            RecordRuntimeFailure(args.Exception);
+            args.Handled = true;
+        };
         var iconPath = Path.Combine(AppContext.BaseDirectory, "assets", "pulse.ico");
         _tray = new Forms.NotifyIcon
         {
@@ -731,7 +737,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                 throw new InvalidOperationException("채널 추가·삭제 또는 설정 저장 실패");
             if (_args.Contains("--ui-smoke-refresh")) await window.ProbeRefreshAsync();
             Console.WriteLine($"NATIVE_UI_SMOKE_PASSED channels={channelCount} browser={window.BrowserProcessId}");
-            CloseToTray(window);
+            window.Close(); // the real X-button path
             var timer = System.Diagnostics.Stopwatch.StartNew();
             while (window.IsBrowserProcessAlive && timer.Elapsed < TimeSpan.FromSeconds(10))
                 await Task.Delay(100);
@@ -777,7 +783,7 @@ internal sealed class PrototypeApp : System.Windows.Application
                     Console.WriteLine($"CAPTURE {output}");
                 }
                 Console.WriteLine($"OPEN {i} browser={window.BrowserProcessId}");
-                CloseToTray(window);
+                window.Close(); // the real X-button path
                 var timer = System.Diagnostics.Stopwatch.StartNew();
                 while (window.IsBrowserProcessAlive && timer.Elapsed < TimeSpan.FromSeconds(10))
                     await Task.Delay(100);

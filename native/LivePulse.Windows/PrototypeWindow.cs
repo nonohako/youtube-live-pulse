@@ -207,8 +207,10 @@ internal sealed class PrototypeWindow : Window
         {
             if (!_disposed)
             {
+                // The X button closes to the tray. Close() cannot be called again while this
+                // Closing event runs (WPF throws and the app died), so dispose after it returns.
                 args.Cancel = true;
-                _app.CloseToTray(this);
+                _ = Dispatcher.BeginInvoke(() => _app.CloseToTray(this));
             }
         };
     }
