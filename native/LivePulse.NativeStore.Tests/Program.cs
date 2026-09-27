@@ -30,9 +30,53 @@ static void ExpectInvalidData(Action action, string message)
     throw new InvalidOperationException(message);
 }
 
+// Storage version 2 keeps every observation in one table; map the version 1 table names.
+static long ImportedCount(string database)
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = database, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+    connection.Open();
+    return Count(connection, "samples");
+}
+
+static void AddCloudObservation(SqliteConnection connection, SqliteTransaction? transaction, string channel,
+    string kind, string video, DateTimeOffset at, long count)
+{
+    using var command = connection.CreateCommand();
+    command.Transaction = transaction;
+    command.CommandText = """
+        INSERT OR IGNORE INTO series_keys(source,channel_id,kind,video_id) VALUES('runtime-cloud',$channel,$kind,$video);
+        INSERT OR REPLACE INTO observations(series,at,count) SELECT id,$at,$count FROM series_keys
+        WHERE source='runtime-cloud' AND channel_id=$channel AND kind=$kind AND video_id=$video;
+        """;
+    command.Parameters.AddWithValue("$channel", channel);
+    command.Parameters.AddWithValue("$kind", kind);
+    command.Parameters.AddWithValue("$video", video);
+    command.Parameters.AddWithValue("$at", at.ToUnixTimeMilliseconds());
+    command.Parameters.AddWithValue("$count", count);
+    command.ExecuteNonQuery();
+}
+
 static long Count(SqliteConnection connection, string table)
 {
     using var command = connection.CreateCommand();
+    using (var probe = connection.CreateCommand())
+    {
+        probe.CommandText = "SELECT 1 FROM sqlite_master WHERE name='observations'";
+        var filter = probe.ExecuteScalar() is null ? null : table switch
+        {
+            "samples" => "k.source IN ('local','cloud')",
+            "runtime_subscriber_samples" => "k.source='runtime-local' AND k.kind='subscriber'",
+            "runtime_video_samples" => "k.source='runtime-local' AND k.kind='video'",
+            "runtime_cloud_samples" => "k.source='runtime-cloud'",
+            _ => null
+        };
+        if (filter is not null)
+        {
+            command.CommandText = $"SELECT COUNT(*) FROM observations o JOIN series_keys k ON k.id=o.series WHERE {filter}";
+            return (long)command.ExecuteScalar()!;
+        }
+    }
     command.CommandText = $"SELECT COUNT(*) FROM {table}";
     return (long)command.ExecuteScalar()!;
 }
@@ -219,7 +263,7 @@ var importedPlan = MonitorChangePlanner.Plan(channelId, importedState.Tracking,
     importedState.LastSubscriberSample, settings, snapshot);
 Require(importedStore.Commit(channelId, 0, snapshot, importedPlan) == 1,
     "실제 이전 도구 DB에 런타임 상태를 기록하지 못함");
-Require(StoreImporter.Verify(source, importedDb).Samples == 1,
+Require(ImportedCount(importedDb) == 1,
     "런타임 저장 후 원본 이전 표본 검증이 깨짐");
 Require(new NativeMonitorStore(importedDb).Load(channelId).Revision == 1,
     "실제 이전 도구 DB의 런타임 상태가 재시작 후 사라짐");
@@ -251,7 +295,7 @@ ExpectFailure(() => allFailedRunner.RunChannelOnceAsync(channelId, settings).Get
     "모든 공개 소스 실패를 저장함");
 Require(runnerStore.Load(channelId).Revision == 2 && fakeEffects.OpenedUrls.Count == 1,
     "모든 공개 소스 실패 후 저장 상태 또는 열기 효과가 바뀜");
-Require(StoreImporter.Verify(source, runnerDb).Samples == 1,
+Require(ImportedCount(runnerDb) == 1,
     "감시 실행이 이전 원본 표본을 변경함");
 
 var videoStatsDb = Path.Combine(folder, "video-stats.sqlite");
@@ -284,7 +328,7 @@ Require(overviewVideoSamples.Count == 2
     && overviewVideoSamples[1]!["count"]!.GetValue<long>() == 402
     && new NativeStateReader(videoStatsDb).Read(channelId, [(channelId, firstVideo.Id)])
         ["channels"]![0]!["videoViewHistories"]![0]!["samples"]!.AsArray().Count == 3
-    && StoreImporter.Verify(source, videoStatsDb).Samples == 1,
+    && ImportedCount(videoStatsDb) == 1,
     "영상 요약 양끝점·상세 전체 기록 또는 이전 원본 보존 오류");
 
 var cloudSource = Path.Combine(folder, "cloud-source.json");
@@ -345,8 +389,8 @@ using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
     Require(Count(connection, "samples") == 2 && Count(connection, "runtime_cloud_samples") == 4,
         "클라우드 페이지가 이전 원본을 변경했거나 표본을 누락함");
 }
-Require(StoreImporter.Verify(cloudSource, cloudDb).Samples == 2
-    && StoreImporter.Verify(cloudSource, cloudDb + ".bak.1").Samples == 2,
+Require(ImportedCount(cloudDb) == 2
+    && ImportedCount(cloudDb + ".bak.1") == 2,
     "클라우드 동기화 뒤 원본 또는 첫 백업 표본 검증 실패");
 // A cursor replay must not copy observations the imported archive already holds.
 var replayDb = Path.Combine(folder, "cloud-replay.sqlite");
@@ -364,12 +408,101 @@ using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
 {
     connection.Open();
     using var kinds = connection.CreateCommand();
-    kinds.CommandText = "SELECT group_concat(kind) FROM runtime_cloud_samples";
+    kinds.CommandText = "SELECT group_concat(k.kind) FROM observations o JOIN series_keys k ON k.id=o.series WHERE k.source='runtime-cloud'";
     Require(kinds.ExecuteScalar() as string == "video", "재수신이 이미 가져온 클라우드 구독자 표본을 중복 저장함");
     using var index = connection.CreateCommand();
     index.CommandText = "SELECT count(*) FROM sqlite_master WHERE name='runtime_cloud_samples_by_time'";
     Require(Convert.ToInt32(index.ExecuteScalar()) == 0, "기본 키와 같은 중복 색인이 남음");
 }
+
+// Storage version 2: conversion of a version 1 DB, and the 30-day change-only rule for views.
+static long SeriesRows(string database, string source, string video)
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = database, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = "SELECT count(*) FROM observations o JOIN series_keys k ON k.id=o.series WHERE k.source=$source AND k.video_id=$video";
+    command.Parameters.AddWithValue("$source", source);
+    command.Parameters.AddWithValue("$video", video);
+    return (long)command.ExecuteScalar()!;
+}
+var sparseDb = Path.Combine(folder, "sparse.sqlite");
+StoreImporter.Import(cloudSource, sparseDb);
+var sparseNow = DateTimeOffset.UtcNow;
+var oldPublished = sparseNow.AddDays(-60);
+using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = sparseDb, Pooling = false }.ToString()))
+{
+    // Version 1 tables as the earlier app wrote them, before the first store open converts them.
+    raw.Open();
+    using var legacy = raw.CreateCommand();
+    legacy.CommandText = """
+        CREATE TABLE runtime_cloud_samples(channel_id TEXT NOT NULL, kind TEXT NOT NULL, video_id TEXT NOT NULL,
+          at TEXT NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(channel_id,kind,video_id,at));
+        CREATE TABLE runtime_cloud_videos(channel_id TEXT NOT NULL, video_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
+          PRIMARY KEY(channel_id,video_id));
+        """;
+    legacy.ExecuteNonQuery();
+    legacy.CommandText = "INSERT INTO runtime_cloud_videos VALUES($id,'oldsparse01',$meta)";
+    legacy.Parameters.AddWithValue("$id", channelId);
+    legacy.Parameters.AddWithValue("$meta", JsonSerializer.Serialize(new { publishedAt = oldPublished.ToString("O") }));
+    legacy.ExecuteNonQuery();
+    legacy.Parameters.Clear();
+    legacy.CommandText = "INSERT INTO runtime_cloud_samples VALUES($id,'video','oldsparse01',$at,9)";
+    legacy.Parameters.AddWithValue("$id", channelId);
+    legacy.Parameters.Add(new SqliteParameter("$at", ""));
+    // Three rows while young (kept), five unchanged rows after 30 days (first as heartbeat, last as latest).
+    foreach (var at in new[] { 1, 2, 3 }.Select(day => oldPublished.AddDays(day))
+                 .Concat(Enumerable.Range(0, 5).Select(minute => oldPublished.AddDays(31).AddMinutes(minute))))
+    {
+        legacy.Parameters["$at"].Value = at.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+        legacy.ExecuteNonQuery();
+    }
+}
+_ = new NativeMonitorStore(sparseDb);
+using (var converted = new SqliteConnection(new SqliteConnectionStringBuilder
+       { DataSource = sparseDb, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
+{
+    converted.Open();
+    using var tables = converted.CreateCommand();
+    tables.CommandText = "SELECT count(*) FROM sqlite_master WHERE name IN ('samples','runtime_cloud_samples','runtime_subscriber_samples','runtime_video_samples')";
+    using var version = converted.CreateCommand();
+    version.CommandText = "SELECT value FROM meta WHERE key='storage_version'";
+    Require((long)tables.ExecuteScalar()! == 0 && version.ExecuteScalar() as string == "2"
+        && ImportedCount(sparseDb) == 2 && SeriesRows(sparseDb, "runtime-cloud", "oldsparse01") == 5,
+        "버전 1 DB 변환 또는 30일 지난 영상의 변화 없는 기록 정리 오류");
+}
+Require(NativeObservations.TakeMigrated(sparseDb) && !NativeObservations.TakeMigrated(sparseDb),
+    "변환 뒤 파일 정리 신호를 한 번만 주지 않음");
+var sparseHistory = new NativeStateReader(sparseDb).Read(channelId, [(channelId, "oldsparse01")])["channels"]![0]!
+    ["videoViewHistories"]!.AsArray().Single(item => (string?)item!["videoId"] == "oldsparse01")!["samples"]!.AsArray();
+Require(sparseHistory.Count == 5 && (string?)sparseHistory[0]!["at"] == oldPublished.AddDays(1).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+    "변환한 기록의 시각이 화면에 그대로 나오지 않음");
+
+// Sync-time rule: after 30 days only changed counts (and a daily heartbeat) are stored.
+var syncStart = sparseNow.AddMinutes(-10).ToUnixTimeMilliseconds() / 60_000 * 60_000;
+string SparsePage(long[] minutes, long[] oldCounts, long[] youngCounts) => JsonSerializer.Serialize(new
+{
+    version = 1, next = syncStart + minutes[^1] * 60_000, hasMore = false,
+    samples = minutes.Select((minute, index) => new { at = syncStart + minute * 60_000, channels = new[] {
+        new { id = channelId, subscriberCount = 150L, views = new Dictionary<string, long>
+            { ["oldsync0001"] = oldCounts[index], ["youngsync01"] = youngCounts[index] } } } }).ToArray(),
+    metadata = new Dictionary<string, object> { [channelId] = new { title = "fixture", videos = new Dictionary<string, object>
+    {
+        ["oldsync0001"] = new { title = "old", publishedAt = sparseNow.AddDays(-45).ToString("O") },
+        ["youngsync01"] = new { title = "young", publishedAt = sparseNow.AddDays(-1).ToString("O") }
+    } } },
+    status = new { lastSuccessAt = sparseNow.ToString("O"), error = (string?)null }
+});
+using (var client = new HttpClient(new CloudFixtureHandler([
+           SparsePage([0], [500], [7]), SparsePage([1, 2, 3], [500, 500, 501], [7, 7, 8])])))
+{
+    var sync = new NativeCloudSync(sparseDb, client);
+    await sync.SyncOnceAsync();
+    await sync.SyncOnceAsync();
+}
+Require(SeriesRows(sparseDb, "runtime-cloud", "oldsync0001") == 2 && SeriesRows(sparseDb, "runtime-cloud", "youngsync01") == 4,
+    "30일 지난 영상의 변화 없는 조회수를 매분 저장하거나 새 영상 기록을 줄임");
 
 var projected = new NativeStateReader(cloudDb).Read(channelId, [(channelId, "abcdefghijk")]);
 var projectedChannel = projected["channels"]![0]!;
@@ -387,7 +520,7 @@ Require(cloudStore.ReadPollConfiguration().ChannelIds.Count == 2
 cloudStore.RemoveChannel(cloudExtraId);
 Require(cloudStore.ReadPollConfiguration().ChannelIds.Count == 1
     && new NativeStateReader(cloudDb).Read()["channels"]!.AsArray().Count == 1
-    && StoreImporter.Verify(cloudSource, cloudDb).Samples == 2,
+    && ImportedCount(cloudDb) == 2,
     "채널 제거가 화면·감시에서 빠지지 않거나 이전 기록을 변경함");
 using (var backup = new SqliteConnection(new SqliteConnectionStringBuilder
 { DataSource = cloudDb + ".bak.1", Mode = SqliteOpenMode.ReadOnly }.ToString()))
@@ -490,11 +623,7 @@ var cloudOnlyStore = new NativeMonitorStore(cloudOnlyDb);
 using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = cloudOnlyDb, Pooling = false }.ToString()))
 {
     raw.Open();
-    using var insert = raw.CreateCommand();
-    insert.CommandText = "INSERT INTO runtime_cloud_samples(channel_id,kind,video_id,at,count) VALUES($id,'subscriber','',$at,100)";
-    insert.Parameters.AddWithValue("$id", channelId);
-    insert.Parameters.AddWithValue("$at", checkedAt.AddMinutes(-2).ToString("O"));
-    insert.ExecuteNonQuery();
+    AddCloudObservation(raw, null, channelId, "subscriber", "", checkedAt.AddMinutes(-2), 100);
 }
 var fallbackStore = new NativeMonitorStore(fallbackDb);
 await new NativeMonitorRunner(fallbackStore, new FixtureSnapshotSource(snapshot), new RecordingEffects(() => 0))
@@ -548,13 +677,7 @@ using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSo
     using var transaction = raw.BeginTransaction();
     for (var minute = 0; minute < 3 * 24 * 60; minute++)
     {
-        using var insert = raw.CreateCommand();
-        insert.Transaction = transaction;
-        insert.CommandText = "INSERT INTO runtime_cloud_samples(channel_id,kind,video_id,at,count) VALUES($id,'subscriber','',$at,$count)";
-        insert.Parameters.AddWithValue("$id", channelId);
-        insert.Parameters.AddWithValue("$at", minuteStart.AddMinutes(minute).ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
-        insert.Parameters.AddWithValue("$count", 1000 + minute);
-        insert.ExecuteNonQuery();
+        AddCloudObservation(raw, transaction, channelId, "subscriber", "", minuteStart.AddMinutes(minute), 1000 + minute);
     }
     transaction.Commit();
 }
@@ -574,7 +697,7 @@ using (var update = JsonDocument.Parse("""
 Require(settingsStore.ReadPollConfiguration() is { Interval.TotalSeconds: 45, Settings.AutoOpenLive: false }
     && new NativeStateReader(settingsDb).Read()["settings"]!["apiKey"] is null
     && new NativeStateReader(settingsDb).Read()["settings"]!["hasApiKey"]!.GetValue<bool>()
-    && StoreImporter.Verify(source, settingsDb).Samples == 1 && settingsStore.ReadApiKey() == "private-key",
+    && ImportedCount(settingsDb) == 1 && settingsStore.ReadApiKey() == "private-key",
     "설정 저장·비밀값 제거 또는 이전 기록 보존 오류");
 using (var invalidUpdate = JsonDocument.Parse("""{"autoOpenLive":"false"}"""))
     ExpectInvalidData(() => settingsStore.UpdateSettings(invalidUpdate.RootElement),
@@ -603,7 +726,7 @@ Require(workbook.Days.Count == 2 && workbook.SkippedDuplicate == 1 && workbook.S
     && importedDays == (1, 1)
     && new NativeStateReader(settingsDb).Read(channelId)["channels"]![0]!["subscriberHistory"]!.AsArray().Count == 2
     && settingsStore.Load(channelId).LastSubscriberSample?.Count == 100
-    && StoreImporter.Verify(source, settingsDb).Samples == 1,
+    && ImportedCount(settingsDb) == 1,
     "XLSX 날짜 병합에서 기존 값이나 최신 감시 표본을 변경함");
 
 var checkpointDb = Path.Combine(folder, "checkpoint.sqlite");
@@ -692,7 +815,7 @@ await continuingScheduler.RunNowAsync();
 Require(checkpoint.BackupCount == 3 && checkpoint.LastError is null
     && new NativeMonitorStore(checkpointDb + ".bak.1").Load(channelId).Revision == 6,
     "재시도 간격 후 백업을 복구하지 못함");
-Require(StoreImporter.Verify(source, checkpointDb).Samples == 1,
+Require(ImportedCount(checkpointDb) == 1,
     "백업 실패 뒤 이전 원본 표본이 바뀜");
 
 var forcedDb = Path.Combine(folder, "forced-checkpoint.sqlite");
@@ -960,7 +1083,7 @@ Require(restored.Restored && restored.Source == runnerDb + ".bak.1"
     && restored.PreservedPrimary is { } forensic && File.ReadAllBytes(forensic).SequenceEqual(new byte[] { 0, 1, 2, 3, 4 })
     && new NativeMonitorStore(runnerDb).Load(channelId).Revision == 3,
     "손상 원본 보존 또는 최신 백업 복구 오류");
-Require(StoreImporter.Verify(source, runnerDb).Samples == 1, "복구 후 이전 표본이 바뀜");
+Require(ImportedCount(runnerDb) == 1, "복구 후 이전 표본이 바뀜");
 
 SqliteConnection.ClearAllPools();
 File.WriteAllBytes(runnerDb + ".bak.1", [9, 8, 7]);
@@ -997,7 +1120,7 @@ using (var writer = new SqliteConnection(new SqliteConnectionStringBuilder
     // A tiny cache forces SQLite to write changed pages into the DB file before commit.
     begin.CommandText = """
         PRAGMA cache_size=1; BEGIN IMMEDIATE;
-        UPDATE samples SET payload_json=payload_json||' ';
+        UPDATE observations SET count=count+1;
         CREATE TABLE filler(x);
         WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i<200)
         INSERT INTO filler SELECT randomblob(4000) FROM c;
@@ -1010,9 +1133,18 @@ using (var writer = new SqliteConnection(new SqliteConnectionStringBuilder
     begin.ExecuteNonQuery();
 }
 ExpectFailure(() => NativeStoreRecovery.Validate(crashedDb), "읽기 전용 검증이 hot journal DB를 통과함");
+static long CountSum(string database)
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = database, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+    connection.Open();
+    using var sum = connection.CreateCommand();
+    sum.CommandText = "SELECT total(count) FROM observations";
+    return Convert.ToInt64(sum.ExecuteScalar());
+}
 var crashed = NativeStoreRecovery.OpenForStartup(crashedDb);
 Require(!crashed.Restored && !File.Exists(crashedDb + "-journal")
-    && StoreImporter.Verify(source, crashedDb).Samples == 1,
+    && ImportedCount(crashedDb) == 1 && CountSum(crashedDb) == CountSum(startupDb),
     "강제 종료 저널이 남은 정상 DB를 시작하지 못하거나 원본 표본이 바뀜");
 var tempRoot = Path.GetFullPath(Path.GetTempPath());
 if (!Path.GetFullPath(folder).StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase))

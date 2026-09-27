@@ -233,8 +233,7 @@ public sealed class NativeStateReader
         using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                SELECT DISTINCT video_id FROM runtime_cloud_samples
-                WHERE channel_id=$id AND kind='video'
+                SELECT video_id FROM series_keys WHERE source='runtime-cloud' AND channel_id=$id AND kind='video'
                 """;
             command.Parameters.AddWithValue("$id", channelId);
             using var reader = command.ExecuteReader();
@@ -249,7 +248,7 @@ public sealed class NativeStateReader
                 videos[reader.GetString(0)] = JsonNode.Parse(reader.GetString(1))?.AsObject() ?? new JsonObject();
         }
         var output = new JsonArray();
-        using var endpoints = PrepareEndpoints(connection, channelId);
+        using var endpoints = new VideoEndpointReader(connection, channelId);
         foreach (var (videoId, video) in videos)
         {
             video["videoId"] = videoId;
@@ -257,90 +256,103 @@ public sealed class NativeStateReader
             video["url"] ??= "https://www.youtube.com/watch?v=" + videoId;
             video["samples"] = selected.Any(item => item.ChannelId == channelId && item.VideoId == videoId)
                 ? Samples(connection, channelId, "video", videoId, full: true)
-                : VideoEndpoints(endpoints, videoId);
+                : endpoints.Read(videoId);
             output.Add(video);
         }
         return output;
     }
 
-    // One prepared statement (first/last row of each of the four sources) reused for every video;
-    // creating eight commands per video cost about 80 ms per channel on real data.
-    private static readonly string EndpointSql = string.Join(" UNION ALL ", new[]
+    // First/last observation of each video across its series (imported, cloud sync, local checks):
+    // two prepared index seeks per series; the series list for the channel is loaded once.
+    private sealed class VideoEndpointReader : IDisposable
     {
-        ("samples WHERE source='local' AND channel_id=$id AND kind='video' AND video_id=$video", 2),
-        ("samples WHERE source='cloud' AND channel_id=$id AND kind='video' AND video_id=$video", 1),
-        ("runtime_cloud_samples WHERE channel_id=$id AND kind='video' AND video_id=$video", 1),
-        ("runtime_video_samples WHERE channel_id=$id AND video_id=$video", 3)
-    }.SelectMany(item => new[] { "ASC", "DESC" }.Select(direction =>
-        $"SELECT * FROM (SELECT at,count,{item.Item2} FROM {item.Item1} ORDER BY at {direction} LIMIT 1)")));
+        private readonly Dictionary<string, List<(long Series, int Priority)>> series = new(StringComparer.Ordinal);
+        private readonly SqliteCommand first;
+        private readonly SqliteCommand last;
 
-    private static SqliteCommand PrepareEndpoints(SqliteConnection connection, string channelId)
-    {
-        var command = connection.CreateCommand();
-        command.CommandText = EndpointSql;
-        command.Parameters.AddWithValue("$id", channelId);
-        command.Parameters.AddWithValue("$video", "");
-        command.Prepare();
-        return command;
-    }
-
-    private static JsonArray VideoEndpoints(SqliteCommand command, string videoId)
-    {
-        command.Parameters["$video"].Value = videoId;
-        var candidates = new List<(string At, DateTimeOffset Instant, long Count, long Priority)>();
-        using (var reader = command.ExecuteReader())
-            while (reader.Read())
-            {
-                var at = reader.GetString(0);
-                if (DateTimeOffset.TryParse(at, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var instant))
-                    candidates.Add((at, instant, reader.GetInt64(1), reader.GetInt64(2)));
-            }
-        var output = new JsonArray();
-        if (candidates.Count == 0) return output;
-        // Compare instants, not strings: sources store different ISO formats.
-        var first = candidates.Min(item => item.Instant);
-        var last = candidates.Max(item => item.Instant);
-        foreach (var instant in first == last ? new[] { first } : new[] { first, last })
+        public VideoEndpointReader(SqliteConnection connection, string channelId)
         {
-            var selected = candidates.Where(item => item.Instant == instant).MaxBy(item => item.Priority);
-            output.Add(new JsonObject { ["at"] = selected.At, ["count"] = selected.Count });
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "SELECT k.id,k.video_id," + NativeObservations.PrioritySql
+                    + " FROM series_keys k WHERE k.channel_id=$id AND k.kind='video'";
+                command.Parameters.AddWithValue("$id", channelId);
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    if (!series.TryGetValue(reader.GetString(1), out var list)) series[reader.GetString(1)] = list = [];
+                    list.Add((reader.GetInt64(0), reader.GetInt32(2)));
+                }
+            }
+            first = Prepare(connection, "ASC");
+            last = Prepare(connection, "DESC");
         }
-        return output;
+
+        private static SqliteCommand Prepare(SqliteConnection connection, string direction)
+        {
+            var command = connection.CreateCommand();
+            command.CommandText = $"SELECT at,count FROM observations WHERE series=$series ORDER BY at {direction} LIMIT 1";
+            command.Parameters.AddWithValue("$series", 0L);
+            command.Prepare();
+            return command;
+        }
+
+        public JsonArray Read(string videoId)
+        {
+            var candidates = new List<(long At, long Count, int Priority)>();
+            foreach (var (id, priority) in series.GetValueOrDefault(videoId) ?? [])
+                foreach (var command in new[] { first, last })
+                {
+                    command.Parameters["$series"].Value = id;
+                    using var reader = command.ExecuteReader();
+                    if (reader.Read()) candidates.Add((reader.GetInt64(0), reader.GetInt64(1), priority));
+                }
+            var output = new JsonArray();
+            if (candidates.Count == 0) return output;
+            var start = candidates.Min(item => item.At);
+            var end = candidates.Max(item => item.At);
+            foreach (var at in start == end ? new[] { start } : new[] { start, end })
+            {
+                var selected = candidates.Where(item => item.At == at).MaxBy(item => item.Priority);
+                output.Add(new JsonObject { ["at"] = NativeObservations.ToIso(at), ["count"] = selected.Count });
+            }
+            return output;
+        }
+
+        public void Dispose()
+        {
+            first.Dispose();
+            last.Dispose();
+        }
     }
 
     private static JsonArray Samples(SqliteConnection connection, string channelId, string kind,
         string videoId, bool full)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT at,count,CASE source WHEN 'local' THEN 2 ELSE 1 END AS priority
-              FROM samples WHERE source IN ('local','cloud') AND channel_id=$id AND kind=$kind AND video_id=$video
-            UNION ALL SELECT at,count,1 FROM runtime_cloud_samples
-              WHERE channel_id=$id AND kind=$kind AND video_id=$video
-            UNION ALL SELECT at,count,3 FROM runtime_subscriber_samples
-              WHERE $kind='subscriber' AND $video='' AND channel_id=$id
-            UNION ALL SELECT at,count,3 FROM runtime_video_samples
-              WHERE $kind='video' AND channel_id=$id AND video_id=$video
-            ORDER BY at,priority
+        command.CommandText = "SELECT o.at,o.count," + NativeObservations.PrioritySql + """
+             AS priority
+            FROM series_keys k JOIN observations o ON o.series=k.id
+            WHERE k.channel_id=$id AND k.kind=$kind AND k.video_id=$video
+            ORDER BY o.at,priority
             """;
         command.Parameters.AddWithValue("$id", channelId);
         command.Parameters.AddWithValue("$kind", kind);
         command.Parameters.AddWithValue("$video", videoId);
-        var all = full ? new List<KeyValuePair<string, long>>() : null;
+        var all = full ? new List<KeyValuePair<long, long>>() : null;
         // The overview spans the whole history: the first observation, then each local day's last
         // real observation (the newest 119 days), ending with the latest one. Minute-level cloud
         // samples would otherwise make "the latest N samples" cover only the last hour.
-        var tail = new Queue<KeyValuePair<string, long>>();
-        KeyValuePair<string, long>? first = null;
-        KeyValuePair<string, long>? dayLast = null;
+        var tail = new Queue<KeyValuePair<long, long>>();
+        KeyValuePair<long, long>? first = null;
+        KeyValuePair<long, long>? dayLast = null;
         DateOnly? day = null;
-        KeyValuePair<string, long>? pending = null;
-        void Keep(KeyValuePair<string, long> sample)
+        KeyValuePair<long, long>? pending = null;
+        void Keep(KeyValuePair<long, long> sample)
         {
             if (full) { all!.Add(sample); return; }
             if (first is null) { first = sample; return; }
-            var sampleDay = DateTimeOffset.TryParse(sample.Key, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal, out var at) ? DateOnly.FromDateTime(at.LocalDateTime) : (DateOnly?)null;
+            DateOnly? sampleDay = DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(sample.Key).LocalDateTime);
             if (dayLast is { } closed && sampleDay != day)
             {
                 tail.Enqueue(closed);
@@ -352,7 +364,7 @@ public sealed class NativeStateReader
         using var reader = command.ExecuteReader();
         while (reader.Read())
         {
-            var sample = new KeyValuePair<string, long>(reader.GetString(0), reader.GetInt64(1));
+            var sample = new KeyValuePair<long, long>(reader.GetInt64(0), reader.GetInt64(1));
             if (pending is { } previous && previous.Key != sample.Key) Keep(previous);
             pending = sample;
         }
@@ -362,11 +374,11 @@ public sealed class NativeStateReader
             tail.Enqueue(latest);
             if (tail.Count > 119) tail.Dequeue();
         }
-        IEnumerable<KeyValuePair<string, long>> observations = full ? all! : first is { } start
+        IEnumerable<KeyValuePair<long, long>> observations = full ? all! : first is { } start
             ? new[] { start }.Concat(tail).ToArray() : [];
         var output = new JsonArray();
         foreach (var (at, count) in observations)
-            output.Add(new JsonObject { ["at"] = at, ["count"] = count });
+            output.Add(new JsonObject { ["at"] = NativeObservations.ToIso(at), ["count"] = count });
         return output;
     }
 

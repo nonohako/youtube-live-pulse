@@ -131,13 +131,16 @@ public static class NativeStoreRecovery
         if (marker.ExecuteScalar() is not string hash || hash.Length != 64
             || hash.Any(character => !Uri.IsHexDigit(character)))
             throw new InvalidDataException("원본 SHA-256 표시가 없습니다.");
-        foreach (var table in new[] { "channels", "series", "samples", "runtime_tracking", "runtime_events", "runtime_subscriber_samples" })
+        // Storage version 1 kept observations in "samples"; version 2 in "observations".
+        foreach (var tables in new[] { new[] { "channels" }, new[] { "series" }, new[] { "runtime_tracking" },
+                     new[] { "runtime_events" }, new[] { "observations", "samples" } })
         {
             using var present = connection.CreateCommand();
-            present.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$name";
-            present.Parameters.AddWithValue("$name", table);
+            present.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ($a,$b)";
+            present.Parameters.AddWithValue("$a", tables[0]);
+            present.Parameters.AddWithValue("$b", tables[^1]);
             if (present.ExecuteScalar() is null)
-                throw new InvalidDataException($"필수 SQLite 테이블이 없습니다: {table}");
+                throw new InvalidDataException($"필수 SQLite 테이블이 없습니다: {string.Join("/", tables)}");
         }
     }
 

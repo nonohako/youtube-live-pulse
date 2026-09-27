@@ -67,21 +67,11 @@ public sealed class NativeMonitorStore
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               event_key TEXT NOT NULL UNIQUE,
               payload_json TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_subscriber_samples(
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              channel_id TEXT NOT NULL,
-              at TEXT NOT NULL,
-              count INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_subscribers_by_channel
-              ON runtime_subscriber_samples(channel_id,id);
             CREATE TABLE IF NOT EXISTS runtime_snapshots(
               channel_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_channels(
               id TEXT PRIMARY KEY, metadata_json TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_removed_channels(id TEXT PRIMARY KEY);
-            CREATE TABLE IF NOT EXISTS runtime_video_samples(
-              channel_id TEXT NOT NULL, video_id TEXT NOT NULL, at TEXT NOT NULL, count INTEGER NOT NULL,
-              PRIMARY KEY(channel_id,video_id,at));
             CREATE TABLE IF NOT EXISTS runtime_video_metadata(
               channel_id TEXT NOT NULL, video_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
               PRIMARY KEY(channel_id,video_id));
@@ -91,6 +81,8 @@ public sealed class NativeMonitorStore
         schema.ExecuteNonQuery();
         // Monitoring reads cloud samples/publish times even before the first cloud sync.
         NativeCloudArchive.EnsureSchema(connection);
+        // Storage version 2 (compact observations); converts version 1 once.
+        NativeObservations.EnsureSchema(connection);
     }
 
     public StoredTracking Load(string channelId)
@@ -180,11 +172,13 @@ public sealed class NativeMonitorStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT max(at) FROM runtime_cloud_samples WHERE channel_id=$id";
+        command.CommandText = """
+            SELECT max(o.at) FROM observations o JOIN series_keys k ON k.id=o.series
+            WHERE k.source='runtime-cloud' AND k.channel_id=$id
+            """;
         command.Parameters.AddWithValue("$id", channelId);
-        return command.ExecuteScalar() is string text
-            && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var latest)
-            && now - latest <= CloudStatisticsGrace;
+        return command.ExecuteScalar() is long latest
+            && now.ToUnixTimeMilliseconds() - latest <= (long)CloudStatisticsGrace.TotalMilliseconds;
     }
 
     // Recorded publish times: the cloud collector's official value first, then local metadata.
@@ -353,13 +347,8 @@ public sealed class NativeMonitorStore
         }
         if (plan.SubscriberSampleToAppend is { } sample)
         {
-            using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO runtime_subscriber_samples(channel_id,at,count) VALUES($id,$at,$count)";
-            insert.Parameters.AddWithValue("$id", channelId);
-            insert.Parameters.AddWithValue("$at", sample.At.ToString("O", CultureInfo.InvariantCulture));
-            insert.Parameters.AddWithValue("$count", sample.Count);
-            insert.ExecuteNonQuery();
+            AppendObservation(connection, transaction, NativeObservations.RuntimeLocal, channelId, "subscriber", "",
+                sample.At.ToUnixTimeMilliseconds(), sample.Count);
         }
         using (var savedSnapshot = connection.CreateCommand())
         {
@@ -397,33 +386,20 @@ public sealed class NativeMonitorStore
                 using var previousVideo = connection.CreateCommand();
                 previousVideo.Transaction = transaction;
                 previousVideo.CommandText = """
-                    SELECT at,count FROM (
-                      SELECT at,count FROM samples WHERE source='local' AND kind='video'
-                        AND channel_id=$channel AND video_id=$video
-                      UNION ALL SELECT at,count FROM runtime_video_samples
-                        WHERE channel_id=$channel AND video_id=$video)
-                    ORDER BY julianday(at) DESC LIMIT 1
+                    SELECT o.at,o.count FROM observations o JOIN series_keys k ON k.id=o.series
+                    WHERE k.source IN ('local','runtime-local') AND k.kind='video'
+                      AND k.channel_id=$channel AND k.video_id=$video
+                    ORDER BY o.at DESC LIMIT 1
                     """;
                 previousVideo.Parameters.AddWithValue("$channel", channelId);
                 previousVideo.Parameters.AddWithValue("$video", video.Id);
                 using var previousReader = previousVideo.ExecuteReader();
                 var append = !previousReader.Read() || previousReader.GetInt64(1) != count
-                    || !DateTimeOffset.TryParse(previousReader.GetString(0), CultureInfo.InvariantCulture,
-                        DateTimeStyles.AssumeUniversal, out var previousAt)
-                    || checkedAt - previousAt >= TimeSpan.FromHours(6);
+                    || checkedAt.ToUnixTimeMilliseconds() - previousReader.GetInt64(0) >= (long)TimeSpan.FromHours(6).TotalMilliseconds;
                 previousReader.Close();
                 if (!append) continue;
-                using var sampleInsert = connection.CreateCommand();
-                sampleInsert.Transaction = transaction;
-                sampleInsert.CommandText = """
-                    INSERT OR IGNORE INTO runtime_video_samples(channel_id,video_id,at,count)
-                    VALUES($channel,$video,$at,$count)
-                    """;
-                sampleInsert.Parameters.AddWithValue("$channel", channelId);
-                sampleInsert.Parameters.AddWithValue("$video", video.Id);
-                sampleInsert.Parameters.AddWithValue("$at", checkedAt.ToString("O", CultureInfo.InvariantCulture));
-                sampleInsert.Parameters.AddWithValue("$count", count);
-                sampleInsert.ExecuteNonQuery();
+                AppendObservation(connection, transaction, NativeObservations.RuntimeLocal, channelId, "video", video.Id,
+                    checkedAt.ToUnixTimeMilliseconds(), count);
             }
             using var state = connection.CreateCommand();
             state.Transaction = transaction;
@@ -568,29 +544,17 @@ public sealed class NativeMonitorStore
         using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                SELECT at FROM samples WHERE source='local' AND kind='subscriber'
-                  AND video_id='' AND channel_id=$id
-                UNION ALL SELECT at FROM runtime_subscriber_samples WHERE channel_id=$id
+                SELECT o.at FROM observations o JOIN series_keys k ON k.id=o.series
+                WHERE k.source IN ('local','runtime-local') AND k.kind='subscriber' AND k.video_id='' AND k.channel_id=$id
                 """;
             command.Parameters.AddWithValue("$id", channelId);
             using var reader = command.ExecuteReader();
             while (reader.Read())
-            {
-                if (!DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
-                        DateTimeStyles.AssumeUniversal, out var at))
-                    throw new InvalidDataException("기존 구독자 표본 시각이 올바르지 않습니다.");
-                existing.Add(DateOnly.FromDateTime(at.ToLocalTime().DateTime));
-            }
+                existing.Add(DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)).ToLocalTime().DateTime));
         }
         var added = 0;
         var skipped = 0;
         using var transaction = connection.BeginTransaction();
-        using var insert = connection.CreateCommand();
-        insert.Transaction = transaction;
-        insert.CommandText = "INSERT INTO runtime_subscriber_samples(channel_id,at,count) VALUES($id,$at,$count)";
-        insert.Parameters.AddWithValue("$id", channelId);
-        insert.Parameters.Add(new SqliteParameter("$at", ""));
-        insert.Parameters.Add(new SqliteParameter("$count", 0L));
         foreach (var day in days)
         {
             if (day.Count < 0 || day.Count > 9_007_199_254_740_991)
@@ -598,9 +562,8 @@ public sealed class NativeMonitorStore
             if (!existing.Add(day.Date)) { skipped++; continue; }
             var local = day.Date.ToDateTime(TimeOnly.MinValue);
             var at = new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)).ToUniversalTime();
-            insert.Parameters["$at"].Value = at.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
-            insert.Parameters["$count"].Value = day.Count;
-            insert.ExecuteNonQuery();
+            AppendObservation(connection, transaction, NativeObservations.RuntimeLocal, channelId, "subscriber", "",
+                at.ToUnixTimeMilliseconds(), day.Count);
             added++;
         }
         transaction.Commit();
@@ -677,19 +640,27 @@ public sealed class NativeMonitorStore
     {
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT at,count FROM (
-              SELECT at,count,ordinal AS sequence FROM samples
-                WHERE source='local' AND kind='subscriber' AND video_id='' AND channel_id=$id
-              UNION ALL SELECT at,count,id AS sequence FROM runtime_subscriber_samples WHERE channel_id=$id)
-            ORDER BY julianday(at) DESC,sequence DESC LIMIT 1
+            SELECT o.at,o.count FROM observations o JOIN series_keys k ON k.id=o.series
+            WHERE k.source IN ('local','runtime-local') AND k.kind='subscriber' AND k.video_id='' AND k.channel_id=$id
+            ORDER BY o.at DESC, k.source='runtime-local' DESC LIMIT 1
             """;
         command.Parameters.AddWithValue("$id", channelId);
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
-        if (!DateTimeOffset.TryParse(reader.GetString(0), CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal, out var at))
-            throw new InvalidDataException("구독자 표본 시각이 올바르지 않습니다.");
-        return new SubscriberObservation(at, reader.GetInt64(1));
+        return new SubscriberObservation(DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)), reader.GetInt64(1));
+    }
+
+    private static void AppendObservation(SqliteConnection connection, SqliteTransaction transaction, string source,
+        string channelId, string kind, string videoId, long atMilliseconds, long count)
+    {
+        var series = NativeObservations.SeriesId(connection, transaction, source, channelId, kind, videoId, create: true)!.Value;
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT OR IGNORE INTO observations(series,at,count) VALUES($series,$at,$count)";
+        insert.Parameters.AddWithValue("$series", series);
+        insert.Parameters.AddWithValue("$at", atMilliseconds);
+        insert.Parameters.AddWithValue("$count", count);
+        insert.ExecuteNonQuery();
     }
 
     private static HashSet<string> ReadImportedEventKeys(SqliteConnection connection, SqliteTransaction transaction)

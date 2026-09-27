@@ -45,12 +45,6 @@ internal sealed class NativeCloudArchive
               id INTEGER PRIMARY KEY CHECK(id=1), endpoint TEXT NOT NULL, cursor INTEGER NOT NULL,
               archive_version INTEGER NOT NULL, last_sync_at TEXT NOT NULL,
               last_collection_at TEXT, error TEXT);
-            CREATE TABLE IF NOT EXISTS runtime_cloud_samples(
-              channel_id TEXT NOT NULL, kind TEXT NOT NULL, video_id TEXT NOT NULL,
-              at TEXT NOT NULL, count INTEGER NOT NULL,
-              PRIMARY KEY(channel_id,kind,video_id,at));
-            -- Same columns as the primary key: a pure duplicate that cost tens of MB.
-            DROP INDEX IF EXISTS runtime_cloud_samples_by_time;
             CREATE TABLE IF NOT EXISTS runtime_cloud_videos(
               channel_id TEXT NOT NULL, video_id TEXT NOT NULL, metadata_json TEXT NOT NULL,
               PRIMARY KEY(channel_id,video_id));
@@ -123,7 +117,7 @@ internal sealed class NativeCloudArchive
             throw new InvalidDataException("클라우드 응답 형식이 올바르지 않습니다.");
         var next = RequiredInt(root, "next");
         var expected = configuration.Cursor;
-        var observations = new List<(string Channel, string Kind, string Video, string At, long Count)>();
+        var observations = new List<(string Channel, string Kind, string Video, long AtMilliseconds, long Count)>();
         foreach (var sample in samples.EnumerateArray())
         {
             var timestamp = RequiredInt(sample, "at");
@@ -132,7 +126,7 @@ internal sealed class NativeCloudArchive
             expected = timestamp;
             if (!sample.TryGetProperty("channels", out var channels) || channels.ValueKind != JsonValueKind.Array)
                 throw new InvalidDataException("클라우드 채널 목록이 올바르지 않습니다.");
-            var at = DateTimeOffset.FromUnixTimeMilliseconds(timestamp).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
+            var at = timestamp;
             foreach (var channel in channels.EnumerateArray())
             {
                 if (channel.ValueKind != JsonValueKind.Object || OptionalString(channel, "id") is not { } id
@@ -160,28 +154,61 @@ internal sealed class NativeCloudArchive
         using var transaction = connection.BeginTransaction();
         if (ReadCursor(connection, configuration.Endpoint.GetLeftPart(UriPartial.Authority), transaction) != configuration.Cursor)
             throw new InvalidOperationException("클라우드 커서가 다른 작업에서 변경됐습니다.");
-        using (var insert = connection.CreateCommand())
         {
+            // Observations go to 'runtime-cloud' series. Rows the imported Electron archive already
+            // holds are skipped (a cursor replay once duplicated 650K rows), and views of videos older
+            // than 30 days are stored only when the count changes (plus a daily heartbeat).
+            var published = NativeObservations.PublishTimes(connection, transaction);
+            var seriesCache = new Dictionary<(string, string, string), (long Runtime, long? Imported)>();
+            var latest = new Dictionary<long, (long At, long Count)>();
+            using var insert = connection.CreateCommand();
             insert.Transaction = transaction;
             insert.CommandText = """
-                INSERT INTO runtime_cloud_samples(channel_id,kind,video_id,at,count)
-                SELECT $channel,$kind,$video,$at,$count
-                -- A cursor replay (e.g. after adding a channel) must not copy observations that the
-                -- imported Electron archive already holds; that once duplicated 650K rows (160 MB).
-                WHERE NOT EXISTS (SELECT 1 FROM samples WHERE source='cloud' AND channel_id=$channel
-                  AND kind=$kind AND video_id=$video AND at=$at)
-                ON CONFLICT(channel_id,kind,video_id,at) DO UPDATE SET count=excluded.count
+                INSERT INTO observations(series,at,count) SELECT $series,$at,$count
+                WHERE NOT EXISTS (SELECT 1 FROM observations WHERE series=$imported AND at=$at)
+                ON CONFLICT(series,at) DO UPDATE SET count=excluded.count
                 """;
-            foreach (var name in new[] { "$channel", "$kind", "$video", "$at", "$count" })
-                insert.Parameters.Add(new SqliteParameter(name, DBNull.Value));
+            foreach (var name in new[] { "$series", "$at", "$count", "$imported" })
+                insert.Parameters.Add(new SqliteParameter(name, 0L));
+            using var previous = connection.CreateCommand();
+            previous.Transaction = transaction;
+            previous.CommandText = """
+                SELECT at,count FROM observations WHERE series IN ($series,$imported) AND at<$at ORDER BY at DESC LIMIT 1
+                """;
+            foreach (var name in new[] { "$series", "$imported", "$at" })
+                previous.Parameters.Add(new SqliteParameter(name, 0L));
             foreach (var item in observations)
             {
-                insert.Parameters["$channel"].Value = item.Channel;
-                insert.Parameters["$kind"].Value = item.Kind;
-                insert.Parameters["$video"].Value = item.Video;
-                insert.Parameters["$at"].Value = item.At;
+                var key = (item.Channel, item.Kind, item.Video);
+                if (!seriesCache.TryGetValue(key, out var ids))
+                {
+                    ids = (NativeObservations.SeriesId(connection, transaction, NativeObservations.RuntimeCloud,
+                            item.Channel, item.Kind, item.Video, create: true)!.Value,
+                        NativeObservations.SeriesId(connection, transaction, NativeObservations.ImportedCloud,
+                            item.Channel, item.Kind, item.Video, create: false));
+                    seriesCache[key] = ids;
+                }
+                var at = item.AtMilliseconds;
+                if (item.Kind == "video" && published.TryGetValue((item.Channel, item.Video), out var publishedAt)
+                    && at >= publishedAt + (long)NativeObservations.DenseVideoAge.TotalMilliseconds)
+                {
+                    if (!latest.TryGetValue(ids.Runtime, out var last))
+                    {
+                        previous.Parameters["$series"].Value = ids.Runtime;
+                        previous.Parameters["$imported"].Value = ids.Imported ?? -1L;
+                        previous.Parameters["$at"].Value = at;
+                        using var reader = previous.ExecuteReader();
+                        last = reader.Read() ? (reader.GetInt64(0), reader.GetInt64(1)) : (long.MinValue, -1);
+                    }
+                    if (last.Count == item.Count && at - last.At < (long)NativeObservations.SparseHeartbeat.TotalMilliseconds)
+                        continue;
+                }
+                insert.Parameters["$series"].Value = ids.Runtime;
+                insert.Parameters["$imported"].Value = ids.Imported ?? -1L;
+                insert.Parameters["$at"].Value = at;
                 insert.Parameters["$count"].Value = item.Count;
                 insert.ExecuteNonQuery();
+                latest[ids.Runtime] = (at, item.Count);
             }
         }
         if (root.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object)

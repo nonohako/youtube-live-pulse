@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (cloud replay dedupe, SDK installed; work continues on `main`).
+Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`).
 
 ## Current state
 
@@ -24,7 +24,9 @@ Last maintained: 2026-09-27 (cloud replay dedupe, SDK installed; work continues 
 
 ## Storage, backup and recovery invariants
 
-- SQLite primary with separate runtime tables; imported Electron series and their verification hashes stay unchanged. Commits are transactional; tracking/dedup keys are committed before any notification or URL effect.
+- Storage version 2 (`NativeObservations`): every subscriber/view observation lives in `observations(series, at INTEGER ms UTC, count)` WITHOUT ROWID, keyed through `series_keys(source, channel_id, kind, video_id)`. Sources: `local`/`cloud` (imported Electron archive), `runtime-cloud` (Fly sync), `runtime-local` (this PC and xlsx imports); the reader prefers runtime-local > local > cloud at the same instant. Opening a version 1 DB converts `samples`, `runtime_cloud_samples`, `runtime_subscriber_samples` and `runtime_video_samples` in one transaction (stopping on any unparseable time), drops them, sets `meta.storage_version=2`, and the host then VACUUMs once. The per-row raw JSON copies are gone; the original Electron JSON remains in `data/legacy/`, so `StoreImporter.Verify` applies only to a freshly imported (version 1) DB. Real data on 2026-09-27: 264 MB to 12.3 MB, subscriber rows identical, every view change and each series' first/last row kept.
+- View history after a video is 30 days old (by recorded `publishedAt`) is stored only when the count changes, plus a daily heartbeat; the conversion applied this once to stored rows (about 208K unchanged rows removed) and cloud sync applies it on insert. Subscriber history and the first 30 days of each video stay dense.
+- SQLite primary with runtime tables for tracking/events/snapshots/metadata. Commits are transactional; tracking/dedup keys are committed before any notification or URL effect.
 - Backups (`NativeStoreRecovery.CreateBackup`) use SQLite's backup API, validate the snapshot with `integrity_check`, and rotate `.bak.1/.bak.2`. Routine backups run on the first commit and then hourly; a commit that plans effects forces a backup first. A failed backup is shown as `monitor.warning` and retried after 5 minutes; it never stops monitoring or suppresses an already committed/deduplicated effect.
 - Interrupted-backup residue (`.backup.tmp` and its hot journal) is discarded only after the primary and every existing generation validate under the writer lease. Never remove or restore a partial backup without that validation.
 - Personal startup calls `NativeStoreRecovery.OpenForStartup` under the lease: a read-write open rolls back a crash journal (read-only validation rejects such a valid DB), then the primary is validated or the newest valid backup is restored with the corrupt primary preserved. No valid copy stops startup visibly.

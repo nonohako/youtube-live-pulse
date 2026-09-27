@@ -610,6 +610,19 @@ internal sealed class PrototypeApp : System.Windows.Application
                     $"{DateTimeOffset.Now:O}\nRESTORED from {recovery.Source}; preserved {recovery.PreservedPrimary ?? "(none)"}\n\n");
         }
         var store = new NativeMonitorStore(database);
+        // The one-time conversion to compact storage frees most pages; shrink the file right away
+        // (still under the writer lease, before monitoring or cloud sync open connections).
+        if (NativeObservations.TakeMigrated(database))
+        {
+            var timer = Stopwatch.StartNew();
+            using var compact = new Microsoft.Data.Sqlite.SqliteConnection(new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+                { DataSource = database, Pooling = false }.ToString());
+            compact.Open();
+            using var vacuum = compact.CreateCommand();
+            vacuum.CommandText = "VACUUM";
+            vacuum.ExecuteNonQuery();
+            Console.WriteLine($"NATIVE_STORAGE_COMPACTED ms={timer.ElapsedMilliseconds} bytes={new FileInfo(database).Length}");
+        }
         _monitorStore = store;
         _snapshotClient = new YouTubeSnapshotClient { ApiKey = store.ReadApiKey() };
         _monitorBackup = new NativeBackupCheckpoint(database);
