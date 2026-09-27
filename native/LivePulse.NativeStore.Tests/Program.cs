@@ -458,6 +458,62 @@ var legacyEvent = new NativeStateReader(legacyEventDb).Read()["events"]!.AsArray
 Require((string?)legacyEvent["at"] == "2026-09-26T11:00:33Z",
     "시간이 없는 옛 새 동영상 알림에 기록된 게시 시각을 쓰지 않음");
 
+// Subscriber/view history defaults to the cloud; the PC records only without recent cloud samples.
+var cloudFirst = settings with { RecordLocalStatistics = false };
+var fallbackDb = Path.Combine(folder, "stats-fallback.sqlite");
+var cloudOnlyDb = Path.Combine(folder, "stats-cloud.sqlite");
+foreach (var path in new[] { fallbackDb, cloudOnlyDb }) StoreImporter.Import(source, path);
+var cloudOnlyStore = new NativeMonitorStore(cloudOnlyDb);
+using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = cloudOnlyDb, Pooling = false }.ToString()))
+{
+    raw.Open();
+    using var insert = raw.CreateCommand();
+    insert.CommandText = "INSERT INTO runtime_cloud_samples(channel_id,kind,video_id,at,count) VALUES($id,'subscriber','',$at,100)";
+    insert.Parameters.AddWithValue("$id", channelId);
+    insert.Parameters.AddWithValue("$at", checkedAt.AddMinutes(-2).ToString("O"));
+    insert.ExecuteNonQuery();
+}
+var fallbackStore = new NativeMonitorStore(fallbackDb);
+await new NativeMonitorRunner(fallbackStore, new FixtureSnapshotSource(snapshot), new RecordingEffects(() => 0))
+    .RunChannelOnceAsync(channelId, cloudFirst);
+await new NativeMonitorRunner(cloudOnlyStore, new FixtureSnapshotSource(snapshot), new RecordingEffects(() => 0))
+    .RunChannelOnceAsync(channelId, cloudFirst);
+using (var fallbackConnection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = fallbackDb, Pooling = false }.ToString()))
+using (var cloudConnection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = cloudOnlyDb, Pooling = false }.ToString()))
+{
+    fallbackConnection.Open();
+    cloudConnection.Open();
+    Require(Count(fallbackConnection, "runtime_subscriber_samples") == 1 && Count(cloudConnection, "runtime_subscriber_samples") == 0,
+        "클라우드가 정상일 때 로컬 구독자 기록을 멈추지 않거나 클라우드가 없을 때 대신 기록하지 않음");
+}
+Require(cloudOnlyStore.HasRecentCloudStatistics(channelId, checkedAt)
+    && !cloudOnlyStore.HasRecentCloudStatistics(channelId, checkedAt + NativeMonitorStore.CloudStatisticsGrace + TimeSpan.FromMinutes(1)),
+    "클라우드 수집 중단 판정 오류");
+
+// New-video events show the cloud's recorded publish time and the list is ordered by time.
+using (var raw = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = cloudOnlyDb, Pooling = false }.ToString()))
+{
+    raw.Open();
+    using var insert = raw.CreateCommand();
+    insert.CommandText = $$"""
+        INSERT INTO runtime_events(event_key,payload_json) VALUES('{{channelId}}|video|cloudvideo1',
+          '{"id":"x","at":"2026-09-24T05:00:00Z","channelId":"{{channelId}}","type":"video","sourceId":"cloudvideo1","title":"새 동영상","detail":"","url":""}');
+        INSERT INTO runtime_events(event_key,payload_json) VALUES('{{channelId}}|live|laterlive01',
+          '{"id":"y","at":"2026-09-24T03:00:00Z","channelId":"{{channelId}}","type":"live","sourceId":"laterlive01","title":"라이브 시작","detail":"","url":""}');
+        INSERT INTO runtime_cloud_videos(channel_id,video_id,metadata_json)
+          VALUES('{{channelId}}','cloudvideo1','{"title":"클라우드 영상","publishedAt":"2026-09-24T02:00:00Z"}');
+        """;
+    insert.ExecuteNonQuery();
+}
+var orderedEvents = new NativeStateReader(cloudOnlyDb).Read()["events"]!.AsArray();
+var cloudEvent = orderedEvents.Single(item => (string?)item!["sourceId"] == "cloudvideo1")!;
+var times = orderedEvents.Select(item => DateTimeOffset.TryParse((string?)item!["at"], out var at) ? at : DateTimeOffset.MinValue).ToArray();
+Require((string?)cloudEvent["at"] == "2026-09-24T02:00:00Z" && (string?)cloudEvent["detectedAt"] == "2026-09-24T05:00:00Z"
+    && times.SequenceEqual(times.OrderByDescending(at => at))
+    && orderedEvents.IndexOf(orderedEvents.Single(item => (string?)item!["sourceId"] == "laterlive01"))
+        < orderedEvents.IndexOf(cloudEvent),
+    "새 동영상 알림이 클라우드 게시 시각을 쓰지 않거나 시간순이 아님");
+
 var settingsDb = Path.Combine(folder, "settings.sqlite");
 StoreImporter.Import(source, settingsDb);
 var settingsStore = new NativeMonitorStore(settingsDb);

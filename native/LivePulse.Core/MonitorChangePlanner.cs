@@ -4,8 +4,9 @@ public sealed record ChannelTrackingState(IReadOnlyList<string>? SeenVideoIds,
     IReadOnlyList<string>? SeenPostIds, IReadOnlyList<string> OpenedBroadcastIds,
     string? LastVideoId = null, string? LastPostId = null);
 
+// RecordLocalStatistics=false leaves subscriber/view history to the cloud collector while it is healthy.
 public sealed record MonitorSettings(bool AutoOpenLive, bool AutoOpenUpcoming,
-    bool NotifyNewVideos, bool NotifyNewPosts);
+    bool NotifyNewVideos, bool NotifyNewPosts, bool RecordLocalStatistics = true);
 
 public sealed record SubscriberObservation(DateTimeOffset At, long Count);
 public sealed record MonitorEvent(string ChannelId, string Type, string SourceId,
@@ -15,14 +16,34 @@ public sealed record MonitorChangePlan(ChannelTrackingState NextTrackingState,
     IReadOnlyList<MonitorEvent> Events, IReadOnlyList<MonitorNotification> Notifications,
     IReadOnlyList<string> UrlsToOpen, SubscriberObservation? SubscriberSampleToAppend);
 
-// Pure decision step. A future runner must commit NextTrackingState before performing side effects.
-public static class MonitorChangePlanner
+// Pure decision step. The runner commits NextTrackingState before performing side effects.
+public static partial class MonitorChangePlanner
 {
     private const int RecentIdLimit = 100;
     private static readonly TimeSpan SubscriberHeartbeat = TimeSpan.FromHours(6);
+    // An unseen item published longer ago than this resurfaced in a list (reordering, a newly
+    // listed Short, an old stream replay); it is marked seen without a "new" alert.
+    public static readonly TimeSpan NewContentWindow = TimeSpan.FromDays(2);
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(\d+)\s*(초|분|시간|일|주|개월|달|년|seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s*(전|ago)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex RelativeAgePattern();
+
+    // knownPublishedAt holds recorded publish times (cloud collector first, then local metadata).
+    public static bool IsOldContent(DateTimeOffset? publishedAt, string? publishedText, DateTimeOffset checkedAt)
+    {
+        if (publishedAt is { } published) return checkedAt - published > NewContentWindow;
+        var match = RelativeAgePattern().Match(publishedText ?? "");
+        if (!match.Success || !int.TryParse(match.Groups[1].Value, out var amount)) return false;
+        var unit = match.Groups[2].Value.ToLowerInvariant();
+        // Relative text is coarse ("2일 전" means 2 to 3 days), so only clearly old items qualify.
+        return unit is "주" or "개월" or "달" or "년" || unit.StartsWith("week") || unit.StartsWith("month")
+            || unit.StartsWith("year") || ((unit == "일" || unit.StartsWith("day")) && amount >= 3);
+    }
 
     public static MonitorChangePlan Plan(string channelId, ChannelTrackingState previous,
-        SubscriberObservation? lastSubscriberSample, MonitorSettings settings, YouTubeSnapshot snapshot)
+        SubscriberObservation? lastSubscriberSample, MonitorSettings settings, YouTubeSnapshot snapshot,
+        IReadOnlyDictionary<string, DateTimeOffset>? knownPublishedAt = null)
     {
         if (string.IsNullOrWhiteSpace(channelId)) throw new ArgumentException("채널 ID가 필요합니다.", nameof(channelId));
         var recentVideos = snapshot.RecentVideos.DistinctBy(item => item.Id, StringComparer.Ordinal).ToArray();
@@ -33,6 +54,12 @@ public static class MonitorChangePlanner
             : recentVideos.Where(item => !seenVideos.Contains(item.Id)).ToArray();
         YouTubePageParser.CommunityPost[] newPosts = previous.SeenPostIds is null ? []
             : recentPosts.Where(item => !seenPosts.Contains(item.Id)).ToArray();
+        newVideos = newVideos.Where(video => !IsOldContent(
+            knownPublishedAt is not null && knownPublishedAt.TryGetValue(video.Id, out var known) ? known
+                : DateTimeOffset.TryParse(video.PublishedAt, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed) ? parsed : null,
+            video.PublishedText, snapshot.CheckedAt)).ToArray();
+        newPosts = newPosts.Where(post => !IsOldContent(null, post.PublishedText, snapshot.CheckedAt)).ToArray();
         var events = new List<MonitorEvent>();
         var notifications = new List<MonitorNotification>();
         var urlsToOpen = new List<string>();

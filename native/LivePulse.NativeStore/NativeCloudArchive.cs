@@ -33,6 +33,12 @@ internal sealed class NativeCloudArchive
             DataSource = Path.GetFullPath(databasePath), Mode = SqliteOpenMode.ReadWrite, Pooling = false
         }.ToString();
         using var connection = Open();
+        EnsureSchema(connection);
+    }
+
+    // Shared with NativeMonitorStore, which reads cloud samples before the first sync.
+    internal static void EnsureSchema(SqliteConnection connection)
+    {
         using var schema = connection.CreateCommand();
         schema.CommandText = """
             CREATE TABLE IF NOT EXISTS runtime_cloud_state(

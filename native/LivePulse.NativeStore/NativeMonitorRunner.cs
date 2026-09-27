@@ -29,9 +29,13 @@ public sealed class NativeMonitorRunner(NativeMonitorStore store, IYouTubeSnapsh
             cancellationToken.ThrowIfCancellationRequested();
             if (snapshot.SuccessfulSourceCount == 0)
                 throw new InvalidDataException("모든 공개 데이터 소스 확인에 실패해 감시 상태를 저장하지 않았습니다.");
+            // Subscriber/view history comes from the cloud unless the user keeps local recording on
+            // or the cloud has no recent samples for this channel.
+            var recordStatistics = settings.RecordLocalStatistics
+                || !store.HasRecentCloudStatistics(channelId, snapshot.CheckedAt);
             IReadOnlyList<VideoCandidate>? videoStatistics = null;
             DateTimeOffset? videoCheckedAt = null;
-            if (source is IVideoStatisticsSource statisticsSource
+            if (recordStatistics && source is IVideoStatisticsSource statisticsSource
                 && store.NeedsVideoStatistics(channelId, snapshot.CheckedAt))
             {
                 var ids = (snapshot.RegularVideos ?? snapshot.RecentVideos)
@@ -50,7 +54,9 @@ public sealed class NativeMonitorRunner(NativeMonitorStore store, IYouTubeSnapsh
                 }
             }
             var plan = MonitorChangePlanner.Plan(channelId, previous.Tracking,
-                previous.LastSubscriberSample, settings, snapshot);
+                previous.LastSubscriberSample, settings, snapshot,
+                store.ReadPublishedTimes(channelId, snapshot.RecentVideos.Select(video => video.Id)));
+            if (!recordStatistics) plan = plan with { SubscriberSampleToAppend = null };
             var revision = store.Commit(channelId, previous.Revision, snapshot, plan,
                 videoStatistics, videoCheckedAt);
             checkpoint?.AfterCommit(plan.Notifications.Count != 0 || plan.UrlsToOpen.Count != 0);

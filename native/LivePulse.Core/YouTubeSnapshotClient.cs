@@ -204,7 +204,9 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
         Warn(warnings, "동영상 목록", videos);
         Warn(warnings, "쇼츠 목록", shorts);
         Warn(warnings, "게시물", posts);
-        Warn(warnings, "새 영상", feed);
+        // The RSS feed often answers 404/500 while the channel pages work; it only duplicates
+        // /videos, so its failure is shown only when the video list itself is unavailable.
+        if (!videos.Success) Warn(warnings, "새 영상", feed);
         Warn(warnings, "현재 라이브", live);
         var successfulSources = new[] { streams.Success, videos.Success, shorts.Success,
             posts.Success, feed.Success, live.Success }.Count(success => success);

@@ -117,8 +117,8 @@ public sealed class NativeStateReader
             channel["videoViewHistories"] = Videos(connection, id, selectedVideos);
             channels.Add(channel);
         }
-        // Newest first: runtime events precede the imported Electron list; removed channels' events are hidden.
-        var events = new JsonArray();
+        // Removed channels' events are hidden; the list is ordered by time below.
+        var eventItems = new List<JsonObject>();
         using (var command = connection.CreateCommand())
         {
             command.CommandText = "SELECT payload_json FROM runtime_events ORDER BY id DESC LIMIT 100";
@@ -133,17 +133,29 @@ public sealed class NativeStateReader
                         item[char.ToLowerInvariant(key[0]) + key[1..]] = item[key]?.DeepClone();
                         item.Remove(key);
                     }
-                if (!ids.Contains((string?)item["channelId"] ?? "")) continue;
-                // Events stored before 2026-09-27 have no time; a video's official publish time
-                // (recorded by the cloud collector or a local check) is the closest real record.
-                if (item["at"] is null && (string?)item["type"] == "video" && (string?)item["sourceId"] is { } videoId)
-                    item["at"] = PublishedAt(connection, (string)item["channelId"]!, videoId);
-                events.Add(item);
+                if (ids.Contains((string?)item["channelId"] ?? "")) eventItems.Add(item);
             }
         }
         foreach (var item in JsonNode.Parse(Meta(connection, "events"))?.AsArray() ?? new JsonArray())
-            if (events.Count < 100 && item is JsonObject imported && ids.Contains((string?)imported["channelId"] ?? ""))
-                events.Add(imported.DeepClone());
+            if (item is JsonObject imported && ids.Contains((string?)imported["channelId"] ?? ""))
+                eventItems.Add(imported.DeepClone().AsObject());
+        foreach (var item in eventItems)
+        {
+            // A new-video event shows the cloud collector's official publish time (the user's reference
+            // record); detection time is kept as detectedAt. Events stored before 2026-09-27 have no
+            // time and fall back to locally recorded publish metadata. Never invent a time.
+            if ((string?)item["type"] != "video" || (string?)item["sourceId"] is not { } videoId) continue;
+            var channelId = (string)item["channelId"]!;
+            if (PublishedAt(connection, channelId, videoId, cloudOnly: true) is { } cloudTime)
+            {
+                if (item["at"] is not null) item["detectedAt"] = item["at"]!.DeepClone();
+                item["at"] = cloudTime;
+            }
+            else if (item["at"] is null) item["at"] = PublishedAt(connection, channelId, videoId, cloudOnly: false);
+        }
+        var events = new JsonArray(eventItems
+            .OrderByDescending(item => DateTimeOffset.TryParse((string?)item["at"], out var at) ? at : DateTimeOffset.MinValue)
+            .Take(100).ToArray<JsonNode>());
         var cloud = new JsonObject { ["lastSyncAt"] = null, ["lastCollectionAt"] = null, ["error"] = null };
         using (var command = connection.CreateCommand())
         {
@@ -172,10 +184,12 @@ public sealed class NativeStateReader
         };
     }
 
-    private static string? PublishedAt(SqliteConnection connection, string channelId, string videoId)
+    private static string? PublishedAt(SqliteConnection connection, string channelId, string videoId, bool cloudOnly)
     {
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = cloudOnly
+            ? "SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_cloud_videos WHERE channel_id=$channel AND video_id=$video"
+            : """
             SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_cloud_videos WHERE channel_id=$channel AND video_id=$video
             UNION ALL SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_video_metadata WHERE channel_id=$channel AND video_id=$video
             UNION ALL SELECT json_extract(metadata_json,'$.publishedAt') FROM series WHERE channel_id=$channel AND kind='video' AND video_id=$video

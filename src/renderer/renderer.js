@@ -156,7 +156,7 @@ function cacheElements() {
     'settings-button', 'settings-dialog', 'settings-form', 'settings-close',
     'settings-cancel', 'hide-button', 'quit-button', 'clear-api-key',
     'setting-startup', 'setting-live', 'setting-upcoming', 'setting-videos',
-    'setting-posts', 'setting-subscriber-chart-mode', 'setting-interval',
+    'setting-posts', 'setting-local-stats', 'local-stats-help', 'setting-subscriber-chart-mode', 'setting-interval',
     'setting-api-key', 'api-key-status',
     'setting-cloud-url', 'setting-cloud-token', 'cloud-sync-status',
     'import-cloud-connection',
@@ -1593,6 +1593,8 @@ function openSettings() {
   elements.settingUpcoming.checked = settings.autoOpenUpcoming;
   elements.settingVideos.checked = settings.notifyNewVideos;
   elements.settingPosts.checked = settings.notifyNewPosts;
+  elements.settingLocalStats.checked = settings.recordLocalStatistics === true;
+  elements.localStatsHelp.textContent = localStatisticsHelp(settings);
   elements.settingSubscriberChartMode.value = readChartPreferences().subscriberMode;
   elements.settingInterval.value = settings.pollIntervalSeconds;
   elements.settingApiKey.value = '';
@@ -1618,6 +1620,16 @@ function openSettings() {
   elements.settingsDialog.showModal();
 }
 
+// Mirrors the host rule: without recent cloud samples the PC records subscriber/view history itself.
+function localStatisticsHelp(settings) {
+  const base = '끄면 클라우드 기록만 사용하고, 클라우드 수집이 멈추면 자동으로 이 PC에서 기록합니다.';
+  if (settings.recordLocalStatistics) return '켜짐 · 클라우드와 별도로 이 PC에서도 구독자·조회수를 기록합니다.';
+  if (!settings.cloudUrl) return `${base} 지금은 클라우드가 연결되지 않아 이 PC에서 기록합니다.`;
+  const collected = Date.parse(appState.cloud?.lastCollectionAt || '');
+  const stale = appState.cloud?.error || !Number.isFinite(collected) || Date.now() - collected > 10 * 60 * 1000;
+  return stale ? `${base} 지금은 클라우드 수집이 멈춰 이 PC에서 대신 기록합니다.` : `${base} 지금은 클라우드 기록을 사용합니다.`;
+}
+
 async function handleSaveSettings(event) {
   event.preventDefault();
   const update = {
@@ -1626,6 +1638,7 @@ async function handleSaveSettings(event) {
     autoOpenUpcoming: elements.settingUpcoming.checked,
     notifyNewVideos: elements.settingVideos.checked,
     notifyNewPosts: elements.settingPosts.checked,
+    recordLocalStatistics: elements.settingLocalStats.checked,
     subscriberChartMode: elements.settingSubscriberChartMode.value,
     pollIntervalSeconds: Number(elements.settingInterval.value),
     cloudUrl: elements.settingCloudUrl.value.trim()

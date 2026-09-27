@@ -80,6 +80,8 @@ public sealed class NativeMonitorStore
               channel_id TEXT PRIMARY KEY, checked_at TEXT NOT NULL);
             """;
         schema.ExecuteNonQuery();
+        // Monitoring reads cloud samples/publish times even before the first cloud sync.
+        NativeCloudArchive.EnsureSchema(connection);
     }
 
     public StoredTracking Load(string channelId)
@@ -161,6 +163,47 @@ public sealed class NativeMonitorStore
         transaction.Commit();
     }
 
+    // Cloud statistics count as healthy for a channel while synced cloud samples are recent.
+    // This covers Fly/collector failures, sync failures and channels the server does not track.
+    public static readonly TimeSpan CloudStatisticsGrace = TimeSpan.FromMinutes(10);
+
+    public bool HasRecentCloudStatistics(string channelId, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT max(at) FROM runtime_cloud_samples WHERE channel_id=$id";
+        command.Parameters.AddWithValue("$id", channelId);
+        return command.ExecuteScalar() is string text
+            && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var latest)
+            && now - latest <= CloudStatisticsGrace;
+    }
+
+    // Recorded publish times: the cloud collector's official value first, then local metadata.
+    public IReadOnlyDictionary<string, DateTimeOffset> ReadPublishedTimes(string channelId, IEnumerable<string> videoIds)
+    {
+        var result = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        using var connection = Open();
+        foreach (var videoId in videoIds.Distinct(StringComparer.Ordinal))
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_cloud_videos WHERE channel_id=$channel AND video_id=$video
+                UNION ALL SELECT json_extract(metadata_json,'$.publishedAt') FROM runtime_video_metadata WHERE channel_id=$channel AND video_id=$video
+                """;
+            command.Parameters.AddWithValue("$channel", channelId);
+            command.Parameters.AddWithValue("$video", videoId);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+                if (!reader.IsDBNull(0) && reader.GetValue(0) is string text
+                    && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at))
+                {
+                    result[videoId] = at;
+                    break;
+                }
+        }
+        return result;
+    }
+
     public string ReadApiKey()
     {
         using var connection = Open();
@@ -183,7 +226,8 @@ public sealed class NativeMonitorStore
         var interval = ReadPollInterval(settings);
         var monitorSettings = new MonitorSettings(
             ReadBoolean(settings, "autoOpenLive"), ReadBoolean(settings, "autoOpenUpcoming"),
-            ReadBoolean(settings, "notifyNewVideos"), ReadBoolean(settings, "notifyNewPosts"));
+            ReadBoolean(settings, "notifyNewVideos"), ReadBoolean(settings, "notifyNewPosts"),
+            ReadBoolean(settings, "recordLocalStatistics", missing: false));
         var ids = new List<string>();
         using var channels = connection.CreateCommand();
         channels.CommandText = """
@@ -432,6 +476,7 @@ public sealed class NativeMonitorStore
             switch (property.Name)
             {
                 case "startAtLogin":
+                case "recordLocalStatistics":
                 case "autoOpenLive":
                 case "autoOpenUpcoming":
                 case "notifyNewVideos":
@@ -574,9 +619,9 @@ public sealed class NativeMonitorStore
             : throw new InvalidDataException("채널 메타데이터 문자열이 올바르지 않습니다.");
     }
 
-    private static bool ReadBoolean(JsonElement root, string property)
+    private static bool ReadBoolean(JsonElement root, string property, bool missing = true)
     {
-        if (!root.TryGetProperty(property, out var value)) return true;
+        if (!root.TryGetProperty(property, out var value)) return missing;
         return value.ValueKind switch
         {
             JsonValueKind.True => true,

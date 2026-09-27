@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (legacy event times from recorded publish times) after completing the C# migration: Electron parity items were ported, the Electron app/source/build outputs were removed, and the personal app runs portably from this folder.
+Last maintained: 2026-09-27 (cloud-first statistics, old-content filter, cloud-timed events) after completing the C# migration: Electron parity items were ported, the Electron app/source/build outputs were removed, and the personal app runs portably from this folder.
 
 ## Current state
 
@@ -30,7 +30,10 @@ Last maintained: 2026-09-27 (legacy event times from recorded publish times) aft
 
 - `NativeMonitorScheduler` reads channel IDs/settings each sweep, starts after 250 ms, runs channels sequentially and contains channel failures (recorded once per distinct message as an `error` event, like Electron). `Wake()` ends the current wait after a channel add, interval change or API key change.
 - `monitor.running` means a sweep is in progress; `monitor.nextCheckAt` comes from the scheduler; the channel being checked shows `checking`. Sweep start/finish pushes state and updates the tray tooltip (live count).
-- Events carry `id`/`at`, are newest-first (runtime before imported), and removed channels' events are hidden. A legacy video event without `at` displays the video's recorded `publishedAt` (cloud, then local metadata); never invent a time. Channel name/avatar come from the latest check.
+- Events carry `id`/`at`, are sorted by time (newest first), and removed channels' events are hidden. A new-video event displays the cloud collector's recorded `publishedAt` (detection time kept as `detectedAt`); legacy events without `at` fall back to local publish metadata. Never invent a time. Channel name/avatar come from the latest check.
+- Subscriber/view history is cloud-first: with `recordLocalStatistics` off (the default when missing) the PC records subscriber samples and watch-page view counts only for a channel without cloud samples newer than 10 minutes (Fly/collector/sync failure, channel not tracked by the server, cloud not configured). The settings switch turns local recording on permanently. Live/upcoming/new-video/post detection always stays local.
+- An unseen video or post is alerted as new only if its recorded publish time (cloud, local metadata or RSS) is within 2 days, or, without one, its relative text is not clearly older ("3일 전", weeks, months, years). Old items resurfacing in lists are marked seen silently.
+- The YouTube RSS feed often answers 404/500 (about 20 of 24 requests on 2026-09-27) while channel pages work; its failure is shown only if `/videos` also failed. The Fly collector uses the Data API, not RSS.
 - Keep the validated analytics scope per WebView session; rejected requests preserve it; dialog release, channel removal and window disposal release it. Never replace open-chart histories with overview endpoints on a timer/cloud refresh.
 - After a failed channel sweep keep saved snapshots/history but hide stale live/upcoming indications; expose effect failures without promising automatic retries of deduplicated notifications.
 - Hidden startup creates no WebView. Closing disposes WebView; minimized/hidden windows skip broadcasts and pause countdowns; restore sends fresh scoped state. Monitoring and cloud sync continue while hidden.

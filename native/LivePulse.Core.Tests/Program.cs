@@ -133,10 +133,13 @@ Require(YouTubeChannelInput.FindChannelId("\"channelId\":\"UCaaaaaaaaaaaaaaaaaaa
 var channelId = "UCtKtCiaWRz-d3EZn2xd1mdA";
 var liveFailure = false;
 var allFailure = false;
+var feedFailure = false;
 using var handler = new FixtureHandler(request =>
 {
     if (allFailure) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
     var path = request.RequestUri!.AbsolutePath;
+    if (feedFailure && path.EndsWith("/feeds/videos.xml", StringComparison.Ordinal))
+        return new HttpResponseMessage(HttpStatusCode.NotFound);
     if (Uri.UnescapeDataString(path) == "/@sample.channel")
         return new HttpResponseMessage(HttpStatusCode.OK)
         { Content = new StringContent($"<script>{{\"externalId\":\"{channelId}\"}}</script>") };
@@ -165,6 +168,11 @@ Require(snapshot.Upcoming is [{ Id: "lmnopqrstuv" }], "스냅샷 미래 예약 �
 Require(snapshot.RecentVideos.Select(item => item.Id).SequenceEqual(new[] { "12345678901", "mFM2hP5LEhM" }),
     "스냅샷 RSS/Shorts interleave 또는 라이브 제외 오류");
 Require(snapshot.LatestPost?.Id == "Ugkx-post" && snapshot.Warnings.Count == 0, "게시물 또는 성공 경고 오류");
+feedFailure = true;
+var feedDown = await client.FetchChannelSnapshotAsync(channelId);
+Require(feedDown.Warnings.Count == 0 && feedDown.RecentVideos.Any(item => item.Id == "mFM2hP5LEhM"),
+    "영상 목록이 정상인데 RSS 404를 경고로 표시함");
+feedFailure = false;
 liveFailure = true;
 var fallback = await client.FetchChannelSnapshotAsync(channelId);
 Require(fallback.Live?.Id == "abcdefghijk" && fallback.Warnings.Contains("현재 라이브 확인 실패 (HTTP 503)"),
@@ -296,6 +304,30 @@ Require((await apiClient.FetchChannelSnapshotAsync(channelId)).Metadata.Source =
     "API 키 삭제 후에도 API를 사용함");
 Require(YouTubeDataApi.FormatCompact(999) == "999" && YouTubeDataApi.FormatCompact(1234) == "1.23천"
     && YouTubeDataApi.FormatCompact(123456789) == "1.23억", "한국어 축약 숫자 오류");
+
+// Old items resurfacing in a list are marked seen without a "new" alert.
+Require(MonitorChangePlanner.IsOldContent(now.AddDays(-3), null, now)
+    && !MonitorChangePlanner.IsOldContent(now.AddDays(-1), "3개월 전", now)
+    && MonitorChangePlanner.IsOldContent(null, "3개월 전", now)
+    && MonitorChangePlanner.IsOldContent(null, "스트리밍 시간: 2주 전", now)
+    && MonitorChangePlanner.IsOldContent(null, "5 days ago", now)
+    && !MonitorChangePlanner.IsOldContent(null, "2일 전", now)
+    && !MonitorChangePlanner.IsOldContent(null, "3시간 전", now)
+    && !MonitorChangePlanner.IsOldContent(null, "", now), "옛 콘텐츠 판별 규칙 오류");
+var resurfaced = new VideoCandidate("OLDVIDEO001", Title: "옛 영상", PublishedText: "3개월 전");
+var cloudOld = new VideoCandidate("CLOUDOLD001", Title: "클라우드 기록상 옛 영상");
+var fresh = new VideoCandidate("FRESHVIDEO1", Title: "새 영상", PublishedAt: plannerSnapshot.CheckedAt.AddMinutes(-3).ToString("O"));
+var staleCheck = MonitorChangePlanner.Plan(channelId, baseline.NextTrackingState, baseline.SubscriberSampleToAppend, settings,
+    plannerSnapshot with { RecentVideos = new[] { fresh, resurfaced, cloudOld }.Concat(plannerSnapshot.RecentVideos).ToArray() },
+    new Dictionary<string, DateTimeOffset> { ["CLOUDOLD001"] = plannerSnapshot.CheckedAt.AddDays(-80) });
+Require(staleCheck.Events.Select(item => item.SourceId).SequenceEqual(new[] { "FRESHVIDEO1" })
+    && staleCheck.NextTrackingState.SeenVideoIds!.Contains("OLDVIDEO001")
+    && staleCheck.NextTrackingState.SeenVideoIds!.Contains("CLOUDOLD001"),
+    "옛 영상을 새 영상으로 알리거나 확인한 목록에서 빠뜨림");
+var oldPost = new YouTubePageParser.CommunityPost("old-post", "옛 글", "1개월 전", "https://www.youtube.com/post/old-post", "");
+Require(MonitorChangePlanner.Plan(channelId, baseline.NextTrackingState, baseline.SubscriberSampleToAppend, settings,
+    plannerSnapshot with { RecentPosts = new[] { oldPost }.Concat(plannerSnapshot.RecentPosts).ToArray() }).Events.Count == 0,
+    "옛 게시물을 새 게시물로 알림");
 Console.WriteLine("CORE_TESTS_PASSED");
 
 sealed class FixtureHandler(Func<HttpRequestMessage, HttpResponseMessage> handle) : HttpMessageHandler
