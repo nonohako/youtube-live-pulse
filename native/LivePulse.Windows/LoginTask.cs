@@ -26,7 +26,8 @@ internal static class LoginTask
             dynamic folder = service.GetFolder(@"\");
             string? xml = null;
             try { xml = folder.GetTask(TaskName).Xml; }
-            catch (COMException error) when (error.HResult == FileNotFound) { }
+            // The runtime maps the missing-task HRESULT to FileNotFoundException, not COMException.
+            catch (Exception error) when (error.HResult == FileNotFound) { }
             var current = xml is null ? null : ReadCommand(xml);
             // Never replace or remove an unrelated task that happens to use the product name.
             if (xml is not null && (current is null || !PrototypeApp.IsOwnRunCommand(current))) return;
