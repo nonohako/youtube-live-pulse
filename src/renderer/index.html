@@ -212,7 +212,17 @@
         <input id="setting-backup-folder" type="text" autocomplete="off" placeholder="예: G:\내 드라이브\라이브 펄스 백업">
         <small id="backup-folder-status">외부 백업 안 함</small>
         <button id="choose-backup-folder" type="button" class="text-button">폴더 선택</button>
-        <small>기록 DB를 하루 한 번 압축해 이 폴더에 저장하고 최근 3일치만 남깁니다. Google Drive 데스크톱 앱의 폴더를 고르면 자동으로 드라이브에 올라갑니다. 비우고 저장하면 끕니다.</small>
+        <small>기록 DB를 하루 한 번 압축해 이 폴더에 저장하고 최근 3일치만 남깁니다. Google Drive 데스크톱 앱의 폴더를 고르면 그 앱이 켜져 있을 때 드라이브에 올라갑니다. 비우고 저장하면 끕니다.</small>
+      </div>
+
+      <div class="field-group">
+        <label>구글 드라이브에 직접 백업 <span>선택</span></label>
+        <small id="drive-backup-status">연결 안 됨</small>
+        <div>
+          <button id="connect-google-drive" type="button" class="text-button">구글 드라이브 연결</button>
+          <button id="disconnect-google-drive" type="button" class="text-button" hidden>연결 해제</button>
+        </div>
+        <small>Google Drive 데스크톱 앱 없이, 앱이 하루 한 번 기록 DB를 드라이브의 '라이브 펄스 백업' 폴더에 올리고 최근 3일치만 남깁니다. 연결할 때 Google Cloud에서 받은 OAuth 클라이언트 파일(데스크톱 앱 유형)을 고른 뒤 브라우저에서 허용하세요. 앱은 자기가 만든 파일에만 접근합니다.</small>
       </div>
 
       <div class="dialog-actions">

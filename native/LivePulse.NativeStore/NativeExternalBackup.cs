@@ -20,11 +20,25 @@ public static class NativeExternalBackup
             throw new InvalidDataException("외부 백업 폴더는 전체 경로여야 합니다.");
         if (!Directory.Exists(folder))
             throw new DirectoryNotFoundException($"외부 백업 폴더가 없습니다: {folder}");
-        var source = System.IO.Path.GetFullPath(databasePath) + ".bak.1";
-        if (!File.Exists(source)) return new Result(false, null);
-        var target = System.IO.Path.Combine(folder, $"{Prefix}{localNow:yyyyMMdd}{Suffix}");
+        if (!File.Exists(System.IO.Path.GetFullPath(databasePath) + ".bak.1")) return new Result(false, null);
+        var target = System.IO.Path.Combine(folder, FileName(localNow));
         if (File.Exists(target)) return new Result(false, target);
+        if (!WriteZip(databasePath, target)) return new Result(false, null);
 
+        foreach (var old in Directory.GetFiles(folder, $"{Prefix}*{Suffix}")
+                     .Where(path => IsOwnName(System.IO.Path.GetFileName(path)))
+                     .OrderByDescending(path => path, StringComparer.Ordinal).Skip(KeepDays))
+            File.Delete(old);
+        return new Result(true, target);
+    }
+
+    public static string FileName(DateTime localNow) => $"{Prefix}{localNow:yyyyMMdd}{Suffix}";
+
+    // Zips a validated snapshot of .bak.1 to target (never left half-written). False without a backup yet.
+    public static bool WriteZip(string databasePath, string target)
+    {
+        var source = System.IO.Path.GetFullPath(databasePath) + ".bak.1";
+        if (!File.Exists(source)) return false;
         // Snapshot the generation first: hourly rotation may rename .bak.1 while zipping.
         var snapshot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"livepulse-external-{Guid.NewGuid():N}.sqlite");
         var partial = target + ".partial";
@@ -39,21 +53,16 @@ public static class NativeExternalBackup
                 if (check.Entries is not [{ } entry] || entry.Length != new FileInfo(snapshot).Length)
                     throw new InvalidDataException("외부 백업 압축 검증에 실패했습니다.");
             File.Move(partial, target);
+            return true;
         }
         finally
         {
             File.Delete(snapshot);
             if (File.Exists(partial)) File.Delete(partial);
         }
-
-        foreach (var old in Directory.GetFiles(folder, $"{Prefix}*{Suffix}")
-                     .Where(path => IsOwnName(System.IO.Path.GetFileName(path)))
-                     .OrderByDescending(path => path, StringComparer.Ordinal).Skip(KeepDays))
-            File.Delete(old);
-        return new Result(true, target);
     }
 
-    private static bool IsOwnName(string name)
+    public static bool IsOwnName(string name)
         => name.Length == Prefix.Length + 8 + Suffix.Length && name.StartsWith(Prefix, StringComparison.Ordinal)
             && name.EndsWith(Suffix, StringComparison.Ordinal)
             && DateTime.TryParseExact(name.Substring(Prefix.Length, 8), "yyyyMMdd", CultureInfo.InvariantCulture,

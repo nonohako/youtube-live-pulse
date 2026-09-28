@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-28 (channel removal deletes its data; logon task for immediate start at login; work continues on `main`).
+Last maintained: 2026-09-28 (channel removal deletes its data; logon task for immediate start at login; direct Google Drive backup; work continues on `main`).
 
 ## Current state
 
@@ -34,6 +34,7 @@ Last maintained: 2026-09-28 (channel removal deletes its data; logon task for im
 - The 2026-08-02..09-16 subscriber gap was filled from Playboard daily totals at the user's request (xlsx-import semantics). Past counts cannot come from the public Data API.
 - Cloud sync must not store rows the imported archive already holds (`samples` with source `cloud`): a cursor replay after adding a channel once duplicated 653,823 rows (+160 MB). Those exact duplicates and the index duplicating the primary key were removed and the DB vacuumed on 2026-09-27 (434 MB to 249 MB).
 - Daily external backup: when `externalBackupFolder` is set (settings dialog, folder picker via the `chooseBackupFolder` bridge action), `NativeExternalBackup` zips a quick-checked copy of `.bak.1` to `live-pulse-YYYYMMDD.sqlite.zip` once per local day (checked every 10 minutes, off the UI thread) and keeps the newest three such files; it never touches other files. Intended target: a Google Drive for desktop folder (not installed on 2026-09-27). Status shows in settings via `app.externalBackup`.
+- Direct Google Drive backup (user request 2026-09-28, so Google Drive for desktop need not run): `GoogleDriveBackup` uploads the same daily zip (`NativeExternalBackup.WriteZip`) with the Drive v3 resumable API into the app-created `라이브 펄스 백업` folder, verifies the stored size, and moves copies beyond the newest three to the Drive trash. OAuth uses the user's own "Desktop app" client file (never committed or bundled), the loopback redirect on 127.0.0.1 with PKCE, and only the `drive.file` scope. The client and refresh token live DPAPI-encrypted (current user) in `data/google-drive.dat`, never in SQLite, so the uploaded DB never carries the Drive token. Checked with the folder backup every 10 minutes; once today's copy is confirmed, no further calls that day. `invalid_grant` shows a reconnect message; status is `app.googleDrive`. The consent screen must be published (testing-mode refresh tokens expire after 7 days).
 - Real observations recorded by another runtime may be merged only with exact-instant deduplication (done once for Electron's 2026-09-26/27 run: 11 subscriber and 2,321 video samples).
 
 ## Monitoring and UI state invariants
