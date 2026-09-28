@@ -14,7 +14,7 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 ## What was done on 2026-09-28
 
-1. **Channel removal deletes data (user request).** Removing a channel in the app now deletes everything stored for it (tracking, snapshots, events, metadata, every subscriber/view series), not just hides it. Cloud sync and failure recording skip a channel removed mid-operation. Startup purges channels removed by older builds; this cleared the leftover Lofi Girl (`UCSJ4gkVC6NrvII8umztf0Ow`) rows (379 local observations). A copy of the DB before the purge is in `data/legacy/`. The five legacy events without `at` were kept: they display the cloud publish time.
+1. **Channel removal deletes data (user request).** Removing a channel in the app now deletes everything stored for it (tracking, snapshots, events, metadata, every subscriber/view series), not just hides it. Cloud sync and failure recording skip a channel removed mid-operation. Startup purges channels removed by older builds; this cleared the leftover Lofi Girl (`UCSJ4gkVC6NrvII8umztf0Ow`) rows (379 local observations). A copy of the DB before the purge is in `data/legacy/`. At the user's request the five legacy `runtime_events` rows without `at` (PascalCase payloads) were then deleted with the app stopped (copy in `data/legacy/live-pulse-before-event-delete-20260928.sqlite`, `integrity_check` ok).
 
 ## What was done on 2026-09-27
 
