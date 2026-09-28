@@ -148,6 +148,17 @@ public sealed class NativeMonitorStore
             """;
         name.Parameters.AddWithValue("$id", channelId);
         var title = name.ExecuteScalar() as string;
+        // A sweep that was checking a channel while it was removed must not leave an orphan event.
+        using (var exists = connection.CreateCommand())
+        {
+            exists.Transaction = transaction;
+            exists.CommandText = """
+                SELECT 1 FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels)
+                WHERE id=$id AND id NOT IN (SELECT id FROM runtime_removed_channels)
+                """;
+            exists.Parameters.AddWithValue("$id", channelId);
+            if (exists.ExecuteScalar() is null) return;
+        }
         var key = $"{channelId}|error|{message}";
         if (ReadImportedEventKeys(connection, transaction).Contains(key)) return;
         using var insert = connection.CreateCommand();
@@ -447,18 +458,80 @@ public sealed class NativeMonitorStore
         transaction.Commit();
     }
 
+    // Removing a channel deletes all of its stored data (user request 2026-09-28): registration,
+    // tracking, snapshots, events, metadata and every observation series. Re-adding starts fresh.
     public void RemoveChannel(string channelId)
     {
         _ = YouTubeChannelInput.Normalize(channelId);
         using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using (var check = connection.CreateCommand())
+        {
+            check.Transaction = transaction;
+            check.CommandText = """
+                SELECT 1 FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels)
+                WHERE id=$id AND id NOT IN (SELECT id FROM runtime_removed_channels)
+                """;
+            check.Parameters.AddWithValue("$id", channelId);
+            if (check.ExecuteScalar() is null) throw new KeyNotFoundException("등록된 채널을 찾지 못했습니다.");
+        }
+        DeleteChannelData(connection, transaction, channelId);
+        transaction.Commit();
+    }
+
+    // Also used once to clean channels removed before removal deleted their data.
+    public int PurgeRemovedChannels()
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var ids = new List<string>();
+        using (var list = connection.CreateCommand())
+        {
+            list.Transaction = transaction;
+            list.CommandText = "SELECT id FROM runtime_removed_channels";
+            using var reader = list.ExecuteReader();
+            while (reader.Read()) ids.Add(reader.GetString(0));
+        }
+        foreach (var id in ids) DeleteChannelData(connection, transaction, id);
+        transaction.Commit();
+        return ids.Count;
+    }
+
+    private static void DeleteChannelData(SqliteConnection connection, SqliteTransaction transaction, string channelId)
+    {
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
-            INSERT OR IGNORE INTO runtime_removed_channels(id)
-            SELECT id FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels) WHERE id=$id
+            DELETE FROM observations WHERE series IN (SELECT id FROM series_keys WHERE channel_id=$id);
+            DELETE FROM series_keys WHERE channel_id=$id;
+            DELETE FROM series WHERE channel_id=$id;
+            DELETE FROM runtime_tracking WHERE channel_id=$id;
+            DELETE FROM runtime_snapshots WHERE channel_id=$id;
+            DELETE FROM runtime_video_metadata WHERE channel_id=$id;
+            DELETE FROM runtime_video_stats_state WHERE channel_id=$id;
+            DELETE FROM runtime_cloud_videos WHERE channel_id=$id;
+            DELETE FROM runtime_events WHERE json_extract(payload_json,'$.channelId')=$id
+              OR json_extract(payload_json,'$.ChannelId')=$id;
+            DELETE FROM channels WHERE id=$id;
+            DELETE FROM cloud_channels WHERE id=$id;
+            DELETE FROM runtime_channels WHERE id=$id;
+            DELETE FROM runtime_removed_channels WHERE id=$id;
             """;
         command.Parameters.AddWithValue("$id", channelId);
-        if (command.ExecuteNonQuery() == 0)
-            throw new KeyNotFoundException("등록된 채널을 찾지 못했습니다.");
+        command.ExecuteNonQuery();
+        // Imported Electron events live in one meta JSON array.
+        using var read = connection.CreateCommand();
+        read.Transaction = transaction;
+        read.CommandText = "SELECT value FROM meta WHERE key='events'";
+        if (read.ExecuteScalar() is not string json || JsonNode.Parse(json) is not JsonArray events) return;
+        var kept = new JsonArray(events.Where(item => (string?)item?["channelId"] != channelId)
+            .Select(item => item?.DeepClone()).ToArray());
+        if (kept.Count == events.Count) return;
+        using var write = connection.CreateCommand();
+        write.Transaction = transaction;
+        write.CommandText = "UPDATE meta SET value=$value WHERE key='events'";
+        write.Parameters.AddWithValue("$value", kept.ToJsonString());
+        write.ExecuteNonQuery();
     }
 
     public void UpdateSettings(JsonElement partial)

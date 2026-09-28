@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`).
+Last maintained: 2026-09-28 (channel removal deletes its data; work continues on `main`).
 
 ## Current state
 
@@ -40,7 +40,7 @@ Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`
 
 - `NativeMonitorScheduler` reads channel IDs/settings each sweep, starts after 250 ms, runs channels sequentially and contains channel failures (recorded once per distinct message as an `error` event, like Electron). `Wake()` ends the current wait after a channel add, interval change or API key change.
 - `monitor.running` means a sweep is in progress; `monitor.nextCheckAt` comes from the scheduler; the channel being checked shows `checking`. Sweep start/finish pushes state and updates the tray tooltip (live count).
-- Events carry `id`/`at`, are sorted by time (newest first), and removed channels' events are hidden. A new-video event displays the cloud collector's recorded `publishedAt` (detection time kept as `detectedAt`); legacy events without `at` fall back to local publish metadata. Never invent a time. Channel name/avatar come from the latest check.
+- Events carry `id`/`at`, are sorted by time (newest first). Removing a channel deletes all of its data in one transaction (user request 2026-09-28): registration (`channels`/`runtime_channels`/`cloud_channels`), tracking, snapshots, video metadata/stats state, cloud video metadata, `series`/`series_keys`/`observations` of every source, its `runtime_events` and meta `events` entries. A later cloud page or failed sweep for it writes nothing; re-adding starts fresh. Startup purges channels left in `runtime_removed_channels` by older builds. A new-video event displays the cloud collector's recorded `publishedAt` (detection time kept as `detectedAt`); legacy events without `at` fall back to local publish metadata. Never invent a time. Channel name/avatar come from the latest check.
 - Subscriber/view history is cloud-first: with `recordLocalStatistics` off (the default when missing) the PC records subscriber samples and watch-page view counts only for a channel without cloud samples newer than 10 minutes (Fly/collector/sync failure, channel not tracked by the server, cloud not configured). The settings switch turns local recording on permanently. Live/upcoming/new-video/post detection always stays local.
 - An unseen video or post is alerted as new only if its recorded publish time (cloud, local metadata or RSS) is within 2 days, or, without one, its relative text is not clearly older ("3일 전", weeks, months, years). Old items resurfacing in lists are marked seen silently.
 - The YouTube RSS feed often answers 404/500 (about 20 of 24 requests on 2026-09-27) while channel pages work; its failure is shown only if `/videos` also failed. The Fly collector uses the Data API, not RSS.

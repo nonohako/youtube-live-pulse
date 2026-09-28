@@ -1,6 +1,6 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` and `native/README.md`. Earlier history (Electron releases v1.x, the 2026-09-22 data recovery, the staged C# migration, the Codex MSIX incident) is in Git history up to commit 94d53df.
 
@@ -11,6 +11,10 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 - **Electron:** fully retired. The installed copy was uninstalled; its source, scripts, Electron-only tests, `package-lock.json`, the release workflow and `docs/migration-csharp-webview2.md` were removed. `package.json` only runs `node --test` (renderer math and the cloud collector).
 - **Cloud:** the Fly collector writes subscriber/view statistics to Upstash every minute; the app syncs them and treats them as the primary history (see "Cloud-first records" below).
 - **Agent tooling:** Claude Code CLI 2.1.283 is installed at `%USERPROFILE%\.local\bin\claude.exe` (added to the user PATH). The `upstash-redis` MCP server in `.mcp.json` is connected with the read-only token and returned the `live-pulse:v1:metadata` and `live-pulse:v1:samples` keys. `.git` is owned by the Codex sandbox account, so this folder was added to the user's global git `safe.directory`.
+
+## What was done on 2026-09-28
+
+1. **Channel removal deletes data (user request).** Removing a channel in the app now deletes everything stored for it (tracking, snapshots, events, metadata, every subscriber/view series), not just hides it. Cloud sync and failure recording skip a channel removed mid-operation. Startup purges channels removed by older builds; this cleared the leftover Lofi Girl (`UCSJ4gkVC6NrvII8umztf0Ow`) rows (379 local observations). A copy of the DB before the purge is in `data/legacy/`. The five legacy events without `at` were kept: they display the cloud publish time.
 
 ## What was done on 2026-09-27
 
