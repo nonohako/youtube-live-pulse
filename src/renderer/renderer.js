@@ -160,6 +160,7 @@ function cacheElements() {
     'setting-api-key', 'api-key-status',
     'setting-cloud-url', 'setting-cloud-token', 'cloud-sync-status',
     'import-cloud-connection', 'setting-backup-folder', 'backup-folder-status', 'choose-backup-folder',
+    'drive-backup-status', 'connect-google-drive', 'disconnect-google-drive',
     'startup-help', 'app-version', 'update-button', 'update-status',
     'subscriber-dialog', 'subscriber-close', 'subscriber-dialog-title',
     'subscriber-import-button', 'subscriber-import-status', 'subscriber-detail-content',
@@ -235,6 +236,19 @@ function bindEvents() {
   elements.chooseBackupFolder.addEventListener('click', () => safely(async () => {
     const result = await window.livePulse.chooseBackupFolder();
     if (!result.canceled) elements.settingBackupFolder.value = result.path;
+  }));
+  elements.connectGoogleDrive.addEventListener('click', () => safely(async () => {
+    elements.driveBackupStatus.textContent = '브라우저에서 Google 계정으로 로그인하고 허용해 주세요…';
+    const result = await window.livePulse.connectGoogleDrive();
+    appState = await window.livePulse.getState();
+    renderGoogleDriveSetting();
+    if (result.error) elements.driveBackupStatus.textContent = `연결하지 못했습니다: ${result.error}`;
+  }));
+  elements.disconnectGoogleDrive.addEventListener('click', () => safely(async () => {
+    if (!window.confirm('구글 드라이브 백업 연결을 해제할까요? 드라이브에 이미 올라간 백업은 그대로 남습니다.')) return;
+    await window.livePulse.disconnectGoogleDrive();
+    appState = await window.livePulse.getState();
+    renderGoogleDriveSetting();
   }));
   elements.hideButton.addEventListener('click', () => window.livePulse.hideWindow());
   elements.quitButton.addEventListener('click', () => {
@@ -1443,6 +1457,7 @@ function openSettings() {
   elements.backupFolderStatus.textContent = !settings.externalBackupFolder ? '외부 백업 안 함'
     : backup.error || (backup.running ? '백업하는 중…'
       : backup.lastAt ? `최근 외부 백업: ${new Date(backup.lastAt).toLocaleString('ko-KR')}` : '곧 첫 백업을 만듭니다.');
+  renderGoogleDriveSetting();
   elements.cloudSyncStatus.textContent = appState.cloud?.error || (settings.cloudUrl
     ? (appState.cloud?.lastSyncAt ? `최근 동기화: ${new Date(appState.cloud.lastSyncAt).toLocaleString('ko-KR')}` : '연결 후 동기화를 기다립니다.')
     : '클라우드 연결 안 됨');
@@ -1460,6 +1475,15 @@ function openSettings() {
     ? 'Windows 시작 앱 설정에 반영됩니다.'
     : '개발 실행 중에는 등록하지 않으며, 설치본에서 적용됩니다.';
   elements.settingsDialog.showModal();
+}
+
+function renderGoogleDriveSetting() {
+  const drive = appState.app?.googleDrive || {};
+  elements.connectGoogleDrive.hidden = Boolean(drive.connected);
+  elements.disconnectGoogleDrive.hidden = !drive.connected;
+  elements.driveBackupStatus.textContent = !drive.connected ? '연결 안 됨'
+    : drive.error || (drive.running ? '구글 드라이브에 백업하는 중…'
+      : drive.lastAt ? `최근 드라이브 백업: ${new Date(drive.lastAt).toLocaleString('ko-KR')}` : '연결됨 · 곧 첫 백업을 올립니다.');
 }
 
 // Mirrors the host rule: without recent cloud samples the PC records subscriber/view history itself.

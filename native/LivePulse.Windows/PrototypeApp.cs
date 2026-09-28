@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows;
@@ -24,6 +25,11 @@ internal sealed class PrototypeApp : System.Windows.Application
     private DateTime _externalBackupCheckedAt = DateTime.UtcNow.AddMinutes(-8);
     private string? _externalBackupAt;
     private string? _externalBackupError;
+    private static readonly HttpClient DriveHttp = new() { Timeout = TimeSpan.FromMinutes(10) };
+    private int _driveBackupRunning;
+    private DateOnly? _driveBackupDoneDay;
+    private string? _driveBackupAt;
+    private string? _driveBackupError;
     private DateTime _lastTrim = DateTime.MinValue;
     private MonitorSweepResult? _lastSweepSent;
     private int _ticksSinceState;
@@ -164,13 +170,14 @@ internal sealed class PrototypeApp : System.Windows.Application
             ShowWindow();
     }
 
-    // Daily zip of the newest backup generation into the user's folder (e.g. Google Drive).
-    // Checked every 10 minutes (first check 2 minutes after start) off the UI thread.
+    // Daily zip of the newest backup generation into the user's folder (e.g. Google Drive) and/or
+    // straight to Google Drive. Checked every 10 minutes (first check 2 minutes after start) off the UI thread.
     private void RunExternalBackupIfDue(bool force = false)
     {
         if (_monitorStore is null || _personal is null) return;
         if (!force && DateTime.UtcNow - _externalBackupCheckedAt < TimeSpan.FromMinutes(10)) return;
         _externalBackupCheckedAt = DateTime.UtcNow;
+        RunDriveBackupIfDue();
         string folder;
         try { folder = _monitorStore.ReadExternalBackupFolder(); }
         catch (Exception error) { Volatile.Write(ref _externalBackupError, error.Message); return; }
@@ -197,6 +204,93 @@ internal sealed class PrototypeApp : System.Windows.Application
                 _ = Dispatcher.BeginInvoke(() => _window?.SendState());
             }
         });
+    }
+
+    // Once a day's copy is confirmed on Drive, later checks that day make no network calls.
+    private void RunDriveBackupIfDue()
+    {
+        if (_personal is null || !File.Exists(_personal.GoogleDriveCredentials)) return;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (_driveBackupDoneDay == today) return;
+        if (Interlocked.Exchange(ref _driveBackupRunning, 1) != 0) return;
+        var database = _personal.Database;
+        var credentialsPath = _personal.GoogleDriveCredentials;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var credentials = GoogleDriveCredentialFile.Read(credentialsPath);
+                var result = await new GoogleDriveBackup(DriveHttp).RunIfDueAsync(database, credentials, DateTime.Now);
+                if (result.At is { } at)
+                {
+                    Volatile.Write(ref _driveBackupAt, at.ToString("O"));
+                    _ = Dispatcher.BeginInvoke(() => _driveBackupDoneDay = today);
+                }
+                Volatile.Write(ref _driveBackupError, null);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                Volatile.Write(ref _driveBackupError, $"구글 드라이브 백업 실패: {error.Message}");
+                Console.Error.WriteLine($"NATIVE_DRIVE_BACKUP_FAILED {error}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _driveBackupRunning, 0);
+                _ = Dispatcher.BeginInvoke(() => _window?.SendState());
+            }
+        });
+    }
+
+    internal async Task<object> ConnectGoogleDriveAsync()
+    {
+        if (_personal is null) throw new InvalidOperationException("개인용 앱에서만 구글 드라이브에 연결할 수 있습니다.");
+        var picker = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Google OAuth 클라이언트 파일 선택 (client_secret_….json)", Filter = "JSON 파일 (*.json)|*.json",
+            CheckFileExists = true, Multiselect = false
+        };
+        if (picker.ShowDialog(_window) != true) return new { canceled = true };
+        GoogleDriveCredentials credentials;
+        try
+        {
+            if (new FileInfo(picker.FileName).Length > 16384) throw new InvalidDataException("OAuth 클라이언트 파일이 너무 큽니다.");
+            var (clientId, clientSecret) = GoogleDriveBackup.ParseClientFile(File.ReadAllText(picker.FileName));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            credentials = await new GoogleDriveBackup(DriveHttp).AuthorizeAsync(clientId, clientSecret,
+                uri => LaunchBrowser(uri), timeout.Token);
+        }
+        // Shown in the settings dialog; the bridge would otherwise replace it with a generic failure.
+        catch (Exception error) when (error is InvalidDataException or JsonException or HttpRequestException
+            or OperationCanceledException or IOException)
+        {
+            return new { canceled = false, error = error is OperationCanceledException
+                ? "5분 안에 Google 로그인을 마치지 않아 연결을 취소했습니다." : error.Message };
+        }
+        GoogleDriveCredentialFile.Write(_personal.GoogleDriveCredentials, credentials);
+        _driveBackupDoneDay = null;
+        Volatile.Write(ref _driveBackupError, null);
+        RunDriveBackupIfDue();
+        _window?.SendState();
+        return new { canceled = false };
+    }
+
+    internal async Task<object> DisconnectGoogleDriveAsync()
+    {
+        if (_personal is null || !File.Exists(_personal.GoogleDriveCredentials)) return new { ok = true };
+        GoogleDriveCredentials? credentials = null;
+        try { credentials = GoogleDriveCredentialFile.Read(_personal.GoogleDriveCredentials); }
+        catch (Exception error) { Console.Error.WriteLine($"NATIVE_DRIVE_CREDENTIALS_UNREADABLE {error.Message}"); }
+        File.Delete(_personal.GoogleDriveCredentials);
+        _driveBackupDoneDay = null;
+        Volatile.Write(ref _driveBackupAt, null);
+        Volatile.Write(ref _driveBackupError, null);
+        if (credentials is not null)
+        {
+            try { await new GoogleDriveBackup(DriveHttp).RevokeAsync(credentials); }
+            catch (Exception error) { Console.Error.WriteLine($"NATIVE_DRIVE_REVOKE_FAILED {error.Message}"); }
+        }
+        _window?.SendState();
+        return new { ok = true };
     }
 
     internal object ChooseBackupFolder()
@@ -257,6 +351,13 @@ internal sealed class PrototypeApp : System.Windows.Application
             ["lastAt"] = Volatile.Read(ref _externalBackupAt),
             ["error"] = Volatile.Read(ref _externalBackupError),
             ["running"] = Volatile.Read(ref _externalBackupRunning) != 0
+        };
+        state["app"]!["googleDrive"] = new JsonObject
+        {
+            ["connected"] = _personal is not null && File.Exists(_personal.GoogleDriveCredentials),
+            ["lastAt"] = Volatile.Read(ref _driveBackupAt),
+            ["error"] = Volatile.Read(ref _driveBackupError),
+            ["running"] = Volatile.Read(ref _driveBackupRunning) != 0
         };
         state["app"]!["loginSettingApplied"] = IsPersonal
             && IsPersonalLoginSettingApplied(state["settings"]!["startAtLogin"]?.GetValue<bool>() == true);
@@ -460,6 +561,13 @@ internal sealed class PrototypeApp : System.Windows.Application
             || uri.Host is not ("youtube.com" or "www.youtube.com" or "m.youtube.com" or "youtu.be")
             || uri.UserInfo.Length != 0 || !uri.IsDefaultPort)
             throw new InvalidDataException("허용되지 않은 YouTube 주소입니다.");
+        LaunchBrowser(uri);
+        return new { ok = true };
+    }
+
+    // Chrome when installed (the user's signed-in browser), otherwise the default browser.
+    private static void LaunchBrowser(Uri uri)
+    {
         var candidates = new[]
         {
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -475,7 +583,6 @@ internal sealed class PrototypeApp : System.Windows.Application
                 WindowStyle = ProcessWindowStyle.Hidden };
         if (chrome is not null) start.ArgumentList.Add(uri.AbsoluteUri);
         _ = Process.Start(start) ?? throw new IOException("브라우저를 열지 못했습니다.");
-        return new { ok = true };
     }
 
     internal Task ShowNotificationAsync(MonitorNotification notification, CancellationToken cancellationToken)

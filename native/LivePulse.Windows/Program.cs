@@ -12,6 +12,7 @@ internal sealed record PortableLayout(string Root, string AppDirectory, string D
     internal const string MarkerName = "LivePulse.portable";
     internal string Database => Path.Combine(DataDirectory, "live-pulse.sqlite");
     internal string WebViewProfile => Path.Combine(DataDirectory, "WebView2");
+    internal string GoogleDriveCredentials => Path.Combine(DataDirectory, "google-drive.dat");
 
     internal static PortableLayout? Find(string appDirectory)
     {

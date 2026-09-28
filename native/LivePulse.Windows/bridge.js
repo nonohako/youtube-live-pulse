@@ -44,6 +44,8 @@
       updateSettings: settings => invoke('updateSettings', settings),
       importCloudConnection: () => invoke('importCloudConnection'),
       chooseBackupFolder: () => invoke('chooseBackupFolder'),
+      connectGoogleDrive: () => invoke('connectGoogleDrive'),
+      disconnectGoogleDrive: () => invoke('disconnectGoogleDrive'),
       openUrl: url => invoke('openUrl', url),
       hideWindow: () => invoke('hideWindow'),
       quit: () => invoke('quit'),

@@ -889,6 +889,61 @@ using (var zip = System.IO.Compression.ZipFile.OpenRead(Path.Combine(externalFol
 ExpectFailure(() => NativeExternalBackup.RunIfDue(forcedDb, Path.Combine(folder, "missing"), DateTime.Now),
     "없는 외부 백업 폴더를 조용히 넘김");
 
+// Direct Google Drive upload: desktop OAuth client file, loopback consent, daily upload and retention.
+var driveClient = GoogleDriveBackup.ParseClientFile("""
+    {"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"GOCSPX-secret_1",
+     "redirect_uris":["http://localhost"]}}
+    """);
+Require(driveClient == ("123-abc.apps.googleusercontent.com", "GOCSPX-secret_1"), "OAuth 클라이언트 파일 해석 오류");
+ExpectInvalidData(() => GoogleDriveBackup.ParseClientFile("""{"web":{"client_id":"1.apps.googleusercontent.com","client_secret":"xxxxxxxx"}}"""),
+    "웹용 OAuth 클라이언트를 받아들임");
+ExpectInvalidData(() => GoogleDriveBackup.ParseClientFile("""{"installed":{"client_id":"evil.example.com","client_secret":"xxxxxxxx"}}"""),
+    "잘못된 OAuth 클라이언트 ID를 받아들임");
+Require(GoogleDriveBackup.ParseCallback("GET /?state=s%2F1&code=4%2F0abc HTTP/1.1") is { } callback
+    && callback["state"] == "s/1" && callback["code"] == "4/0abc"
+    && GoogleDriveBackup.ParseCallback("GET /favicon.ico HTTP/1.1") is null,
+    "OAuth 리디렉션 해석 오류");
+var driveHandler = new DriveFixtureHandler(["live-pulse-20260924.sqlite.zip", "live-pulse-20260925.sqlite.zip",
+    "live-pulse-20260926.sqlite.zip", "notes.txt"]);
+using (var driveHttp = new HttpClient(driveHandler))
+{
+    var drive = new GoogleDriveBackup(driveHttp);
+    Uri? consent = null;
+    using var callbackHttp = new HttpClient();
+    var authorized = await drive.AuthorizeAsync(driveClient.ClientId, driveClient.ClientSecret, uri =>
+    {
+        consent = uri;
+        var query = GoogleDriveBackup.ParseCallback($"GET /?{uri.Query.TrimStart('?')} HTTP/1.1")!;
+        _ = callbackHttp.GetStringAsync($"{query["redirect_uri"]}/?state={Uri.EscapeDataString(query["state"])}&code=auth-code");
+    }, new CancellationTokenSource(TimeSpan.FromSeconds(20)).Token);
+    Require(authorized.RefreshToken == "refresh-1" && consent is { Host: "accounts.google.com" }
+        && consent.Query.Contains("code_challenge_method=S256") && consent.Query.Contains("drive.file")
+        && driveHandler.TokenForms[0].Contains("code=auth-code") && driveHandler.TokenForms[0].Contains("code_verifier="),
+        "Google 드라이브 연결 흐름 오류");
+
+    var first = await drive.RunIfDueAsync(forcedDb, authorized, new DateTime(2026, 9, 27, 9, 0, 0));
+    Require(first.Created && driveHandler.Uploaded.Keys.SequenceEqual(["live-pulse-20260927.sqlite.zip"])
+        && driveHandler.Trashed.SequenceEqual(["id-live-pulse-20260924.sqlite.zip"])
+        && driveHandler.FoldersCreated == 1,
+        "구글 드라이브 업로드·폴더 생성·최근 3일 유지 오류");
+    using (var zip = new ZipArchive(new MemoryStream(driveHandler.Uploaded["live-pulse-20260927.sqlite.zip"])))
+    {
+        var restoredCopy = Path.Combine(folder, "drive-restored.sqlite");
+        zip.Entries.Single().ExtractToFile(restoredCopy);
+        NativeStoreRecovery.Validate(restoredCopy);
+    }
+    var again = await drive.RunIfDueAsync(forcedDb, authorized, new DateTime(2026, 9, 27, 18, 0, 0));
+    Require(!again.Created && again.At is not null && driveHandler.Uploaded.Count == 1 && driveHandler.FoldersCreated == 1,
+        "구글 드라이브에 같은 날 백업을 다시 올림");
+    driveHandler.RevokedGrant = true;
+    try
+    {
+        await drive.RunIfDueAsync(forcedDb, authorized, new DateTime(2026, 9, 28, 9, 0, 0));
+        throw new InvalidOperationException("만료된 구글 드라이브 연결을 조용히 넘김");
+    }
+    catch (InvalidDataException) { }
+}
+
 var schedulerDb = Path.Combine(folder, "scheduler.sqlite");
 StoreImporter.Import(source, schedulerDb);
 var schedulerStore = new NativeMonitorStore(schedulerDb);
@@ -1259,4 +1314,76 @@ sealed class CloudFixtureHandler(IEnumerable<string> pages, Action? onResponse =
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         { Content = new StringContent(body) });
     }
+}
+
+// Minimal Drive v3 / OAuth token fake: one folder, files keyed by name, trash recorded.
+sealed class DriveFixtureHandler(IEnumerable<string> existing) : HttpMessageHandler
+{
+    private readonly List<string> files = [.. existing];
+    private string? folderId;
+    private string? pendingName;
+    public List<string> TokenForms { get; } = [];
+    public Dictionary<string, byte[]> Uploaded { get; } = [];
+    public List<string> Trashed { get; } = [];
+    public int FoldersCreated { get; private set; }
+    public bool RevokedGrant { get; set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var url = request.RequestUri!;
+        var query = Uri.UnescapeDataString(url.Query);
+        if (url.Host == "oauth2.googleapis.com" && url.AbsolutePath == "/token")
+        {
+            var form = await request.Content!.ReadAsStringAsync(cancellationToken);
+            TokenForms.Add(form);
+            if (RevokedGrant) return Json("""{"error":"invalid_grant"}""", HttpStatusCode.BadRequest);
+            return Json(form.Contains("grant_type=authorization_code")
+                ? """{"access_token":"a","refresh_token":"refresh-1"}""" : """{"access_token":"access-2"}""");
+        }
+        if (request.Headers.Authorization?.Parameter is not ("a" or "access-2"))
+            throw new InvalidOperationException("구글 드라이브 요청에 접근 토큰이 없음");
+        if (url.Host == "www.googleapis.com" && url.AbsolutePath == "/drive/v3/files" && request.Method == HttpMethod.Get)
+        {
+            if (query.Contains("mimeType='application/vnd.google-apps.folder'"))
+                return Json(folderId is null ? """{"files":[]}""" : $$"""{"files":[{"id":"{{folderId}}"}]}""");
+            if (folderId is null || !query.Contains($"'{folderId}' in parents")) throw new InvalidOperationException("다른 폴더 조회");
+            return Json(JsonSerializer.Serialize(new { files = files.Select(name =>
+                new { id = $"id-{name}", name, createdTime = "2026-09-27T00:00:00Z" }) }));
+        }
+        if (url.AbsolutePath == "/drive/v3/files" && request.Method == HttpMethod.Post)
+        {
+            FoldersCreated++;
+            folderId = "folder-1";
+            return Json("""{"id":"folder-1"}""");
+        }
+        if (url.AbsolutePath == "/upload/drive/v3/files" && request.Method == HttpMethod.Post)
+        {
+            using var metadata = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+            if (metadata.RootElement.GetProperty("parents")[0].GetString() != folderId) throw new InvalidOperationException("다른 폴더에 업로드");
+            pendingName = metadata.RootElement.GetProperty("name").GetString();
+            var response = new HttpResponseMessage(HttpStatusCode.OK);
+            response.Headers.Location = new Uri("https://www.googleapis.com/upload/drive/v3/files?upload_id=u1");
+            return response;
+        }
+        if (url.AbsolutePath == "/upload/drive/v3/files" && request.Method == HttpMethod.Put)
+        {
+            Uploaded[pendingName!] = await request.Content!.ReadAsByteArrayAsync(cancellationToken);
+            files.Add(pendingName!);
+            return Json($$"""{"id":"id-{{pendingName}}"}""");
+        }
+        var id = Uri.UnescapeDataString(url.AbsolutePath["/drive/v3/files/".Length..]);
+        var name = id["id-".Length..];
+        if (request.Method == HttpMethod.Get)
+            return Json($$"""{"size":"{{Uploaded[name].Length}}"}""");
+        if (request.Method == HttpMethod.Patch)
+        {
+            Trashed.Add(id);
+            files.Remove(name);
+            return Json($$"""{"id":"{{id}}"}""");
+        }
+        throw new InvalidOperationException($"예상하지 못한 구글 드라이브 요청 {request.Method} {url}");
+    }
+
+    private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK)
+        => new(status) { Content = new StringContent(body) };
 }

@@ -399,6 +399,12 @@ internal sealed class PrototypeWindow : Window
                 case "chooseBackupFolder":
                     result = _app.ChooseBackupFolder();
                     break;
+                case "connectGoogleDrive":
+                    result = await _app.ConnectGoogleDriveAsync();
+                    break;
+                case "disconnectGoogleDrive":
+                    result = await _app.DisconnectGoogleDriveAsync();
+                    break;
                 case "importCloudConnection":
                     result = _app.ImportCloudConnection();
                     break;
