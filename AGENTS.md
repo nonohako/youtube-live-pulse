@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`).
+Last maintained: 2026-09-28 (compact storage version 2; work continues on `main`).
 
 ## Current state
 
@@ -34,13 +34,14 @@ Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`
 - The 2026-08-02..09-16 subscriber gap was filled from Playboard daily totals at the user's request (xlsx-import semantics). Past counts cannot come from the public Data API.
 - Cloud sync must not store rows the imported archive already holds (`samples` with source `cloud`): a cursor replay after adding a channel once duplicated 653,823 rows (+160 MB). Those exact duplicates and the index duplicating the primary key were removed and the DB vacuumed on 2026-09-27 (434 MB to 249 MB).
 - Daily external backup: when `externalBackupFolder` is set (settings dialog, folder picker via the `chooseBackupFolder` bridge action), `NativeExternalBackup` zips a quick-checked copy of `.bak.1` to `live-pulse-YYYYMMDD.sqlite.zip` once per local day (checked every 10 minutes, off the UI thread) and keeps the newest three such files; it never touches other files. Intended target: a Google Drive for desktop folder (not installed on 2026-09-27). Status shows in settings via `app.externalBackup`.
+- Removing a channel in the app deletes everything this PC stores for it in one transaction (user request 2026-09-28): registration, tracking, snapshot, events (both event lists), video metadata and every observation series, including its imported Electron archive. The confirm dialog says so. Server data is untouched; re-adding starts fresh (first check is a silent baseline). Older removals kept data behind `runtime_removed_channels`; that marker is still honored.
 - Real observations recorded by another runtime may be merged only with exact-instant deduplication (done once for Electron's 2026-09-26/27 run: 11 subscriber and 2,321 video samples).
 
 ## Monitoring and UI state invariants
 
 - `NativeMonitorScheduler` reads channel IDs/settings each sweep, starts after 250 ms, runs channels sequentially and contains channel failures (recorded once per distinct message as an `error` event, like Electron). `Wake()` ends the current wait after a channel add, interval change or API key change.
 - `monitor.running` means a sweep is in progress; `monitor.nextCheckAt` comes from the scheduler; the channel being checked shows `checking`. Sweep start/finish pushes state and updates the tray tooltip (live count).
-- Events carry `id`/`at`, are sorted by time (newest first), and removed channels' events are hidden. A new-video event displays the cloud collector's recorded `publishedAt` (detection time kept as `detectedAt`); legacy events without `at` fall back to local publish metadata. Never invent a time. Channel name/avatar come from the latest check.
+- Events carry `id`/`at`, are sorted by time (newest first). A new-video event displays the cloud collector's recorded `publishedAt` (detection time kept as `detectedAt`); legacy events without `at` fall back to local publish metadata. Never invent a time. Channel name/avatar come from the latest check.
 - Subscriber/view history is cloud-first: with `recordLocalStatistics` off (the default when missing) the PC records subscriber samples and watch-page view counts only for a channel without cloud samples newer than 10 minutes (Fly/collector/sync failure, channel not tracked by the server, cloud not configured). The settings switch turns local recording on permanently. Live/upcoming/new-video/post detection always stays local.
 - An unseen video or post is alerted as new only if its recorded publish time (cloud, local metadata or RSS) is within 2 days, or, without one, its relative text is not clearly older ("3일 전", weeks, months, years). Old items resurfacing in lists are marked seen silently.
 - The YouTube RSS feed often answers 404/500 (about 20 of 24 requests on 2026-09-27) while channel pages work; its failure is shown only if `/videos` also failed. The Fly collector uses the Data API, not RSS.

@@ -447,18 +447,61 @@ public sealed class NativeMonitorStore
         transaction.Commit();
     }
 
+    // Removing a channel deletes everything stored for it on this PC (user request 2026-09-28):
+    // registration, tracking, snapshot, events, video metadata and every observation series.
+    // Cloud data on the server is untouched; re-adding the channel starts fresh.
     public void RemoveChannel(string channelId)
     {
         _ = YouTubeChannelInput.Normalize(channelId);
         using var connection = Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT OR IGNORE INTO runtime_removed_channels(id)
-            SELECT id FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels) WHERE id=$id
-            """;
-        command.Parameters.AddWithValue("$id", channelId);
-        if (command.ExecuteNonQuery() == 0)
-            throw new KeyNotFoundException("등록된 채널을 찾지 못했습니다.");
+        using var transaction = connection.BeginTransaction();
+        void Execute(string sql)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = sql;
+            command.Parameters.AddWithValue("$id", channelId);
+            command.ExecuteNonQuery();
+        }
+        using (var check = connection.CreateCommand())
+        {
+            check.Transaction = transaction;
+            check.CommandText = """
+                SELECT 1 FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels)
+                WHERE id=$id AND id NOT IN (SELECT id FROM runtime_removed_channels)
+                """;
+            check.Parameters.AddWithValue("$id", channelId);
+            if (check.ExecuteScalar() is null) throw new KeyNotFoundException("등록된 채널을 찾지 못했습니다.");
+        }
+        Execute("DELETE FROM observations WHERE series IN (SELECT id FROM series_keys WHERE channel_id=$id)");
+        Execute("DELETE FROM series_keys WHERE channel_id=$id");
+        foreach (var table in new[] { "channels", "runtime_channels", "runtime_removed_channels", "cloud_channels" })
+            if (NativeObservations.TableExists(connection, table, transaction)) Execute($"DELETE FROM {table} WHERE id=$id");
+        foreach (var table in new[] { "runtime_tracking", "runtime_snapshots", "runtime_video_metadata",
+                     "runtime_video_stats_state", "runtime_cloud_videos", "series" })
+            if (NativeObservations.TableExists(connection, table, transaction)) Execute($"DELETE FROM {table} WHERE channel_id=$id");
+        // Events written before 2026-09-27 use PascalCase keys.
+        Execute("""
+            DELETE FROM runtime_events WHERE $id IN
+              (json_extract(payload_json,'$.channelId'), json_extract(payload_json,'$.ChannelId'))
+            """);
+        using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT value FROM meta WHERE key='events'";
+            if (read.ExecuteScalar() is string json && JsonNode.Parse(json) is JsonArray imported)
+            {
+                var kept = new JsonArray(imported
+                    .Where(item => (string?)(item as JsonObject)?["channelId"] != channelId)
+                    .Select(item => item?.DeepClone()).ToArray());
+                using var write = connection.CreateCommand();
+                write.Transaction = transaction;
+                write.CommandText = "UPDATE meta SET value=$value WHERE key='events'";
+                write.Parameters.AddWithValue("$value", kept.ToJsonString());
+                write.ExecuteNonQuery();
+            }
+        }
+        transaction.Commit();
     }
 
     public void UpdateSettings(JsonElement partial)

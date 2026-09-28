@@ -1,6 +1,6 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` and `native/README.md`. Earlier history (Electron releases v1.x, the 2026-09-22 data recovery, the staged C# migration, the Codex MSIX incident) is in Git history up to commit 94d53df.
 
@@ -52,6 +52,11 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 21. **Hover kept across re-renders (user report).** After a wheel step the readout fell back to the idle hint until the mouse moved. The chart now remembers the last cursor position over it and re-applies the hover after any re-render (zoom or background refresh); leaving the chart clears it.
 
+## 2026-09-28
+
+- **Channel removal deletes its data** (user request): `NativeMonitorStore.RemoveChannel` now purges the channel's rows instead of only marking it removed; the renderer confirm warns that it cannot be undone.
+- **Old data cleanup** on the personal DB at the user's request: the five time-less pre-2026-09-27 `runtime_events` rows (three were false new-video alerts for 미나미 June/July videos) and all local data of the removed test channel Lofi Girl `UCSJ4gkVC6NrvII8umztf0Ow` (379 observations, tracking, snapshot, video metadata, one live event).
+
 ## Verification (last runtime change)
 
 CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NATIVE_STARTUP_TESTS_PASSED, Node 36/36 (forecast tests added with the chart change), isolated WebView smoke (actions, refresh, minimize/restore, close); Release build with 0 warnings. The published app started on real data, backed up within seconds, stopped gracefully with `--quit`, relaunched, swept both channels and synced cloud data without errors. After the cloud-first change no local subscriber/view rows were written while cloud samples were current, and Fly logs showed a collection every minute with `error: null`.
@@ -60,7 +65,6 @@ CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NA
 
 - A real live-broadcast Chrome open and balloon click on the native app has not been observed yet.
 - The Data API path is covered by fixtures only (no key is configured).
-- Five events created before 2026-09-27 have no stored time; the UI shows the cloud (or local) publish time for them. Three of them were false "new video" alerts for June/July videos; the 2-day rule prevents new ones.
 - The cloud collector excludes live/upcoming items and community posts, and its `seenAt` is a last-seen, not first-seen, time.
 - The .NET 10 SDK lives in `%TEMP%\livepulse-dotnet10`; reinstall it if a temp cleaner removes it.
 - CHZZK support is still only planned (see `AGENTS.md`).

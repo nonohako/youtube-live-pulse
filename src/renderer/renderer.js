@@ -253,7 +253,7 @@ function bindEvents() {
     const removeButton = event.target.closest('[data-remove-channel]');
     if (removeButton) {
       const channel = appState?.channels.find((item) => item.id === removeButton.dataset.removeChannel);
-      if (window.confirm(`"${channel?.title || '이 채널'}"을 목록에서 삭제할까요?`)) {
+      if (window.confirm(`"${channel?.title || '이 채널'}"을 삭제할까요? 이 PC에 저장된 구독자·조회수 기록과 알림도 함께 지워지며 되돌릴 수 없어요.`)) {
         await safely(() => window.livePulse.removeChannel(removeButton.dataset.removeChannel));
       }
       return;

@@ -521,7 +521,7 @@ cloudStore.RemoveChannel(cloudExtraId);
 Require(cloudStore.ReadPollConfiguration().ChannelIds.Count == 1
     && new NativeStateReader(cloudDb).Read()["channels"]!.AsArray().Count == 1
     && ImportedCount(cloudDb) == 2,
-    "채널 제거가 화면·감시에서 빠지지 않거나 이전 기록을 변경함");
+    "채널 제거가 화면·감시에서 빠지지 않거나 다른 채널 기록을 변경함");
 using (var backup = new SqliteConnection(new SqliteConnectionStringBuilder
 { DataSource = cloudDb + ".bak.1", Mode = SqliteOpenMode.ReadOnly }.ToString()))
 {
@@ -1051,6 +1051,24 @@ using (var cancellation = new CancellationTokenSource())
     schedulerStore.RemoveChannel(channelId);
     Require(new NativeStateReader(schedulerDb).Read()["events"]!.AsArray()
         .All(item => (string?)item!["channelId"] != channelId), "삭제한 채널의 알림이 남음");
+    using (var purged = new SqliteConnection(new SqliteConnectionStringBuilder
+               { DataSource = schedulerDb, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
+    {
+        purged.Open();
+        using var leftover = purged.CreateCommand();
+        leftover.CommandText = """
+            SELECT (SELECT count(*) FROM channels WHERE id=$id) + (SELECT count(*) FROM runtime_channels WHERE id=$id)
+              + (SELECT count(*) FROM runtime_removed_channels WHERE id=$id)
+              + (SELECT count(*) FROM runtime_tracking WHERE channel_id=$id)
+              + (SELECT count(*) FROM runtime_snapshots WHERE channel_id=$id)
+              + (SELECT count(*) FROM series_keys WHERE channel_id=$id)
+              + (SELECT count(*) FROM runtime_events WHERE json_extract(payload_json,'$.channelId')=$id)
+              + (SELECT count(*) FROM meta, json_each(meta.value) e
+                 WHERE meta.key='events' AND json_extract(e.value,'$.channelId')=$id)
+            """;
+        leftover.Parameters.AddWithValue("$id", channelId);
+        Require((long)leftover.ExecuteScalar()! == 0, "삭제한 채널의 저장 데이터가 DB에 남음");
+    }
 }
 using (var cancellation = new CancellationTokenSource())
 {

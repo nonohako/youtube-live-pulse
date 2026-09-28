@@ -192,7 +192,7 @@ public static class NativeObservations
         return command.ExecuteScalar() is not null;
     }
 
-    private static bool TableExists(SqliteConnection connection, string name, SqliteTransaction? transaction = null)
+    internal static bool TableExists(SqliteConnection connection, string name, SqliteTransaction? transaction = null)
     {
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
