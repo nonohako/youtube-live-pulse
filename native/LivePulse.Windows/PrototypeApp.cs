@@ -629,6 +629,9 @@ internal sealed class PrototypeApp : System.Windows.Application
             vacuum.ExecuteNonQuery();
             Console.WriteLine($"NATIVE_STORAGE_COMPACTED ms={timer.ElapsedMilliseconds} bytes={new FileInfo(database).Length}");
         }
+        // Channels removed before removal deleted their data (e.g. Lofi Girl, 2026-09-27).
+        if (store.PurgeRemovedChannels() is > 0 and var purged)
+            Console.WriteLine($"NATIVE_REMOVED_CHANNELS_PURGED count={purged}");
         _monitorStore = store;
         _snapshotClient = new YouTubeSnapshotClient { ApiKey = store.ReadApiKey() };
         _monitorBackup = new NativeBackupCheckpoint(database);

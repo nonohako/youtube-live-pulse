@@ -154,6 +154,19 @@ internal sealed class NativeCloudArchive
         using var transaction = connection.BeginTransaction();
         if (ReadCursor(connection, configuration.Endpoint.GetLeftPart(UriPartial.Authority), transaction) != configuration.Cursor)
             throw new InvalidOperationException("클라우드 커서가 다른 작업에서 변경됐습니다.");
+        // A channel removed while this page downloaded must not get its data back.
+        var active = new HashSet<string>(StringComparer.Ordinal);
+        using (var channels = connection.CreateCommand())
+        {
+            channels.Transaction = transaction;
+            channels.CommandText = """
+                SELECT id FROM (SELECT id FROM channels UNION ALL SELECT id FROM runtime_channels)
+                WHERE id NOT IN (SELECT id FROM runtime_removed_channels)
+                """;
+            using var reader = channels.ExecuteReader();
+            while (reader.Read()) active.Add(reader.GetString(0));
+        }
+        observations.RemoveAll(item => !active.Contains(item.Channel));
         {
             // Observations go to 'runtime-cloud' series. Rows the imported Electron archive already
             // holds are skipped (a cursor replay once duplicated 650K rows), and views of videos older
@@ -214,7 +227,7 @@ internal sealed class NativeCloudArchive
         if (root.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object)
             foreach (var channel in metadata.EnumerateObject())
             {
-                if (!configuration.ChannelIds.Contains(channel.Name) || channel.Value.ValueKind != JsonValueKind.Object
+                if (!active.Contains(channel.Name) || channel.Value.ValueKind != JsonValueKind.Object
                     || !channel.Value.TryGetProperty("videos", out var videos) || videos.ValueKind != JsonValueKind.Object) continue;
                 foreach (var video in videos.EnumerateObject())
                 {

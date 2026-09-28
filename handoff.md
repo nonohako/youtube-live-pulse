@@ -7,10 +7,15 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 ## Current state
 
 - **Branch:** all work happens on `main`. The C# migration (`codex/csharp-webview2-migration`, 26 commits) was merged by PR #12 on 2026-09-27 (merge commit `1782103`). The old branch is kept on GitHub but is no longer used.
-- **App:** the personal app is the C# tray app, running portably from this folder (`app/LivePulse.exe` + `data/`). It starts from the desktop shortcut **라이브 펄스**; the Windows `라이브 펄스` Run value points to `app\LivePulse.exe --hidden`. Rebuild with `native/publish-portable.ps1` after runtime changes.
+- **App:** the personal app is the C# tray app, running portably from this folder (`app/LivePulse.exe` + `data/`). It starts from the desktop shortcut **라이브 펄스**; the Windows `라이브 펄스` Run value and the `라이브 펄스` logon task (Task Scheduler) both run `app\LivePulse.exe --hidden`. Rebuild with `native/publish-portable.ps1` after runtime changes.
 - **Electron:** fully retired. The installed copy was uninstalled; its source, scripts, Electron-only tests, `package-lock.json`, the release workflow and `docs/migration-csharp-webview2.md` were removed. `package.json` only runs `node --test` (renderer math and the cloud collector).
 - **Cloud:** the Fly collector writes subscriber/view statistics to Upstash every minute; the app syncs them and treats them as the primary history (see "Cloud-first records" below).
 - **Agent tooling:** Claude Code CLI 2.1.283 is installed at `%USERPROFILE%\.local\bin\claude.exe` (added to the user PATH). The `upstash-redis` MCP server in `.mcp.json` is connected with the read-only token and returned the `live-pulse:v1:metadata` and `live-pulse:v1:samples` keys. `.git` is owned by the Codex sandbox account, so this folder was added to the user's global git `safe.directory`.
+
+## What was done on 2026-09-28
+
+1. **Channel removal deletes data (user request).** Removing a channel in the app now deletes everything stored for it (tracking, snapshots, events, metadata, every subscriber/view series), not just hides it. Cloud sync and failure recording skip a channel removed mid-operation. Startup purges channels removed by older builds; this cleared the leftover Lofi Girl (`UCSJ4gkVC6NrvII8umztf0Ow`) rows (379 local observations). A copy of the DB before the purge is in `data/legacy/`. At the user's request the five legacy `runtime_events` rows without `at` (PascalCase payloads) were then deleted with the app stopped (copy in `data/legacy/live-pulse-before-event-delete-20260928.sqlite`, `integrity_check` ok).
+2. **Immediate start at login (user report).** The app did not appear after boot although the Run value, the setting and the logs were all fine: Windows starts Run entries one at a time (about 15 on this PC) and reached `LivePulse.exe --hidden` 7.5 minutes after login, after the user had opened it by hand. With `startAtLogin` on, the app now also registers a per-user logon task `라이브 펄스` in Task Scheduler (`native/LivePulse.Windows/LoginTask.cs`), which starts at once. The Run value is kept as a fallback; the second start exits through the single-instance mutex. Turning the setting off removes both.
 
 ## What was done on 2026-09-27
 
@@ -64,7 +69,3 @@ CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NA
 - The cloud collector excludes live/upcoming items and community posts, and its `seenAt` is a last-seen, not first-seen, time.
 - The .NET 10 SDK lives in `%TEMP%\livepulse-dotnet10`; reinstall it if a temp cleaner removes it.
 - CHZZK support is still only planned (see `AGENTS.md`).
-
-## What was done on 2026-09-28
-
-1. **Immediate start at login (user report).** The app did not appear after boot although the Run value, the setting and the logs were all fine: Windows starts Run entries one at a time (about 15 on this PC) and reached `LivePulse.exe --hidden` 7.5 minutes after login, after the user had opened it by hand. With `startAtLogin` on, the app now also registers a per-user logon task `라이브 펄스` in Task Scheduler (`native/LivePulse.Windows/LoginTask.cs`), which starts at once. The Run value is kept as a fallback; the second start exits through the single-instance mutex. Turning the setting off removes both.

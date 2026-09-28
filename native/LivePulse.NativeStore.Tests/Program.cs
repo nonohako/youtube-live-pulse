@@ -1048,9 +1048,28 @@ using (var cancellation = new CancellationTokenSource())
     schedulerStore.RecordChannelFailure(channelId, "fixture network failure", DateTimeOffset.UtcNow);
     Require(new NativeStateReader(schedulerDb).Read()["events"]!.AsArray()
         .Count(item => (string?)item!["type"] == "error") == 1, "같은 오류 알림을 반복 기록함");
+    Require(ChannelRows(schedulerDb, channelId) > 0, "삭제 전 채널 데이터가 없음");
     schedulerStore.RemoveChannel(channelId);
     Require(new NativeStateReader(schedulerDb).Read()["events"]!.AsArray()
         .All(item => (string?)item!["channelId"] != channelId), "삭제한 채널의 알림이 남음");
+    Require(ChannelRows(schedulerDb, channelId) == 0, "삭제한 채널의 기록·추적·이벤트 데이터가 DB에 남음");
+    schedulerStore.RecordChannelFailure(channelId, "late failure", DateTimeOffset.UtcNow);
+    Require(ChannelRows(schedulerDb, channelId) == 0, "삭제 중이던 채널의 실패 알림이 고아 행으로 남음");
+    // Re-adding starts fresh; a legacy removal marker (before removal deleted data) is purged.
+    schedulerStore.AddChannel(YouTubeChannelInput.Normalize(channelId));
+    Require(schedulerStore.ReadPollConfiguration().ChannelIds.Contains(channelId), "삭제 후 다시 추가한 채널이 감시되지 않음");
+    using (var legacy = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = schedulerDb, Pooling = false }.ToString()))
+    {
+        legacy.Open();
+        using var marker = legacy.CreateCommand();
+        marker.CommandText = "INSERT INTO runtime_removed_channels(id) VALUES($id)";
+        marker.Parameters.AddWithValue("$id", channelId);
+        marker.ExecuteNonQuery();
+    }
+    Require(schedulerStore.PurgeRemovedChannels() == 1 && ChannelRows(schedulerDb, channelId) == 0
+        && schedulerStore.PurgeRemovedChannels() == 0, "이전에 삭제한 채널의 남은 데이터를 정리하지 못함");
+    schedulerStore.AddChannel(YouTubeChannelInput.Normalize(channelId));
 }
 using (var cancellation = new CancellationTokenSource())
 {
@@ -1133,6 +1152,28 @@ using (var writer = new SqliteConnection(new SqliteConnectionStringBuilder
     begin.ExecuteNonQuery();
 }
 ExpectFailure(() => NativeStoreRecovery.Validate(crashedDb), "읽기 전용 검증이 hot journal DB를 통과함");
+static long ChannelRows(string database, string channelId)
+{
+    using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+        { DataSource = database, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+    connection.Open();
+    using var command = connection.CreateCommand();
+    command.CommandText = """
+        SELECT (SELECT count(*) FROM observations WHERE series IN (SELECT id FROM series_keys WHERE channel_id=$id))
+          + (SELECT count(*) FROM series_keys WHERE channel_id=$id) + (SELECT count(*) FROM series WHERE channel_id=$id)
+          + (SELECT count(*) FROM channels WHERE id=$id) + (SELECT count(*) FROM runtime_channels WHERE id=$id)
+          + (SELECT count(*) FROM runtime_removed_channels WHERE id=$id)
+          + (SELECT count(*) FROM runtime_tracking WHERE channel_id=$id) + (SELECT count(*) FROM runtime_snapshots WHERE channel_id=$id)
+          + (SELECT count(*) FROM runtime_video_metadata WHERE channel_id=$id)
+          + (SELECT count(*) FROM runtime_video_stats_state WHERE channel_id=$id)
+          + (SELECT count(*) FROM runtime_cloud_videos WHERE channel_id=$id)
+          + (SELECT count(*) FROM runtime_events WHERE payload_json LIKE '%' || $id || '%')
+          + (SELECT count(*) FROM meta WHERE key='events' AND value LIKE '%' || $id || '%')
+        """;
+    command.Parameters.AddWithValue("$id", channelId);
+    return (long)command.ExecuteScalar()!;
+}
+
 static long CountSum(string database)
 {
     using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
