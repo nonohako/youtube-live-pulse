@@ -318,6 +318,12 @@ internal sealed class PrototypeApp : System.Windows.Application
     {
         if (_stateReader is null || _personal is null) return;
         var enabled = _monitorStore!.ReadStartAtLogin();
+        ApplyRunEntry(enabled);
+        LoginTask.Apply(enabled, Environment.ProcessPath!);
+    }
+
+    private void ApplyRunEntry(bool enabled)
+    {
         using var key = Registry.CurrentUser.CreateSubKey(RunKeyPath, writable: true)
             ?? throw new IOException("Windows 시작 항목을 열 수 없습니다.");
         var current = key.GetValue(RunValueName) as string;
@@ -325,7 +331,7 @@ internal sealed class PrototypeApp : System.Windows.Application
         if (current is not null && !IsOwnRunCommand(current)) return;
         if (current is not null && IsElectronRunCommand(current))
         {
-            var preserved = Path.Combine(_personal.DataDirectory, "electron-startup-command.txt");
+            var preserved = Path.Combine(_personal!.DataDirectory, "electron-startup-command.txt");
             if (!File.Exists(preserved)) File.WriteAllText(preserved, current);
         }
         var nativeCommand = RunCommand(Environment.ProcessPath!);

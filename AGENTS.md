@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`).
+Last maintained: 2026-09-28 (logon task for immediate start at login; work continues on `main`).
 
 ## Current state
 
@@ -17,7 +17,7 @@ Last maintained: 2026-09-27 (compact storage version 2; work continues on `main`
 
 - `native/publish-portable.ps1` publishes a framework-dependent build (about 5 MB; needs the installed .NET 10 Desktop Runtime x64, which the script checks) to `<repo>/app` (with the `LivePulse.portable` marker), creates the desktop shortcut `라이브 펄스.lnk`, and removes intermediate `native/*/bin|obj`. It first asks a running app to quit with `app\LivePulse.exe --quit` (graceful: finishes the current write/backup). `-FromJson PATH` performs first setup from an Electron `live-pulse.json` (the final one is archived in `data/legacy/`).
 - All personal data lives in `<repo>/data`: `live-pulse.sqlite`, `.bak.1/.bak.2`, the WebView2 profile, `startup-error.log`/`runtime-error.log`, and `legacy/` (compressed final Electron JSON, preserved Electron Run command). `app/` and `data/` are gitignored; rebuilds never overwrite `data/`.
-- Paths are relative to the executable, so the folder can move (e.g. to D:). On launch the app rewrites its own `라이브 펄스` Run value and a desktop shortcut (`라이브 펄스.lnk` or legacy `라이브 펄스 (네이티브).lnk`) that targets a LivePulse executable. Never overwrite an unrelated Run value or shortcut.
+- Paths are relative to the executable, so the folder can move (e.g. to D:). On launch the app rewrites its own `라이브 펄스` Run value and a desktop shortcut (`라이브 펄스.lnk` or legacy `라이브 펄스 (네이티브).lnk`) that targets a LivePulse executable. Never overwrite an unrelated Run value or shortcut. With `startAtLogin` on, the app also registers a per-user Task Scheduler logon task `라이브 펄스` (`LoginTask`, no admin, no 72-hour limit, runs on battery) because Windows starts Run entries one by one after login (7.5 minutes late on 2026-09-28); the Run value stays as a fallback and the single-instance mutex ignores the second start. Never replace or delete a task whose action is not a LivePulse executable.
 - Only a marked build with no arguments or only `--hidden` opens personal data. Missing `data/` or an unrecoverable DB stops visibly; never fall back to fixture data. Unmarked development builds keep fixture/isolated behavior (`--isolated-monitor-db` needs an ignored `artifacts/migration-isolated-data/*.probe.sqlite`).
 - A per-user mutex and events route repeated launches to the existing window and `--quit` to a graceful stop. The `.native-lock` DB lease is the writer guard.
 - The .NET 10 SDK (10.0.401) is installed in `C:\Program Files\dotnet` since 2026-09-27; the publish script prefers it over the old `%TEMP%\livepulse-dotnet10` copy (a temp cleaner may remove it; reinstall with `winget install Microsoft.DotNet.SDK.10` or pass `-Dotnet`).

@@ -1,6 +1,6 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` and `native/README.md`. Earlier history (Electron releases v1.x, the 2026-09-22 data recovery, the staged C# migration, the Codex MSIX incident) is in Git history up to commit 94d53df.
 
@@ -64,3 +64,7 @@ CORE_TESTS_PASSED, NATIVE_STORE_TESTS_PASSED, DataMigration SELF_TEST_PASSED, NA
 - The cloud collector excludes live/upcoming items and community posts, and its `seenAt` is a last-seen, not first-seen, time.
 - The .NET 10 SDK lives in `%TEMP%\livepulse-dotnet10`; reinstall it if a temp cleaner removes it.
 - CHZZK support is still only planned (see `AGENTS.md`).
+
+## What was done on 2026-09-28
+
+1. **Immediate start at login (user report).** The app did not appear after boot although the Run value, the setting and the logs were all fine: Windows starts Run entries one at a time (about 15 on this PC) and reached `LivePulse.exe --hidden` 7.5 minutes after login, after the user had opened it by hand. With `startAtLogin` on, the app now also registers a per-user logon task `라이브 펄스` in Task Scheduler (`native/LivePulse.Windows/LoginTask.cs`), which starts at once. The Run value is kept as a fallback; the second start exits through the single-instance mutex. Turning the setting off removes both.

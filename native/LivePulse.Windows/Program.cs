@@ -90,6 +90,9 @@ internal static class Program
                 || PrototypeApp.IsOwnRunCommand(@"""C:\Other\Tool.exe"" --hidden")
                 || PrototypeApp.IsOwnRunCommand("LivePulse.exe"))
                 throw new InvalidOperationException("Windows login entry ownership regression");
+            var executable = Path.Combine(root, "유튜브 폴더", "app", "LivePulse.exe");
+            if (LoginTask.ReadCommand(LoginTask.BuildXml(executable, @"PC\사용자")) != PrototypeApp.RunCommand(executable))
+                throw new InvalidOperationException("Windows logon task command regression");
         }
         finally { Directory.Delete(root, recursive: true); }
         Console.WriteLine("NATIVE_STARTUP_TESTS_PASSED");
