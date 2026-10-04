@@ -134,6 +134,7 @@ var channelId = "UCtKtCiaWRz-d3EZn2xd1mdA";
 var liveFailure = false;
 var allFailure = false;
 var feedFailure = false;
+var premiereLive = false;
 using var handler = new FixtureHandler(request =>
 {
     if (allFailure) return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
@@ -143,6 +144,8 @@ using var handler = new FixtureHandler(request =>
     if (Uri.UnescapeDataString(path) == "/@sample.channel")
         return new HttpResponseMessage(HttpStatusCode.OK)
         { Content = new StringContent($"<script>{{\"externalId\":\"{channelId}\"}}</script>") };
+    if (premiereLive && path == "/watch" && request.RequestUri.Query == "?v=abcdefghijk")
+        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Player("abcdefghijk", true, false)) };
     if (path.EndsWith("/live", StringComparison.Ordinal))
         return liveFailure ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
             : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Player("abcdefghijk", false, true)) };
@@ -168,6 +171,10 @@ Require(snapshot.Upcoming is [{ Id: "lmnopqrstuv" }], "스냅샷 미래 예약 �
 Require(snapshot.RecentVideos.Select(item => item.Id).SequenceEqual(new[] { "12345678901", "mFM2hP5LEhM" }),
     "스냅샷 RSS/Shorts interleave 또는 라이브 제외 오류");
 Require(snapshot.LatestPost?.Id == "Ugkx-post" && snapshot.Warnings.Count == 0, "게시물 또는 성공 경고 오류");
+premiereLive = true;
+var premiere = await client.FetchChannelSnapshotAsync(channelId);
+Require(premiere.Live?.Id == "abcdefghijk", "/live에 없는 진행 중 최초공개를 놓침");
+premiereLive = false;
 feedFailure = true;
 var feedDown = await client.FetchChannelSnapshotAsync(channelId);
 Require(feedDown.Warnings.Count == 0 && feedDown.RecentVideos.Any(item => item.Id == "mFM2hP5LEhM"),

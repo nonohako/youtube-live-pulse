@@ -1,6 +1,6 @@
 # Agent Guide
 
-Last maintained: 2026-09-28 (channel removal deletes its data; logon task for immediate start at login; direct Google Drive backup; work continues on `main`).
+Last maintained: 2026-10-04 (in-progress premieres open like live broadcasts; channel removal deletes its data; logon task for immediate start at login; direct Google Drive backup; work continues on `main`).
 
 ## Current state
 
@@ -94,6 +94,7 @@ Also run `LivePulse.exe --startup-self-test` and, for UI changes, the isolated W
 - Regular-video notification candidates must exclude every item currently classified as live or upcoming, even when the same ID appears in RSS, `/videos` and `/streams`.
 - When `/live` responds successfully, require its player response to confirm the current live before opening; do not trust a possibly stale list badge over a successful non-live player result. A list live item is only a network-failure fallback when `/live` itself could not be fetched.
 - Community-post detection is experimental because the official Data API does not expose community posts.
+- A premiere in progress ("최초공개", list badge "Premieres 동영상" with the LIVE badge style) is not served by the channel `/live` page, so `/live` answers non-live while `/streams` and `/videos` list it as live (found 2026-10-04 on `8tmaJYDMp5w`). When `/live` succeeded without a live player and a list item has a LIVE badge, fetch that video's own watch page and trust it only if `ParsePlayer` reports `isLiveNow` for the same ID (`VerifyListedLiveAsync`). A stale badge on a finished broadcast still fails this check. Regression test: "진행 중 최초공개".
 - A player item is upcoming only when a real future `startTimestamp` exists.
 - A stream-list item is upcoming only when a real start timestamp exists and that timestamp is in the future. An upcoming-looking badge without a time is ambiguous and must not auto-open.
 - Missing or past timestamps must never be treated as `DateTimeOffset.MaxValue` or otherwise coerced into the future.

@@ -127,8 +127,11 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
             || now - cached.At >= OfficialInterval || now < cached.At)
             ? YouTubeDataApi.FetchChannelAsync(http, channelId, key, cancellationToken) : null;
         await Task.WhenAll(streamsTask, videosTask, shortsTask, postsTask, feedTask, liveTask);
-        var snapshot = Compose(await streamsTask, await videosTask, await shortsTask, await postsTask,
-            await feedTask, await liveTask);
+        var streams = await streamsTask;
+        var videos = await videosTask;
+        var live = await liveTask;
+        var snapshot = Compose(streams, videos, await shortsTask, await postsTask, await feedTask, live,
+            await VerifyListedLiveAsync(streams, videos, live, now, cancellationToken));
         if (key.Length == 0) return snapshot;
         var warnings = snapshot.Warnings.ToList();
         if (officialTask is not null)
@@ -182,8 +185,22 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
             page.Success ? YouTubeBroadcast.ParsePlayer(page.Body, page.FinalUrl, now) : null);
     }
 
+    // A premiere in progress is not the channel's /live stream, so /live answers "not live" while the
+    // video lists show a LIVE badge. Trust the badge only after that video's own player says it is live now;
+    // a stale badge on a finished broadcast still fails this check.
+    private async Task<Broadcast?> VerifyListedLiveAsync(VideoPage streams, VideoPage videos, LivePage live,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        if (!live.Success || live.Player?.IsLive == true) return null;
+        var listed = streams.Videos.Concat(videos.Videos).FirstOrDefault(item => item.IsLive);
+        if (listed is null) return null;
+        var page = await FetchAsync(listed.Url, cancellationToken);
+        var player = page.Success ? YouTubeBroadcast.ParsePlayer(page.Body, page.FinalUrl, now) : null;
+        return player is { IsLive: true } && player.Id == listed.Id ? player : null;
+    }
+
     private static YouTubeSnapshot Compose(VideoPage streams, VideoPage videos, VideoPage shorts,
-        PostsPage posts, FeedPage feed, LivePage live)
+        PostsPage posts, FeedPage feed, LivePage live, Broadcast? verifiedListedLive = null)
     {
         var metadata = (streams.HasInitialData ? streams.Metadata : videos.HasInitialData ? videos.Metadata
             : streams.Success ? streams.Metadata : videos.Metadata)
@@ -191,7 +208,7 @@ public sealed class YouTubeSnapshotClient : IYouTubeSnapshotSource, IVideoStatis
         var listedVideos = streams.Videos.Concat(videos.Videos).DistinctBy(item => item.Id, StringComparer.Ordinal).ToArray();
         var pageLive = listedVideos.FirstOrDefault(item => item.IsLive);
         var currentLive = YouTubeBroadcast.SelectCurrentLive(live.Player,
-            pageLive is null ? null : AsBroadcast(pageLive), live.Success);
+            pageLive is null ? null : AsBroadcast(pageLive), live.Success) ?? verifiedListedLive;
         var upcoming = listedVideos.Where(item => item.IsUpcoming && item.Id != currentLive?.Id)
             .Select(AsBroadcast).ToList();
         if (live.Player?.IsUpcoming == true && live.Player.Id != currentLive?.Id) upcoming.Add(live.Player);

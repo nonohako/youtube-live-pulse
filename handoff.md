@@ -12,6 +12,10 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 - **Cloud:** the Fly collector writes subscriber/view statistics to Upstash every minute; the app syncs them and treats them as the primary history (see "Cloud-first records" below).
 - **Agent tooling:** Claude Code CLI 2.1.283 is installed at `%USERPROFILE%\.local\bin\claude.exe` (added to the user PATH). The `upstash-redis` MCP server in `.mcp.json` is connected with the read-only token and returned the `live-pulse:v1:metadata` and `live-pulse:v1:samples` keys. `.git` is owned by the Codex sandbox account, so this folder was added to the user's global git `safe.directory`.
 
+## What was done on 2026-10-04
+
+- **In-progress premieres now pop up (user report).** A premiere already playing on `안녕하세요원이입니다잘부탁드립니다` (`8tmaJYDMp5w`) was ignored: the channel `/live` page does not serve premieres, so the app trusted that "not live" answer over the list's LIVE badge. `YouTubeSnapshotClient.VerifyListedLiveAsync` now fetches the badged video's own watch page and treats it as the current live only when its player says `isLiveNow`. Real-channel diagnostic now returns that video as `liveId`; Core test added.
+
 ## What was done on 2026-09-28
 
 1. **Channel removal deletes data (user request).** Removing a channel in the app now deletes everything stored for it (tracking, snapshots, events, metadata, every subscriber/view series), not just hides it. Cloud sync and failure recording skip a channel removed mid-operation. Startup purges channels removed by older builds; this cleared the leftover Lofi Girl (`UCSJ4gkVC6NrvII8umztf0Ow`) rows (379 local observations). A copy of the DB before the purge is in `data/legacy/`. At the user's request the five legacy `runtime_events` rows without `at` (PascalCase payloads) were then deleted with the app stopped (copy in `data/legacy/live-pulse-before-event-delete-20260928.sqlite`, `integrity_check` ok).
