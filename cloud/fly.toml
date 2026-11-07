@@ -2,6 +2,7 @@ app = "live-pulse-stats-nonohako"
 primary_region = "nrt"
 kill_signal = "SIGTERM"
 kill_timeout = "20s"
+swap_size_mb = 256
 
 [build]
   dockerfile = "Dockerfile"
@@ -27,4 +28,4 @@ kill_timeout = "20s"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory = "512mb"
+  memory = "256mb"

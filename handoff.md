@@ -1,6 +1,6 @@
 # Live Pulse handoff
 
-Last updated: 2026-09-28
+Last updated: 2026-11-07
 
 Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` and `native/README.md`. Earlier history (Electron releases v1.x, the 2026-09-22 data recovery, the staged C# migration, the Codex MSIX incident) is in Git history up to commit 94d53df.
 
@@ -11,6 +11,10 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 - **Electron:** fully retired. The installed copy was uninstalled; its source, scripts, Electron-only tests, `package-lock.json`, the release workflow and `docs/migration-csharp-webview2.md` were removed. `package.json` only runs `node --test` (renderer math and the cloud collector).
 - **Cloud:** the Fly collector writes subscriber/view statistics to Upstash every minute; the app syncs them and treats them as the primary history (see "Cloud-first records" below).
 - **Agent tooling:** Claude Code CLI 2.1.283 is installed at `%USERPROFILE%\.local\bin\claude.exe` (added to the user PATH). The `upstash-redis` MCP server in `.mcp.json` is connected with the read-only token and returned the `live-pulse:v1:metadata` and `live-pulse:v1:samples` keys. `.git` is owned by the Codex sandbox account, so this folder was added to the user's global git `safe.directory`.
+
+## What was done on 2026-11-07
+
+- **Fly collector downsized to 256MB (user report).** The October 2026 Fly invoice was $5.04 (shared CPU $2.96, additional RAM $2.03, egress $0.05) and was charged for the first time; 30-day months stayed under the amount Fly waives. `cloud/fly.toml` now asks for 256MB (no additional-RAM charge) plus 256MB swap. Takes effect only after `fly deploy` from `cloud/` (flyctl was not logged in on this PC). After deploying, check memory in the Fly dashboard and that samples keep arriving every minute.
 
 ## What was done on 2026-10-04
 
