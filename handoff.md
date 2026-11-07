@@ -14,7 +14,7 @@ Rules and invariants live in `AGENTS.md`; user-facing setup is in `README.md` an
 
 ## What was done on 2026-11-07
 
-- **Fly collector downsized to 256MB (user report).** The October 2026 Fly invoice was $5.04 (shared CPU $2.96, additional RAM $2.03, egress $0.05) and was charged for the first time; 30-day months stayed under the amount Fly waives. `cloud/fly.toml` now asks for 256MB (no additional-RAM charge) plus 256MB swap. Takes effect only after `fly deploy` from `cloud/` (flyctl was not logged in on this PC). After deploying, check memory in the Fly dashboard and that samples keep arriving every minute.
+- **Fly collector downsized to 256MB (user report).** The October 2026 Fly invoice was $5.04 (shared CPU $2.96, additional RAM $2.03, egress $0.05) and was charged for the first time; 30-day months stayed under the amount Fly waives. `cloud/fly.toml` now asks for 256MB (no additional-RAM charge) plus 256MB swap, and the Dockerfile caps the V8 heap at 128MB. `fly.toml` asked for 512MB since the first commit (2026-09-17); Fly does not add RAM automatically (it OOM-kills), and October was the first full 31-day month. Takes effect only after `fly deploy` from `cloud/` (flyctl was not logged in on this PC). After deploying, check memory in the Fly dashboard and that samples keep arriving every minute.
 
 ## What was done on 2026-10-04
 

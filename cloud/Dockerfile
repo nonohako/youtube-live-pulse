@@ -4,4 +4,4 @@ COPY collector.js server.js ./
 USER node
 ENV NODE_ENV=production PORT=8080
 EXPOSE 8080
-CMD ["node", "server.js"]
+CMD ["node", "--max-old-space-size=128", "server.js"]
